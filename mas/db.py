@@ -107,6 +107,10 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
+MIGRATIONS = [
+    ("supabase", "components TEXT"),  # JSON list of enabled optional components
+]
+
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
               "current_release"}
@@ -124,6 +128,11 @@ class Database:
         parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self.tx() as conn:
             conn.executescript(SCHEMA)
+            for table, column in MIGRATIONS:  # columns added after the first release
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
+                except sqlite3.OperationalError:
+                    pass  # already there
         try:
             os.chmod(self.path, 0o600)
         except OSError:
@@ -250,7 +259,7 @@ class Database:
         return dict(row) if row else None
 
     def save_supabase(self, instance_id: str, **fields: Any) -> None:
-        allowed = {"status", "domain", "dir", "ports", "secrets", "ref", "error", "last_backup"}
+        allowed = {"status", "domain", "dir", "ports", "secrets", "ref", "error", "last_backup", "components"}
         if not set(fields) <= allowed:
             raise ValueError(f"invalid supabase fields: {set(fields) - allowed}")
         with self.tx() as c:

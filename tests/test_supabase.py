@@ -19,7 +19,19 @@ from mas.db import Database
 from mas.deploy import Deployer
 from mas.envcrypt import decrypt_env, encrypt_env, load_fernet
 from mas.host import FixtureHost
-from mas.supabase import SupabaseManager, bind_loopback, generate_secrets, render_env
+import yaml
+
+from mas.supabase import (
+    DEFAULT_COMPONENTS,
+    SupabaseError,
+    SupabaseManager,
+    apply_profile,
+    bind_loopback,
+    estimate_ram,
+    generate_secrets,
+    parse_mem,
+    render_env,
+)
 
 COMPOSE = """services:
   kong:
@@ -52,6 +64,86 @@ def test_render_env_and_loopback_ports():
     assert "- 127.0.0.1:${KONG_HTTP_PORT}:8000/tcp" in compose
     assert '- "127.0.0.1:${KONG_HTTPS_PORT}:8443/tcp"' in compose
     assert "- 127.0.0.1:${POSTGRES_PORT}:5432" in compose
+
+
+FULL_COMPOSE = """services:
+  studio:
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+    depends_on:
+      analytics:
+        condition: service_healthy
+  kong:
+    ports:
+      - ${KONG_HTTP_PORT}:8000/tcp
+    environment:
+      KONG_DATABASE: "off"
+    depends_on:
+      analytics:
+        condition: service_healthy
+  auth:
+    depends_on:
+      db:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+  storage:
+    environment:
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy:5001
+    depends_on:
+      - db
+      - imgproxy
+  imgproxy: {}
+  meta: {}
+  realtime: {}
+  functions: {}
+  analytics: {}
+  vector: {}
+  supavisor:
+    ports:
+      - ${POSTGRES_PORT}:5432
+  db:
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    depends_on:
+      vector:
+        condition: service_healthy
+"""
+
+
+def test_light_profile_drops_heavy_services_and_tunes_memory():
+    out = apply_profile(FULL_COMPOSE, DEFAULT_COMPONENTS)
+    services = yaml.safe_load(out)["services"]
+    assert set(services) == {"studio", "kong", "auth", "storage", "meta", "realtime", "db"}
+    assert "depends_on" not in services["studio"] and "depends_on" not in services["db"]
+    assert list(services["auth"]["depends_on"]) == ["db"]
+    assert services["storage"]["depends_on"] == ["db"]
+    assert services["storage"]["environment"]["ENABLE_IMAGE_TRANSFORMATION"] == "false"
+    assert "IMGPROXY_URL" not in services["storage"]["environment"]
+    assert services["db"]["ports"] == ["127.0.0.1:${POSTGRES_PORT}:5432"]  # no pooler: direct, loopback only
+    assert "shared_buffers=64MB" in services["db"]["command"]
+    assert services["kong"]["environment"]["KONG_NGINX_WORKER_PROCESSES"] == "1"
+    assert services["kong"]["ports"] == ["127.0.0.1:${KONG_HTTP_PORT}:8000/tcp"]
+    assert services["kong"]["environment"]["KONG_DATABASE"] == "off"  # quoting survives the round trip
+    assert services["studio"]["environment"]["NODE_OPTIONS"] == "--max-old-space-size=256"
+    assert estimate_ram(DEFAULT_COMPONENTS) < estimate_ram(["studio", "realtime", "storage", "images", "functions",
+                                                            "logs", "pooler"])
+
+
+def test_core_only_and_full_profiles():
+    core = yaml.safe_load(apply_profile(FULL_COMPOSE, []))["services"]
+    assert set(core) == {"kong", "auth", "db"}
+    full = yaml.safe_load(apply_profile(FULL_COMPOSE, ["studio", "realtime", "storage", "images", "functions",
+                                                       "logs", "pooler"]))["services"]
+    assert "ports" not in full["db"] and full["supavisor"]["ports"] == ["127.0.0.1:${POSTGRES_PORT}:5432"]
+    assert full["storage"]["environment"]["IMGPROXY_URL"] == "http://imgproxy:5001"
+
+
+def test_parse_docker_memory():
+    assert parse_mem("123.4MiB") == 123.4
+    assert parse_mem("1.5GiB") == 1536
+    assert parse_mem("512KiB") == 0.5
+    assert parse_mem("garbage") == 0
 
 
 def test_only_the_public_api_is_proxied():
@@ -99,6 +191,28 @@ def test_install_pipeline(manager):
     env_vars = mgr.connection_env()
     assert env_vars["NEXT_PUBLIC_SUPABASE_URL"] == f"http://127.0.0.1:{ports['kong_http']}"
     assert env_vars["DATABASE_URL"].endswith(f"@127.0.0.1:{ports['postgres']}/postgres")
+
+
+def test_reconfigure_studio_and_stats(manager):
+    mgr, host, db = manager
+    db.save_supabase("supabase", status="installing", dir=mgr.dir, components=json.dumps(["studio"]))
+    assert mgr.install(), mgr.log_path().read_text()
+    assert "supavisor" in host.read_text(f"{mgr.dir}/docker-compose.original.yml")
+    assert "supavisor" not in host.read_text(f"{mgr.dir}/docker-compose.yml")
+    mgr.reconfigure(["pooler", "bogus"])
+    assert mgr.components(mgr.get()) == ["pooler"]
+    assert "supavisor" in host.read_text(f"{mgr.dir}/docker-compose.yml")
+    assert any(c[-3:] == ["up", "-d", "--remove-orphans"] for c in host.executed)
+    with pytest.raises(SupabaseError):
+        mgr.studio("start")  # Studio is no longer enabled
+    mgr.reconfigure(["studio"])
+    mgr.studio("stop")
+    assert any(c[-3:] == ["stop", "studio", "meta"] for c in host.executed)
+    host._commands = {"docker ps *": {"output": "supabase-db\nsupabase-kong\n"},
+                      "docker stats *": {"output": "supabase-db|180.5MiB / 7.6GiB\nsupabase-kong|1.1GiB / 7.6GiB\n"}}
+    stats = mgr.stats()
+    assert [r["name"] for r in stats["containers"]] == ["supabase-kong", "supabase-db"]
+    assert stats["total_mb"] == round(1126.4 + 180.5, 1)
 
 
 def test_install_refuses_without_compose(manager):

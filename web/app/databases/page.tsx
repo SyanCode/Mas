@@ -17,6 +17,15 @@ interface Instance {
   created_at: string;
   ports: Record<string, number>;
   api_url: string | null;
+  components: string[];
+  estimated_ram_mb: number;
+}
+interface Component { id: string; label: string; help: string; ram_mb: number; default: boolean }
+interface Catalog { core_ram_mb: number; components: Component[] }
+interface Stats { containers: { name: string; mb: number }[]; total_mb: number }
+
+function ramOf(catalog: Catalog, value: string[]) {
+  return catalog.core_ram_mb + catalog.components.filter((c) => value.includes(c.id)).reduce((n, c) => n + c.ram_mb, 0);
 }
 interface Requirements { docker: string | null; compose: string | null; memory_available_mb: number | null; memory_recommended_mb: number }
 interface Credentials {
@@ -46,6 +55,29 @@ function InstallLog({ onEnd }: { onEnd: () => void }) {
   );
 }
 
+function ComponentPicker({ catalog, value, onChange }: { catalog: Catalog; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium">Components</span>
+        <span className="mono text-xs text-zinc-500">≈ {ramOf(catalog, value)} MB RAM</span>
+      </div>
+      <div className="flex items-center justify-between rounded-lg border border-white/5 px-3 py-2 text-sm text-zinc-500">
+        <span>Postgres, Auth, REST API, gateway <span className="text-xs">(always on)</span></span>
+        <span className="mono text-xs">{catalog.core_ram_mb} MB</span>
+      </div>
+      {catalog.components.map((c) => (
+        <label key={c.id} className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/5 px-3 py-2 text-sm hover:bg-white/5">
+          <input type="checkbox" checked={value.includes(c.id)}
+            onChange={(e) => onChange(e.target.checked ? [...value, c.id] : value.filter((v) => v !== c.id))} />
+          <span className="flex-1">{c.label} <span className="text-xs text-zinc-500">— {c.help}</span></span>
+          <span className="mono text-xs text-zinc-500">+{c.ram_mb} MB</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function Secret({ label, value }: { label: string; value: string }) {
   const [shown, setShown] = useState(false);
   return (
@@ -71,13 +103,20 @@ function Databases() {
   const [msg, setMsg] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [purge, setPurge] = useState(false);
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [components, setComponents] = useState<string[] | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
   const onDomain = useCallback((c: DomainChoice | null) => setChoice(c), []);
 
   const load = useCallback(() => {
-    api<{ instance: Instance | null; requirements: Requirements }>("/supabase").then((r) => {
+    api<{ instance: Instance | null; requirements: Requirements; catalog: Catalog }>("/supabase").then((r) => {
       setInst(r.instance);
       setReqs(r.requirements);
+      setCatalog(r.catalog);
+      setComponents((prev) => r.instance ? r.instance.components : prev ?? r.catalog.components.filter((c) => c.default).map((c) => c.id));
       if (r.instance && r.instance.status !== "installing") api<Backup[]>("/supabase/backups").then(setBackups).catch(() => {});
+      if (r.instance?.status === "running") api<Stats>("/supabase/stats").then(setStats).catch(() => {});
+      else setStats(null);
     }).catch((e: ApiError) => setError(e.detail));
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -104,11 +143,14 @@ function Databases() {
         if (choice.zone) await api("/dns/records", { method: "POST", body: { zone: choice.zone, subdomain: choice.subdomain, overwrite: choice.overwrite } });
         domain = choice.domain;
       }
-      await api("/supabase", { method: "POST", body: { domain } });
+      await api("/supabase", { method: "POST", body: { domain, components } });
     });
   }
 
-  const memOk = !reqs?.memory_available_mb || reqs.memory_available_mb >= reqs.memory_recommended_mb;
+  const estimate = catalog && components ? ramOf(catalog, components) : reqs?.memory_recommended_mb ?? 0;
+  const memOk = !reqs?.memory_available_mb || reqs.memory_available_mb >= estimate;
+  const changed = !!inst && !!components && [...components].sort().join() !== [...inst.components].sort().join();
+  const studioUp = !!stats?.containers.some((c) => c.name.includes("studio"));
   const ready = !!reqs?.docker && !!reqs?.compose;
 
   return (
@@ -137,7 +179,8 @@ function Databases() {
                   <Badge tone={memOk ? "emerald" : "amber"}>{(reqs.memory_available_mb / 1024).toFixed(1)} GB RAM free</Badge>
                 )}
               </div>
-              {!memOk && <p className="text-xs text-amber-500">Supabase needs about 2 GB of free memory; your other services may slow down.</p>}
+              {!memOk && <p className="text-xs text-amber-500">These components need about {estimate} MB of free memory; your other services may slow down.</p>}
+              {catalog && components && <ComponentPicker catalog={catalog} value={components} onChange={setComponents} />}
             </div>
             <div className="space-y-4">
               <label className="flex items-center gap-2 text-sm font-medium">
@@ -204,6 +247,22 @@ function Databases() {
               )}
             </Card>
 
+            {catalog && components && (
+              <Card title="Components" actions={<span className="mono text-xs text-zinc-500">≈ {inst.estimated_ram_mb} MB</span>}>
+                <div className="space-y-4">
+                  <ComponentPicker catalog={catalog} value={components} onChange={setComponents} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="primary" disabled={!changed || !!busy}
+                      onClick={() => run("components", () => api("/supabase/components", { method: "PUT", body: { components } }), "Components updated.")}>
+                      {busy === "components" ? <Spinner /> : null}Apply
+                    </Button>
+                    {changed && <Button variant="ghost" onClick={() => setComponents(inst.components)}>Cancel</Button>}
+                    <span className="text-xs text-zinc-500">Disabled services are stopped and removed; data volumes are kept.</span>
+                  </div>
+                </div>
+              </Card>
+            )}
+
             {creds && (
               <Card title="Studio (private)">
                 <div className="space-y-3 text-sm">
@@ -219,6 +278,27 @@ function Databases() {
             )}
           </div>
 
+          <div className="space-y-6">
+          <Card title="Memory" actions={stats ? <span className="mono text-xs text-zinc-500">{stats.total_mb.toFixed(0)} MB</span> : null}>
+            {!stats || stats.containers.length === 0 ? (
+              <p className="text-sm text-zinc-500">{inst.status === "running" ? "Loading…" : "Stack stopped."}</p>
+            ) : (
+              <ul className="space-y-1.5 text-sm">
+                {stats.containers.map((c) => (
+                  <li key={c.name} className="flex justify-between gap-2"><span className="mono truncate text-xs">{c.name.replace(/^supabase-/, "")}</span><span className="mono shrink-0 text-xs text-zinc-500">{c.mb.toFixed(0)} MB</span></li>
+                ))}
+              </ul>
+            )}
+            {inst.status === "running" && inst.components.includes("studio") && (
+              <div className="mt-4 flex items-center justify-between gap-2 border-t border-white/5 pt-4 text-xs text-zinc-500">
+                <span>Studio {studioUp ? "running" : "stopped"}: start it only when you need it.</span>
+                <Button disabled={!!busy} onClick={() => run("studio", () => api(`/supabase/studio/${studioUp ? "stop" : "start"}`, { method: "POST" }), studioUp ? "Studio stopped." : "Studio started.")}>
+                  {busy === "studio" ? <Spinner /> : null}{studioUp ? "Stop Studio" : "Start Studio"}
+                </Button>
+              </div>
+            )}
+          </Card>
+
           <Card title="Backups" actions={<Button onClick={() => run("backup", () => api("/supabase/backups", { method: "POST" }), "Backup created.")} disabled={!!busy || inst.status !== "running"}>{busy === "backup" ? <Spinner /> : null}Backup now</Button>}>
             <p className="mb-3 text-xs text-zinc-500">Daily <code>pg_dump</code>, last 7 kept in /var/lib/mas/backups/supabase.</p>
             <ul className="space-y-2 text-sm">
@@ -228,6 +308,7 @@ function Databases() {
               {backups.length === 0 && <li className="text-zinc-500">No backup yet.</li>}
             </ul>
           </Card>
+          </div>
         </div>
       )}
 

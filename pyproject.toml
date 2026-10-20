@@ -19,6 +19,7 @@ dependencies = [
     "argon2-cffi>=23",
     "pyotp>=2.9",
     "segno>=1.6",
+    "pyyaml>=6",
 ]
 
 [project.optional-dependencies]

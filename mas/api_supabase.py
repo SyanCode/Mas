@@ -14,11 +14,23 @@ from mas.db import Database
 from mas.deploy import DOMAIN_RE, Deployer
 from mas.envcrypt import decrypt_env, encrypt_env, load_fernet
 from mas.host import Host
-from mas.supabase import SupabaseError, SupabaseManager, requirements
+from mas.supabase import COMPONENTS, CORE_RAM, SupabaseError, SupabaseManager, estimate_ram, requirements
 
 
 class InstallBody(BaseModel):
     domain: str | None = Field(default=None, max_length=253)
+    components: list[str] | None = Field(default=None, max_length=len(COMPONENTS))
+
+
+class ComponentsBody(BaseModel):
+    components: list[str] = Field(max_length=len(COMPONENTS))
+
+
+def _check_components(names: list[str] | None) -> list[str] | None:
+    unknown = [n for n in names or [] if n not in COMPONENTS]
+    if unknown:
+        raise HTTPException(400, f"unknown components: {', '.join(unknown)}")
+    return names
 
 
 def register(app: FastAPI, *, host: Host, db: Database, current_session: Callable, deployer: Deployer,
@@ -36,19 +48,25 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
         out = {k: inst[k] for k in ("status", "domain", "ref", "error", "last_backup", "created_at")}
         out["ports"] = manager.ports(inst)
         out["api_url"] = manager.api_url(inst) if out["ports"] else None
+        out["components"] = manager.components(inst)
+        out["estimated_ram_mb"] = estimate_ram(out["components"])
         return out
+
+    catalog = {"core_ram_mb": CORE_RAM,
+               "components": [{"id": k, "label": c["label"], "help": c["help"], "ram_mb": c["ram"],
+                               "default": c["default"]} for k, c in COMPONENTS.items()]}
 
     @app.get("/api/supabase")
     async def status(_=Depends(current_session)) -> dict:
         reqs = await asyncio.to_thread(requirements, host)
-        return {"instance": public(manager.get()), "requirements": reqs}
+        return {"instance": public(manager.get()), "requirements": reqs, "catalog": catalog}
 
     @app.post("/api/supabase")
     def install(body: InstallBody, s=Depends(current_session)) -> dict:
         domain = (body.domain or "").strip().lower() or None
         if domain and not DOMAIN_RE.fullmatch(domain):
             raise HTTPException(400, f"invalid domain: {domain}")
-        call(manager.start_install, domain)
+        call(manager.start_install, domain, _check_components(body.components))
         db.audit(s.username, "supabase-install", True, detail=domain or "no domain")
         return {"ok": True}
 
@@ -97,6 +115,23 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
         if not ok:
             raise HTTPException(502, output or f"{action} failed")
         return {"ok": True}
+
+    @app.put("/api/supabase/components")
+    async def reconfigure(body: ComponentsBody, s=Depends(current_session)) -> dict:
+        names = _check_components(body.components) or []
+        await asyncio.to_thread(call, manager.reconfigure, names)
+        db.audit(s.username, "supabase-components", True, detail=", ".join(names) or "core only")
+        return {"ok": True, "components": names, "estimated_ram_mb": estimate_ram(names)}
+
+    @app.post("/api/supabase/studio/{action}")
+    async def studio(action: str, s=Depends(current_session)) -> dict:
+        await asyncio.to_thread(call, manager.studio, action)
+        db.audit(s.username, f"supabase-studio-{action}", True)
+        return {"ok": True}
+
+    @app.get("/api/supabase/stats")
+    async def stats(_=Depends(current_session)) -> dict:
+        return await asyncio.to_thread(manager.stats)
 
     @app.get("/api/supabase/backups")
     def backups(_=Depends(current_session)) -> list[dict]:

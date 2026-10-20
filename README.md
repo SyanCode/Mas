@@ -235,7 +235,27 @@ REST, Realtime, Storage, Studio) on the server:
 
 On an app, **Connect Supabase** adds `SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, the anon and
 service_role keys and `DATABASE_URL` to its (encrypted) environment and redeploys. One instance
-per server: the stack needs Docker with the compose plugin and about 2 GB of free RAM.
+per server; the stack needs Docker with the compose plugin.
+
+**Low-memory profile.** The full official stack uses about 2 GB of RAM. Mas only runs what you
+tick, and you can change it later from the Databases page (`docker compose up -d --remove-orphans`,
+data volumes are kept):
+
+| Component | Default | ≈ RAM |
+|---|---|---|
+| Postgres, Auth, REST, Kong (always on) | on | 400 MB |
+| Studio + pg-meta | on (start/stop on demand) | 250 MB |
+| Realtime | on | 150 MB |
+| Storage | on | 80 MB |
+| Image transformations (imgproxy) | off | 60 MB |
+| Edge Functions | off | 150 MB |
+| Logs & analytics (Logflare + Vector) | off | 600 MB |
+| Connection pooler (Supavisor) | off: Postgres is published directly on `127.0.0.1` | 150 MB |
+
+The services that stay are tuned for a small server: Postgres `shared_buffers=64MB` and smaller
+work memory, one Kong worker with a 32 MB cache, a capped Node.js heap for Studio, Storage and
+pg-meta. The unmodified upstream file is kept as `docker-compose.original.yml`; the page shows
+the memory actually used by each container.
 
 Restore a backup: `docker cp <file> supabase-db:/tmp/r.dump && docker exec supabase-db pg_restore
 -U postgres -d postgres --clean /tmp/r.dump`.

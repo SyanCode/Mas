@@ -102,6 +102,110 @@ def bind_loopback(compose: str) -> str:
     return _PORT_RE.sub(r"\g<1>127.0.0.1:\g<2>", compose)
 
 
+# Optional parts of the stack: compose services, rough RAM (MB), enabled by default.
+COMPONENTS: dict[str, dict] = {
+    "studio": {"services": {"studio", "meta"}, "ram": 250, "default": True,
+               "label": "Studio", "help": "admin dashboard (private, SSH tunnel)"},
+    "realtime": {"services": {"realtime"}, "ram": 150, "default": True,
+                 "label": "Realtime", "help": "live subscriptions over websockets"},
+    "storage": {"services": {"storage"}, "ram": 80, "default": True,
+                "label": "Storage", "help": "file uploads and buckets"},
+    "images": {"services": {"imgproxy"}, "ram": 60, "default": False,
+               "label": "Image transformations", "help": "resize images on the fly (imgproxy)"},
+    "functions": {"services": {"functions"}, "ram": 150, "default": False,
+                  "label": "Edge Functions", "help": "Deno functions runtime"},
+    "logs": {"services": {"analytics", "vector"}, "ram": 600, "default": False,
+             "label": "Logs & analytics", "help": "Logflare + Vector, the heaviest part"},
+    "pooler": {"services": {"supavisor"}, "ram": 150, "default": False,
+               "label": "Connection pooler", "help": "Supavisor; without it Postgres is published directly on 127.0.0.1"},
+}
+CORE_RAM = 400  # db, kong, auth, rest
+DEFAULT_COMPONENTS = [name for name, c in COMPONENTS.items() if c["default"]]
+
+# Low-memory tuning of the services that stay.
+NODE_HEAP = {"studio": 256, "storage": 192, "meta": 128}
+POSTGRES_FLAGS = ["-c", "shared_buffers=64MB", "-c", "effective_cache_size=192MB",
+                  "-c", "maintenance_work_mem=32MB", "-c", "work_mem=2MB"]
+
+
+def estimate_ram(components: list[str]) -> int:
+    return CORE_RAM + sum(COMPONENTS[c]["ram"] for c in components if c in COMPONENTS)
+
+
+def _set_env(service: dict, key: str, value: str) -> None:
+    env = service.get("environment")
+    if isinstance(env, list):
+        env[:] = [e for e in env if not str(e).startswith(f"{key}=")] + [f"{key}={value}"]
+    else:
+        env = env if isinstance(env, dict) else {}
+        env[key] = value
+        service["environment"] = env
+
+
+def _drop_env(service: dict, key: str) -> None:
+    env = service.get("environment")
+    if isinstance(env, dict):
+        env.pop(key, None)
+    elif isinstance(env, list):
+        env[:] = [e for e in env if not str(e).startswith(f"{key}=")]
+
+
+def apply_profile(compose: str, components: list[str]) -> str:
+    """Rewrite the official compose file: drop disabled services (and every
+    ``depends_on`` pointing to them), tune memory, bind ports to loopback."""
+    import yaml  # pyyaml, only needed here
+
+    data = yaml.safe_load(compose)
+    services: dict = data.get("services", {})
+    removed: set[str] = set()
+    for name, comp in COMPONENTS.items():
+        if name not in components:
+            removed |= comp["services"]
+    for name in list(services):
+        if name in removed:
+            del services[name]
+
+    for svc in services.values():
+        deps = svc.get("depends_on")
+        if isinstance(deps, dict):
+            for dep in [d for d in deps if d not in services]:
+                del deps[dep]
+        elif isinstance(deps, list):
+            deps[:] = [d for d in deps if d in services]
+        if "depends_on" in svc and not svc["depends_on"]:
+            del svc["depends_on"]
+
+    if "storage" in services and "imgproxy" not in services:
+        _set_env(services["storage"], "ENABLE_IMAGE_TRANSFORMATION", "false")
+        _drop_env(services["storage"], "IMGPROXY_URL")
+    if "supavisor" not in services and "db" in services:
+        # No pooler: apps on this server reach Postgres directly (loopback only).
+        services["db"].setdefault("ports", []).append("127.0.0.1:${POSTGRES_PORT}:5432")
+    if "kong" in services:
+        _set_env(services["kong"], "KONG_NGINX_WORKER_PROCESSES", "1")
+        _set_env(services["kong"], "KONG_MEM_CACHE_SIZE", "32m")
+    for name, heap in NODE_HEAP.items():
+        if name in services:
+            _set_env(services[name], "NODE_OPTIONS", f"--max-old-space-size={heap}")
+    db = services.get("db")
+    if db is not None:
+        command = db.get("command")
+        if isinstance(command, list) and "shared_buffers=64MB" not in command:
+            db["command"] = command + POSTGRES_FLAGS
+        elif isinstance(command, str) and "shared_buffers" not in command:
+            db["command"] = f"{command} {' '.join(POSTGRES_FLAGS)}"
+    return bind_loopback(yaml.safe_dump(data, sort_keys=False, width=1000))
+
+
+def parse_mem(value: str) -> float:
+    """``123.4MiB`` / ``1.2GiB`` / ``512kB`` → MB."""
+    m = re.match(r"([\d.]+)\s*([KMG]i?B|B)", value.strip(), re.I)
+    if not m:
+        return 0.0
+    n, unit = float(m.group(1)), m.group(2).upper().replace("I", "")
+    return n * {"B": 1 / 1048576, "KB": 1 / 1024, "MB": 1, "GB": 1024}[unit]
+
+
 def memory_available_mb(host: Host) -> int | None:
     for line in (host.read_text("/proc/meminfo") or "").splitlines():
         if line.startswith("MemAvailable:"):
@@ -217,13 +321,21 @@ class SupabaseManager:
 
     # -- install -------------------------------------------------------------
 
-    def start_install(self, domain: str | None) -> None:
+    @staticmethod
+    def components(inst: dict | None) -> list[str]:
+        raw = (inst or {}).get("components")
+        chosen = json.loads(raw) if raw else DEFAULT_COMPONENTS
+        return [c for c in chosen if c in COMPONENTS]
+
+    def start_install(self, domain: str | None, components: list[str] | None = None) -> None:
         current = self.get()
         if current and current["status"] in ("installing", "running", "stopped"):
             raise SupabaseError("Supabase is already installed")
         if self.db.get_app(INSTANCE_ID):
             raise SupabaseError("an app is already called 'supabase'")
-        self.db.save_supabase(INSTANCE_ID, status="installing", domain=domain, dir=self.dir, error=None)
+        chosen = [c for c in (components if components is not None else DEFAULT_COMPONENTS) if c in COMPONENTS]
+        self.db.save_supabase(INSTANCE_ID, status="installing", domain=domain, dir=self.dir, error=None,
+                              components=json.dumps(chosen))
         threading.Thread(target=self.install, daemon=True, name="mas-supabase").start()
 
     def _allocate_ports(self, count: int) -> list[int]:
@@ -266,8 +378,9 @@ class SupabaseManager:
             raise SupabaseError("docker compose v2 is missing (apt install docker-compose-plugin)")
         mem = reqs["memory_available_mb"]
         rlog.line(f"docker {reqs['docker']}, compose {reqs['compose']}, {mem} MB available")
-        if mem is not None and mem < MIN_MEMORY_MB:
-            rlog.line(f"warning: Supabase needs about {MIN_MEMORY_MB} MB of free memory, only {mem} MB available")
+        need = estimate_ram(self.components(inst))
+        if mem is not None and mem < need:
+            rlog.line(f"warning: these components need about {need} MB of free memory, only {mem} MB available")
         existing = self.host.run(["docker", "ps", "-a", "--filter", f"name=^{DB_CONTAINER}$", "--format", "{{.Names}}"])
         if existing is not None and existing.stdout.strip() and not self.host.exists(self.dir):
             raise SupabaseError(f"a container named {DB_CONTAINER} already exists (another Supabase?)")
@@ -308,7 +421,12 @@ class SupabaseManager:
         example = self.host.read_text(f"{self.dir}/.env.example") or ""
         self.host.write_text(f"{self.dir}/.env", render_env(example, values), mode=0o600)
         compose_path = f"{self.dir}/docker-compose.yml"
-        self.host.write_text(compose_path, bind_loopback(self.host.read_text(compose_path) or ""))
+        original = self.host.read_text(compose_path) or ""
+        self.host.write_text(f"{self.dir}/docker-compose.original.yml", original)
+        components = self.components(inst)
+        self.host.write_text(compose_path, apply_profile(original, components))
+        rlog.line(f"components: core + {', '.join(components) or 'nothing else'} "
+                  f"(~{estimate_ram(components)} MB instead of ~{estimate_ram(list(COMPONENTS))} MB)")
         fernet = load_fernet(self.host, self.config.secret_key_path)
         keep = ("POSTGRES_PASSWORD", "JWT_SECRET", "ANON_KEY", "SERVICE_ROLE_KEY", "DASHBOARD_USERNAME",
                 "DASHBOARD_PASSWORD")
@@ -341,6 +459,52 @@ class SupabaseManager:
         content = templates.vhost(INSTANCE_ID, domain, templates.supabase_body(port, self.config.pages_dir),
                                   self.deployer._has_cert(domain))
         self.deployer._nginx_apply(rlog, available, content, enabled)
+
+    # -- footprint -----------------------------------------------------------------
+
+    def reconfigure(self, components: list[str]) -> str:
+        """Change the enabled components: re-render the compose file and apply it."""
+        inst = self.get()
+        if not inst or inst["status"] not in ("running", "stopped"):
+            raise SupabaseError("Supabase is not installed")
+        chosen = [c for c in components if c in COMPONENTS]
+        original = self.host.read_text(f"{self.dir}/docker-compose.original.yml")
+        if original is None:
+            raise SupabaseError("installed by an older Mas: remove and reinstall to change components")
+        with self._lock:
+            self.host.write_text(f"{self.dir}/docker-compose.yml", apply_profile(original, chosen))
+            res = self.host.run(self._compose("up", "-d", "--remove-orphans"), timeout=1800)
+        if res is None or not res.ok:
+            raise SupabaseError(f"docker compose up failed: {(res.stderr if res else 'docker missing').strip()[-500:]}")
+        self.db.save_supabase(INSTANCE_ID, components=json.dumps(chosen), status="running")
+        return (res.stdout + res.stderr).strip()
+
+    def studio(self, action: str) -> None:
+        """Run Studio only when needed (~250 MB)."""
+        if action not in ("start", "stop"):
+            raise SupabaseError("action must be start or stop")
+        if "studio" not in self.components(self.get()):
+            raise SupabaseError("Studio is not enabled in the components")
+        argv = self._compose("up", "-d", "studio", "meta") if action == "start" else \
+            self._compose("stop", "studio", "meta")
+        res = self.host.run(argv, timeout=600)
+        if res is None or not res.ok:
+            raise SupabaseError(f"docker compose failed: {(res.stderr if res else 'docker missing').strip()[-500:]}")
+
+    def stats(self) -> dict:
+        """Memory used by each container of the stack (docker stats)."""
+        names = self.host.run(["docker", "ps", "--filter", f"label=com.docker.compose.project={PROJECT}",
+                               "--format", "{{.Names}}"])
+        containers = [n for n in (names.stdout.split() if names is not None and names.ok else []) if n]
+        rows = []
+        if containers:
+            res = self.host.run(["docker", "stats", "--no-stream", "--format", "{{.Name}}|{{.MemUsage}}", *containers],
+                                timeout=60)
+            for line in (res.stdout.splitlines() if res is not None and res.ok else []):
+                name, _, usage = line.partition("|")
+                rows.append({"name": name, "mb": round(parse_mem(usage.split("/")[0]), 1)})
+        rows.sort(key=lambda r: r["mb"], reverse=True)
+        return {"containers": rows, "total_mb": round(sum(r["mb"] for r in rows), 1)}
 
     # -- backups ---------------------------------------------------------------
 
