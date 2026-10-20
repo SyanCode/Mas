@@ -170,6 +170,28 @@ Every push to the branch then deploys automatically:
 
 The last 5 releases are kept; **Rollback** puts any of them back in one click (`mas rollback <app>`).
 
+### Domains (OVH)
+
+Mas can create the DNS records itself. In **Settings → Domains**:
+
+1. Set this server's **public IP** (Mas suggests the address your existing domains point to).
+2. Click **Create an API token** (OVH Europe, Canada or US): the OVH page opens with the needed
+   rights pre-filled (`GET /me`, `GET/POST/PUT /domain/zone/*`, never `DELETE`). Paste the
+   application key, application secret and consumer key; Mas checks them with OVH and stores
+   them encrypted.
+
+Then, on an app (or in the *New app* form), pick one of your domains and type a sub-domain
+(the app name by default). Mas checks the name live (free, already pointing here, pointing
+elsewhere, CNAME, already used by a site), creates the `A` (and `AAAA`) record, refreshes the
+zone, waits until the name resolves, then deploys with the nginx vhost and the HTTPS
+certificate. A record pointing elsewhere is only replaced if you tick the confirmation; a CNAME
+is never touched.
+
+CLI: `mas dns connect`, `mas dns ip <ipv4> [--ipv6 …]`, `mas dns zones`,
+`mas domain <app> <sub.example.com> [--overwrite | --no-dns]`.
+
+Without OVH, type the domain by hand and create the `A` record at your DNS provider.
+
 ### Adopting an existing service
 
 A detected service whose folder is a GitHub checkout (for example a PM2 or systemd app) shows
