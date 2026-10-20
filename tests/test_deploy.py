@@ -474,3 +474,24 @@ def test_dns_checks():
              "moved.example.com": ["216.198.79.1"], "gone.example.com": []}
     titles = {c.title for c in check_dns(set(table) | {"*.wild.example.com"}, None, resolver=lambda n: table[n])}
     assert titles == {"moved.example.com points elsewhere", "gone.example.com does not resolve"}
+
+
+def test_nextjs_static_export_is_served_by_nginx(env):
+    host, db, config, deployer = env["host"], env["db"], env["config"], env["deployer"]
+    served = []
+
+    def on_stream(argv, cwd, env_vars):
+        if argv[-2:] == ["run", "build"]:  # `output: 'export'` writes out/ and has no server
+            host.makedirs(f"{cwd}/out")
+            host.write_text(f"{cwd}/out/index.html", "<h1>hi</h1>")
+
+    host.stream_hooks.append(on_stream)
+    deployer.health_check = lambda url, h, t: (served.append((url, h)) or True, "HTTP 200")
+    rid, ok = deploy_once(env, SHA1)
+    log = deployer.log_path("web", rid).read_text()
+    assert ok, log
+    assert "static export" in log
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert "root /srv/mas/apps/web/current/out;" in vhost and "proxy_pass" not in vhost
+    assert not host.exists("/etc/systemd/system/mas-app-web.service")
+    assert served == [("http://127.0.0.1/", "web.example.com")]

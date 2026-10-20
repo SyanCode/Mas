@@ -421,6 +421,20 @@ class Deployer:
         raise DeployError("a start command is required for python apps (e.g. .venv/bin/uvicorn main:app "
                           "--host 127.0.0.1 --port $PORT)")
 
+    def _static_export(self, app: dict, app_type: ServiceType, rel: str) -> dict | None:
+        """A Next.js build with ``output: 'export'`` has no server (``next start`` refuses to run):
+        serve its ``out/`` folder with nginx instead. Returns the app as a static site, or None."""
+        if app_type != ServiceType.NEXTJS or app.get("start_command"):
+            return None
+        if not self.host.exists(f"{rel}/out/index.html"):
+            return None
+        return {**app, "root_dir": "out"}
+
+    def _stop_unit(self, app: dict, rlog: ReleaseLog) -> None:
+        if self.host.exists(unit_path(app["id"])):
+            rlog.line(f"stopping {unit_name(app['id'])} (not needed for a static site)")
+            self.host.run(["systemctl", "disable", "--now", unit_name(app["id"])], timeout=120)
+
     def _install_unit(self, app: dict, app_type: ServiceType, paths: AppPaths, env: dict, rlog: ReleaseLog) -> None:
         self.host.makedirs(ENV_DIR, mode=0o700)
         self.host.write_text(env_file(app["id"]), systemd_env_file(env), mode=0o600)
@@ -668,6 +682,10 @@ class Deployer:
 
         rlog.step("Building")
         self._build(app, app_type, rel, user, {**env_vars, "HOME": self._r(paths.home)}, rlog)
+        export = self._static_export(app, app_type, rel)
+        if export:
+            rlog.line("Next.js static export (output: 'export'): serving out/ with nginx")
+            app, app_type = export, ServiceType.STATIC
 
         rlog.step(f"Switching current → {PurePosixPath(rel).name}")
         self.host.symlink_atomic(rel, paths.current)
@@ -677,7 +695,7 @@ class Deployer:
             if app["domain"]:
                 rlog.step("nginx")
                 self._install_vhost(app, app_type, paths, rlog)
-            self._health(app, app_type, rel, rlog)
+            self._health(app, app_type, f"{rel}/out" if export else rel, rlog)
         except (DeployError, EnvError) as exc:
             rlog.line(f"error: {exc}")
             if previous:
@@ -687,6 +705,8 @@ class Deployer:
                     self.host.run(["systemctl", "restart", unit_name(app["id"])], timeout=120)
             raise
 
+        if export:
+            self._stop_unit(app, rlog)
         if app["domain"] and self._ensure_certificate(app, rlog):  # retry if it failed while preparing
             self._install_vhost(app, app_type, paths, rlog)
         self._mark_live(app, release["id"], rel)
@@ -702,12 +722,17 @@ class Deployer:
             raise DeployError("the release folder does not exist anymore")
         app_type = ServiceType(app["type"])
         paths = app_paths(self.config, app["id"])
+        export = self._static_export(app, app_type, target)
+        if export:
+            app, app_type = export, ServiceType.STATIC
         previous = self.host.readlink(paths.current)
         self.host.symlink_atomic(target, paths.current)
         try:
             if app_type in PROXY_TYPES:
                 self._system(rlog, ["systemctl", "restart", unit_name(app["id"])])
-            self._health(app, app_type, target, rlog)
+            if export and app["domain"]:
+                self._install_vhost(app, app_type, paths, rlog)
+            self._health(app, app_type, f"{target}/out" if export else target, rlog)
         except DeployError:
             if previous:
                 self.host.symlink_atomic(previous, paths.current)

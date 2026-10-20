@@ -181,7 +181,8 @@ Every push to the branch then deploys automatically:
    token is passed to git through the environment, never on the command line or in logs)
 2. build as the dedicated user `mas-<app>` (`npm ci && npm run build`, a Python venv +
    `pip install`, `composer install`, or your own build command)
-3. atomic switch of the `current` symlink
+3. atomic switch of the `current` symlink (a Next.js app built with `output: 'export'` has no
+   server: Mas serves its `out/` folder with nginx and skips the systemd unit)
 4. `mas-app-<app>.service` (generated systemd unit, non-root user, `NoNewPrivileges`,
    `ProtectSystem`, `ProtectHome`, app listening on `127.0.0.1:<port>`) restarted
 5. nginx vhost generated from a template (backup, `nginx -t`, reload; refused if another vhost
