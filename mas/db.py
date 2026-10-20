@@ -87,6 +87,11 @@ CREATE TABLE IF NOT EXISTS releases (
     finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS releases_app ON releases(app_id, id);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT NOT NULL
+);
 """
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
@@ -223,6 +228,22 @@ class Database:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (_now(), actor, service_id, action, command, int(ok), (detail or "")[:4000]),
             )
+
+    # -- settings (key/value; secrets are stored encrypted by the caller) --
+
+    def get_setting(self, key: str) -> str | None:
+        with self.tx() as c:
+            row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str | None) -> None:
+        with self.tx() as c:
+            if value is None:
+                c.execute("DELETE FROM settings WHERE key = ?", (key,))
+            else:
+                c.execute("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                          (key, value, _now()))
 
     # -- apps & releases (phase 3) ----------------------------------------
 
