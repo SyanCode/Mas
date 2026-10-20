@@ -5,10 +5,11 @@ running for years, with a mix of PHP sites, Node apps under PM2, a few systemd u
 Docker container or two, and it tells you what is running, where, for which domain, under
 which user and from which git repository. Nothing gets reinstalled or broken.
 
-Then it lets you manage those services from a small web dashboard, and (soon) deploy new
-projects from GitHub, Vercel-style, on the same machine.
+You then manage those services from the `mas` CLI or from a small web dashboard protected
+by a password and two-factor authentication. Deploying new projects from GitHub,
+Vercel-style, is next on the roadmap.
 
-> Status: **phase 1 (read-only detection)**. The dashboard and deployments are on the roadmap below.
+> Status: **phase 2**: detection, CLI, dashboard with 2FA, start/stop/restart/reload, logs.
 
 ## Why another one?
 
@@ -28,6 +29,79 @@ Mas starts from the other end:
 
 Every detection is deterministic: config file parsing, `/proc`, `ss`, `systemctl`, `pm2 jlist`
 and the Docker socket. No AI model and no external API are involved.
+
+## Installation
+
+On the server (Debian 12+, as root):
+
+```console
+$ mkdir -p /tmp/mas-src && tar -xzf mas.tar.gz -C /tmp/mas-src
+                                        # or: git clone https://github.com/<you>/mas /tmp/mas-src
+$ cd /tmp/mas-src
+$ sudo ./deploy/install.sh
+```
+
+The installer is idempotent and asks for two things:
+
+1. **The admin password, then 2FA**: a QR code is printed in the terminal; scan it with
+   Google Authenticator, Aegis, 1Password, Bitwarden… and type the 6-digit code.
+2. **The dashboard domain** (e.g. `mas.example.com`, its DNS must point to the server). Mas gets
+   a Let's Encrypt certificate and installs an HTTPS vhost. Leave it empty to keep the dashboard
+   private and reach it through an SSH tunnel:
+   `ssh -L 7070:127.0.0.1:7070 you@server`, then open http://localhost:7070.
+
+Non-interactive: `sudo ./deploy/install.sh --domain mas.example.com --email you@example.com`.
+
+What gets installed: `/opt/mas/src` (source), `/opt/mas/venv`, `/etc/mas/config.toml`,
+`/var/lib/mas/mas.db`, `mas.service`, `/etc/nginx/sites-available/mas.conf` and `/usr/local/bin/mas`.
+
+### Updating
+
+```console
+$ sudo mas self-update                       # git pull (if installed from a clone)
+$ sudo mas self-update --from mas.tar.gz     # from a `git archive` tarball
+```
+
+It replaces the source (the previous one is kept as `/opt/mas/src.mas-bak-<date>`), reinstalls,
+rebuilds the dashboard and restarts `mas.service`.
+
+## CLI
+
+```console
+$ sudo mas scan                 # table of every detected service (--json available)
+$ sudo mas logs blog.example.com -n 200
+$ sudo mas restart api          # asks for confirmation (-y to skip)
+$ sudo mas start|stop|reload <service>
+$ sudo mas nginx reload         # nginx -t first, reload only if valid
+$ sudo mas history              # who did what, when, with what result
+
+$ sudo mas user create [name]   # password + 2FA QR code
+$ sudo mas user 2fa [name]      # set up / replace the authenticator app
+$ sudo mas user 2fa-reset [name]  # lost phone: disable 2FA (root only)
+$ sudo mas user passwd [name]
+```
+
+`<service>` is the id shown by `mas scan` (usually the domain), or any unambiguous part of it.
+
+| Manager        | Actions                        | Command                                           |
+|----------------|--------------------------------|---------------------------------------------------|
+| `systemd`      | start, stop, restart, reload   | `systemctl <action> <unit>`                       |
+| `pm2`          | start, stop, restart, reload   | `runuser -u <owner> -- pm2 <action> <app>`        |
+| `docker`       | start, stop, restart           | Docker API `POST /containers/<id>/<action>`       |
+| `php-fpm`      | reload, restart                | `systemctl <action> php*-fpm.service`             |
+| `nginx-static` | reload                         | `nginx -t && systemctl reload nginx`              |
+
+## Dashboard
+
+![Services list placeholder](docs/screenshot-services.png)
+![Service page placeholder](docs/screenshot-service.png)
+
+- Services list: status dot, domains (links), type, manager, port, SSL expiry (orange under
+  14 days), GitHub repository; filters (with/without domain, issues) and search.
+- Service page: details, logs (refresh / auto-refresh), actions with confirmation for stop and
+  restart, action history, display name, notes, manual type label.
+- Settings: enable / replace / disable 2FA with a QR code, change password.
+- Light and dark theme (follows the system by default).
 
 ## How detection works
 
@@ -55,97 +129,83 @@ credentials embedded in the remote URL stripped.
 Service types are decided by ordered rules: `fastcgi_pass` or `.php` files → **php**,
 `package.json` with `next` → **nextjs**, `package.json` → **node**,
 `requirements.txt` / `pyproject.toml` → **python**, `root` without proxy → **static**,
-otherwise **unknown** (you can label it by hand, and the manual label wins).
-
-## Usage
-
-```console
-$ sudo mas scan          # table
-$ sudo mas scan --json   # machine-readable
-```
-
-Run it as root: reading other users' `/proc` entries and `ss -p` requires it. As a regular user
-you get a partial view and warnings.
-
-```
- ● app.example.com   app.example.com   nextjs  pm2          3000  2000  alice  /home/alice/apps/web  2027-01-15  gh:acme/web@production
- ● blog.example.com  blog.example.com  php     php-fpm      -     900   -      /var/www/blog/public  2026-10-30  gh:acme/blog@main
- ● mariadb           no domain         unknown systemd      3306  800   mysql  /var/lib/mysql        -           -
-```
-
-![Dashboard screenshot placeholder](docs/screenshot-dashboard.png)
-*(Screenshots will come with the dashboard in phase 2.)*
+otherwise **unknown**. A label set by hand in the dashboard always wins.
 
 ### Configuration
 
-`/etc/mas/config.toml` (optional):
+`/etc/mas/config.toml`:
 
 ```toml
+[server]
+port = 7070           # always bound to 127.0.0.1
+session_hours = 12    # idle timeout (sessions also expire after 7 days)
+scan_interval = 60    # background scan, seconds
+
 [scan]
-# Added to the built-in list of OS units (ssh, cron, nginx, systemd-*, …)
-extra_exclude_units = ["my-backup-agent", "tailscaled"]
-# Or replace the built-in list entirely:
-# exclude_units = ["ssh", "nginx"]
-```
-
-## Installation
-
-> Phase 1 has no installer yet. `deploy/install.sh` comes with phase 2.
-
-```console
-$ git clone https://github.com/<you>/mas.git /opt/mas-src
-$ python3 -m venv /opt/mas && /opt/mas/bin/pip install /opt/mas-src
-$ sudo /opt/mas/bin/mas scan
+extra_exclude_units = ["my-backup-agent"]  # added to the built-in OS list
+hide_os_daemons = true  # hide units with no port and only system paths in their command
 ```
 
 ## Security model
 
-- **Phase 1 is strictly read-only.** Mas reads files and runs `ss`, `systemctl list-units/show`,
-  `pm2 jlist` and a Docker `GET /containers/json`. It never writes, reloads or restarts anything.
-  The test suite checks this: it hashes the whole fixture tree before and after a scan and
-  allow-lists every command executed.
-- `pm2 jlist` would start a PM2 daemon if none is running, so Mas only calls it when the
-  user's daemon is alive, and runs it as that user (`runuser -u <user>`), never as root.
-- Commands always run with an argument list, never `shell=True`.
-- Secrets found along the way (credentials in git remotes, PM2 environment variables) are not
-  kept or displayed.
-- Coming with phase 2: the API listens on `127.0.0.1:7070` only, behind nginx + HTTPS. There is a
-  single admin account (argon2), `HttpOnly`/`Secure`/`SameSite=Strict` session cookies, CSRF
-  protection and login rate limiting. Actions come from a strict allow-list `(manager, action) → argv`
-  and are logged in the database. Any nginx change is backed up (`<file>.mas-bak-<timestamp>`) and
-  validated with `nginx -t` before a reload.
-- **Why the agent runs as root**: it must read `/proc` for every user, `ss -p`, and the Docker
-  socket. `mas.service` reduces the blast radius with `NoNewPrivileges=yes`, `ProtectSystem=full`,
-  `PrivateTmp=yes` and `ReadWritePaths=` limited to the directories Mas manages.
+- **Network**: the API listens on `127.0.0.1:7070` only (`mas serve` refuses anything else).
+  The public entry point is the nginx vhost: HTTPS only, HSTS, `X-Frame-Options: DENY`, CSP,
+  `client_max_body_size 2m`.
+- **Authentication**: a single admin account created on the server (`mas user create`), never
+  from the web. Passwords are hashed with argon2id. **TOTP 2FA** (RFC 6238, 30 s, ±1 step), and
+  each code is accepted only once (replay protection). Five failed logins per account or ten per
+  IP in 15 minutes trigger a temporary block (HTTP 429). Logins are written to the audit log.
+- **Sessions**: random 256-bit token in a `HttpOnly`, `Secure`, `SameSite=Strict` cookie; only
+  its SHA-256 is stored. 12 h idle timeout, 7 days maximum. Changing the password or the 2FA
+  device signs out every other session.
+- **CSRF**: every mutating request needs the per-session `X-CSRF-Token` header, and a foreign
+  `Origin` is rejected.
+- **Actions**: strict allow-list `(manager, action) → argv`, built from identifiers found by
+  the scan (re-validated with regexes), executed without a shell. Stop and restart ask for
+  confirmation. Every action, with its command and output, is written to the audit log.
+- **nginx**: Mas only reloads after a successful `nginx -t`. The installer backs up any file it
+  replaces (`<file>.mas-bak-<timestamp>`) and restores it if `nginx -t` fails.
+- **Read-only discovery**: scans never write. The test suite hashes the whole fixture tree
+  before and after a scan and allow-lists every command executed. `pm2 jlist` is only called
+  when the user's daemon is already running (it would otherwise start one), and as that user.
+- **Secrets** found along the way (credentials in git remotes, PM2 environment variables) are
+  neither stored nor displayed. The database (`/var/lib/mas/mas.db`) is `0600`, root only.
+- **Lost phone**: `sudo mas user 2fa-reset` on the server. Root on the server is the
+  recovery path.
+- **Why the agent runs as root**: it must read `/proc` for every user, `ss -p` and the Docker
+  socket, and restart services. `mas.service` reduces the blast radius with
+  `NoNewPrivileges=yes`, `ProtectSystem=full`, `PrivateTmp=yes`, `ProtectKernel*`, and
+  `ReadWritePaths=` limited to `/var/lib/mas /srv/mas /etc/nginx /etc/mas /etc/systemd/system
+  /etc/letsencrypt`.
 
 ## Development
 
 ```console
 $ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 $ .venv/bin/pytest
+$ cd web && npm ci && npm run build      # dashboard → web/out
 ```
 
 The tests don't need a real server. `tests/fixtures/server.py` builds a fake Debian tree (nginx
 configs, `/proc`, `ss` and `systemctl` outputs, a PM2 jlist, Docker API responses), and
-`FixtureHost` serves it to the collectors. You can scan it too:
+`FixtureHost` serves it to the collectors. You can run the whole app against it:
 
 ```console
 $ python tests/fixtures/server.py /tmp/mas-demo
-$ mas scan --fixture /tmp/mas-demo
+$ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db user create admin
+$ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 ```
 
 ## Roadmap
 
 - [x] **Phase 1: detection.** Collectors, correlation, type detection, `mas scan [--json]`.
-- [ ] **Phase 2: dashboard and management.** FastAPI on `127.0.0.1:7070`, background scan every 60 s,
-      logs (journalctl / pm2 / docker / nginx), start/stop/restart/reload from an allow-list,
-      manual labels, safe `nginx -t && reload`, auth, a static Next.js dashboard with dark mode,
-      `install.sh`, `mas.service`, `mas self-update`.
+- [x] **Phase 2: dashboard and management.** API, 2FA, background scan, logs, allow-listed
+      actions, labels, audit log, `install.sh`, `mas.service`, `mas self-update`.
 - [ ] **Phase 3: deploy from GitHub.** GitHub App, signed webhooks, atomic releases in
       `/srv/mas/apps/<app>/releases/<sha>`, generated systemd unit and nginx vhost, certbot,
       healthcheck with automatic rollback, the last 5 releases kept, build logs over SSE, and
       adoption of already-detected services that have a GitHub remote.
-- [ ] Later: preview deployments per pull request.
+- [ ] Later: preview deployments per pull request, recovery codes for 2FA.
 
 ## License
 

@@ -8,5 +8,6 @@ dist/
 web/node_modules/
 web/out/
 web/.next/
+*.tsbuildinfo
 *.db
 *.tar.gz
