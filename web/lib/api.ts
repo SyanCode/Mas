@@ -134,6 +134,25 @@ export interface Repo {
   installation_id: number;
 }
 
+export interface DnsStatus {
+  provider: "ovh" | null;
+  endpoint: string | null;
+  account: { nichandle: string; name: string | null } | null;
+  ipv4: string | null;
+  ipv6: string | null;
+  suggested_ipv4: string | null;
+  token_urls: Record<string, string>;
+}
+
+export interface DnsCheck {
+  domain: string;
+  records: { type: string; target: string }[];
+  points_here: boolean;
+  points_elsewhere: boolean;
+  cname: boolean;
+  used_by: string | null;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
     super(detail);

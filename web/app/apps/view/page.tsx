@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
 import { Badge, Button, Card, ConfirmDialog, ErrorText, Input, ReleaseBadge } from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type Release } from "@/lib/api";
@@ -34,9 +35,57 @@ function BuildLog({ appId, release, onEnd }: { appId: string; release: Release; 
   );
 }
 
+function DomainCard({ app, onLinked }: { app: App; onLinked: (releaseId: number) => void }) {
+  const [editing, setEditing] = useState(!app.domain);
+  const [choice, setChoice] = useState<DomainChoice | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const onChange = useCallback((c: DomainChoice | null) => setChoice(c), []);
+
+  async function link() {
+    if (!choice) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await api<{ release_id: number; changes: string[] }>(`/apps/${encodeURIComponent(app.id)}/domain`, {
+        method: "POST",
+        body: choice.zone
+          ? { zone: choice.zone, subdomain: choice.subdomain, overwrite: choice.overwrite }
+          : { domain: choice.domain },
+      });
+      setEditing(false);
+      onLinked(r.release_id);
+    } catch (e) {
+      setError((e as ApiError).detail.replace(/^points-elsewhere: |^cname: /, ""));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Domain">
+      {!editing && app.domain ? (
+        <div className="space-y-2 text-sm">
+          <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="font-medium hover:underline">{app.domain} ↗</a>
+          <div><Button onClick={() => setEditing(true)}>Change</Button></div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {!app.domain && <p className="text-sm text-zinc-500">This app has no address yet. Pick one: Mas creates the DNS record, the nginx site and the HTTPS certificate.</p>}
+          <DomainPicker suggestion={app.id} onChange={onChange} />
+          <ErrorText>{error}</ErrorText>
+          <div className="flex gap-2">
+            <Button variant="primary" onClick={link} disabled={!choice || busy}>{busy ? "Linking…" : "Link domain"}</Button>
+            {app.domain && <Button onClick={() => setEditing(false)}>Cancel</Button>}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Settings({ app, onSaved }: { app: App; onSaved: (a: App) => void }) {
   const [branch, setBranch] = useState(app.branch);
-  const [domain, setDomain] = useState(app.domain ?? "");
   const [buildCommand, setBuildCommand] = useState(app.build_command ?? "");
   const [startCommand, setStartCommand] = useState(app.start_command ?? "");
   const [autoDeploy, setAutoDeploy] = useState(app.auto_deploy);
@@ -45,7 +94,7 @@ function Settings({ app, onSaved }: { app: App; onSaved: (a: App) => void }) {
   async function save() {
     setMsg("");
     const body: Record<string, unknown> = { branch, build_command: buildCommand, auto_deploy: autoDeploy };
-    if (app.mode === "managed") Object.assign(body, { domain, start_command: startCommand });
+    if (app.mode === "managed") Object.assign(body, { start_command: startCommand });
     try {
       onSaved(await api<App>(`/apps/${encodeURIComponent(app.id)}`, { method: "PATCH", body }));
       setMsg("Saved. Deploy to apply.");
@@ -58,9 +107,6 @@ function Settings({ app, onSaved }: { app: App; onSaved: (a: App) => void }) {
     <Card title="Settings">
       <div className="space-y-3 text-sm">
         <label className="block space-y-1"><span className="text-zinc-500">Branch</span><Input value={branch} onChange={(e) => setBranch(e.target.value)} /></label>
-        {app.mode === "managed" && (
-          <label className="block space-y-1"><span className="text-zinc-500">Domain</span><Input value={domain} onChange={(e) => setDomain(e.target.value.trim().toLowerCase())} placeholder="none" /></label>
-        )}
         <label className="block space-y-1"><span className="text-zinc-500">Build command</span><Input value={buildCommand} onChange={(e) => setBuildCommand(e.target.value)} placeholder="default" className="mono text-xs" /></label>
         {app.mode === "managed" && (
           <label className="block space-y-1"><span className="text-zinc-500">Start command</span><Input value={startCommand} onChange={(e) => setStartCommand(e.target.value)} placeholder="default" className="mono text-xs" /></label>
@@ -207,6 +253,9 @@ function AppView() {
           </Card>
         </div>
         <div className="space-y-4">
+          {app.mode === "managed" && (
+            <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />
+          )}
           <Settings app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />
           {app.mode === "managed" && <EnvEditor appId={app.id} />}
         </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
 import { Button, Card, ErrorText, Input } from "@/components/ui";
 import { api, ApiError, SERVICE_TYPES, type App, type Repo } from "@/lib/api";
@@ -16,7 +17,9 @@ function NewApp() {
   const [branch, setBranch] = useState("");
   const [type, setType] = useState("");
   const [id, setId] = useState("");
-  const [domain, setDomain] = useState("");
+  const [withDomain, setWithDomain] = useState(true);
+  const [domainChoice, setDomainChoice] = useState<DomainChoice | null>(null);
+  const onDomain = useCallback((c: DomainChoice | null) => setDomainChoice(c), []);
   const [env, setEnv] = useState("");
   const [buildCommand, setBuildCommand] = useState("");
   const [startCommand, setStartCommand] = useState("");
@@ -58,19 +61,29 @@ function NewApp() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!repo) return;
+    if (withDomain && !domainChoice) {
+      setError("Pick a valid domain, or untick “give it an address”.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
+      const choice = withDomain ? domainChoice : null;
+      if (choice?.zone) {
+        await api("/dns/records", {
+          method: "POST", body: { zone: choice.zone, subdomain: choice.subdomain, overwrite: choice.overwrite },
+        });
+      }
       const created = await api<App & { release_id: number }>("/apps", {
         method: "POST",
         body: {
-          id, repo: repo.full_name, branch, installation_id: repo.installation_id, domain: domain || null, type, env,
+          id, repo: repo.full_name, branch, installation_id: repo.installation_id, domain: choice?.domain ?? null, type, env,
           build_command: buildCommand || null, start_command: startCommand || null, root_dir: rootDir, auto_deploy: autoDeploy,
         },
       });
       window.location.href = `/apps/view/?id=${encodeURIComponent(created.id)}&release=${created.release_id}`;
     } catch (err) {
-      setError((err as ApiError).detail);
+      setError((err as ApiError).detail.replace(/^points-elsewhere: |^cname: /, ""));
       setBusy(false);
     }
   }
@@ -129,12 +142,18 @@ function NewApp() {
               {DEPLOYABLE.map((t) => <option key={t}>{t}</option>)}
             </select>
           </label>
-          <label className="space-y-1">
-            <span className="text-zinc-500">Domain (optional)</span>
-            <Input value={domain} onChange={(e) => setDomain(e.target.value.trim().toLowerCase())} placeholder="app.example.com" />
-            <span className="text-xs text-zinc-500">DNS must point here; Mas sets up nginx and HTTPS.</span>
-          </label>
         </div>
+      </Card>
+      <Card title="Domain (optional)" actions={
+        <label className="flex items-center gap-1.5 text-xs font-normal">
+          <input type="checkbox" checked={withDomain} onChange={(e) => setWithDomain(e.target.checked)} /> give it an address
+        </label>
+      }>
+        {withDomain ? (
+          <DomainPicker suggestion={id} onChange={onDomain} />
+        ) : (
+          <p className="text-sm text-zinc-500">No domain: the app only listens on 127.0.0.1. You can add one later.</p>
+        )}
       </Card>
       <Card title="Environment variables">
         <textarea
