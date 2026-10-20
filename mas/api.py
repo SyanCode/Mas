@@ -16,10 +16,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_deploy, api_dns, auth
+from mas import __version__, api_deploy, api_dns, api_supabase, auth
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.deploy import Deployer
 from mas.github import GitHubApp
+from mas.supabase import SupabaseManager
 from mas.config import Config, load_config
 from mas.db import Database
 from mas.host import Host
@@ -127,6 +128,10 @@ def create_app(
                 await asyncio.to_thread(scanner.refresh)
             except Exception:
                 log.exception("background scan failed")
+            try:
+                await asyncio.to_thread(supabase.auto_backup)
+            except Exception:
+                log.exception("Supabase backup failed")
             await asyncio.sleep(max(10, config.scan_interval))
 
     github_cache: dict = {}
@@ -144,6 +149,7 @@ def create_app(
 
     deployer = Deployer(host, config, db, github_client, find_service=scanner.get,
                         on_change=lambda: scanner.refresh())
+    supabase = SupabaseManager(host, config, db, deployer)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -380,6 +386,8 @@ def create_app(
                         deployer=deployer, github_client=github_client, reset_github=github_cache.clear)
     api_dns.register(app, host=host, config=config, db=db, current_session=current_session, deployer=deployer,
                      opener=ovh_opener)
+    api_supabase.register(app, host=host, db=db, current_session=current_session, deployer=deployer,
+                          manager=supabase)
 
     # -- dashboard ---------------------------------------------------------
 

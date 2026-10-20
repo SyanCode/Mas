@@ -48,6 +48,26 @@ PROXY_BODY = """
     }
 """ + STATUS_PAGE_LOCATION
 
+# Supabase: only the public API goes through nginx; Studio and pg-meta stay private.
+SUPABASE_BODY = """
+    error_page 502 503 504 =503 /__mas/status.html;
+    location ~ ^/(rest|auth|realtime|storage|functions|graphql)/v1/ {
+        proxy_pass http://127.0.0.1:@@PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $mas_connection_upgrade;
+        proxy_read_timeout 3600s;
+        client_max_body_size 50m;
+    }
+    location / {
+        return 404;
+    }
+""" + STATUS_PAGE_LOCATION
+
 STATIC_BODY = """
     root @@ROOT@@;
     index index.html;
@@ -155,6 +175,10 @@ def vhost(app_id: str, domain: str, body: str, https: bool) -> str:
 
 def proxy_body(port: int, pages_dir: str) -> str:
     return fill(PROXY_BODY, port=port, pages=pages_dir, page="deploying")
+
+
+def supabase_body(port: int, pages_dir: str) -> str:
+    return fill(SUPABASE_BODY, port=port, pages=pages_dir, page="deploying")
 
 
 def placeholder_body(pages_dir: str, page: str) -> str:

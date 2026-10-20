@@ -64,6 +64,8 @@ class Config:
     # [deploy]
     apps_dir: str = "/srv/mas/apps"
     pages_dir: str = "/srv/mas/pages"  # status pages served by nginx (deploying, unavailable)
+    supabase_dir: str = "/srv/mas/supabase"
+    supabase_keep_backups: int = 7
     keep_releases: int = 5
     letsencrypt_email: str | None = None
     port_min: int = 7100

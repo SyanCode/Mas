@@ -87,6 +87,19 @@ CREATE TABLE IF NOT EXISTS releases (
     finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS releases_app ON releases(app_id, id);
+CREATE TABLE IF NOT EXISTS supabase (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,                      -- installing | running | stopped | failed
+    domain TEXT,
+    dir TEXT NOT NULL,
+    ports TEXT,                                -- JSON {kong_http, kong_https, postgres, pooler}
+    secrets TEXT,                              -- encrypted (mas.envcrypt)
+    ref TEXT,                                  -- commit of the official docker/ folder
+    error TEXT,
+    last_backup TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -228,6 +241,27 @@ class Database:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (_now(), actor, service_id, action, command, int(ok), (detail or "")[:4000]),
             )
+
+    # -- supabase --------------------------------------------------------
+
+    def get_supabase(self, instance_id: str = "supabase") -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM supabase WHERE id = ?", (instance_id,)).fetchone()
+        return dict(row) if row else None
+
+    def save_supabase(self, instance_id: str, **fields: Any) -> None:
+        allowed = {"status", "domain", "dir", "ports", "secrets", "ref", "error", "last_backup"}
+        if not set(fields) <= allowed:
+            raise ValueError(f"invalid supabase fields: {set(fields) - allowed}")
+        with self.tx() as c:
+            c.execute("INSERT OR IGNORE INTO supabase (id, status, dir, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                      (instance_id, fields.get("status", "installing"), fields.get("dir", ""), _now(), _now()))
+            for key, value in fields.items():
+                c.execute(f"UPDATE supabase SET {key} = ?, updated_at = ? WHERE id = ?", (value, _now(), instance_id))
+
+    def delete_supabase(self, instance_id: str = "supabase") -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM supabase WHERE id = ?", (instance_id,))
 
     # -- settings (key/value; secrets are stored encrypted by the caller) --
 
