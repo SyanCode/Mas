@@ -111,9 +111,14 @@ def test_validation():
 
 
 def test_templates():
-    vhost = templates.vhost("web", "web.example.com", templates.proxy_body(7100), https=True)
+    vhost = templates.vhost("web", "web.example.com", templates.proxy_body(7100, "/srv/mas/pages"), https=True)
     assert "proxy_pass http://127.0.0.1:7100;" in vhost and "/etc/letsencrypt/live/web.example.com/" in vhost
     assert "return 301 https://$host$request_uri;" in vhost
+    assert "error_page 502 503 504 =503 /__mas/status.html;" in vhost  # restart gap shows the status page
+    placeholder = templates.vhost("web", "web.example.com", templates.placeholder_body("/srv/mas/pages", "deploying"),
+                                  https=False)
+    assert "return 503;" in placeholder and "alias /srv/mas/pages/deploying.html;" in placeholder
+    assert "Deploying" in templates.status_page("deploying")
     assert "ssl_certificate" not in templates.vhost("web", "web.example.com", templates.static_body("/x"), https=False)
     assert templates.systemd_quote('gunicorn -b "127.0.0.1:$PORT" 50%') == \
         '/bin/sh -c "exec gunicorn -b \\"127.0.0.1:$PORT\\" 50%%"'
@@ -212,6 +217,36 @@ def test_managed_deploy_end_to_end(env):
     assert "ghs_secret_token" not in log and "s3cr3t" not in log
     build_env = next(e for a, e in calls if a[-2:] == ["run", "build"])
     assert build_env["API_KEY"] == "s3cr3t"
+
+
+def test_first_deploy_serves_a_status_page_then_the_app(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    written = []
+    original = host.write_text
+
+    def spy(path, content, mode=0o644):
+        if path.endswith("mas-app-web.conf"):
+            written.append(content)
+        original(path, content, mode)
+
+    host.write_text = spy
+    rid, ok = deploy_once(env, SHA1)
+    assert ok, deployer.log_path("web", rid).read_text()
+    # placeholder first (before the build), then the real proxy vhost
+    assert "return 503;" in written[0] and "deploying.html" in written[0]
+    assert "proxy_pass http://127.0.0.1:7100;" in written[-1]
+    assert "Deploying" in host.read_text("/srv/mas/pages/deploying.html")
+    log = deployer.log_path("web", rid).read_text()
+    assert log.index("Preparing web.example.com") < log.index("Building")
+
+
+def test_failed_first_deploy_shows_unavailable_page(env):
+    host, db = env["host"], env["db"]
+    env["health"]["ok"] = False
+    rid, ok = deploy_once(env, SHA1)
+    assert not ok
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert "unavailable.html" in vhost and "proxy_pass" not in vhost
 
 
 def test_failed_health_check_rolls_back(env):

@@ -122,6 +122,20 @@ def validate_app(app_id: str, repo: str, branch: str, domain: str | None, app_ty
         raise DeployError("type must be one of nextjs, node, python, static, php")
 
 
+CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+ROOT_DIR_RE = re.compile(r"^(?:[A-Za-z0-9_][A-Za-z0-9._-]*)(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*$")
+
+
+def validate_commands(build_command: str | None, start_command: str | None, root_dir: str | None) -> None:
+    """Commands end up in a systemd unit / shell: one line, no control characters.
+    root_dir is served by nginx: a relative path inside the release, never ``..``."""
+    for label, value in (("build command", build_command), ("start command", start_command)):
+        if value and CONTROL_RE.search(value):
+            raise DeployError(f"{label}: one line, no control characters")
+    if root_dir and (not ROOT_DIR_RE.fullmatch(root_dir) or ".." in root_dir.split("/")):
+        raise DeployError("folder to serve: a relative path such as public or dist/site")
+
+
 def used_ports(host: Host, db: Database) -> set[int]:
     used = {a["port"] for a in db.list_apps() if a["port"]}
     res = host.run(["ss", "-tlnH"])
@@ -430,10 +444,21 @@ class Deployer:
             raise DeployError("no PHP-FPM socket found in /run/php (apt install php-fpm)")
         return sockets[-1]
 
-    def _vhost_body(self, app: dict, app_type: ServiceType, paths: AppPaths) -> str:
+    def _ensure_pages(self) -> None:
+        """Status pages served by nginx (deploying / unavailable); readable by www-data."""
+        self._mkdir_public(self.config.pages_dir)
+        for name in templates.STATUS_PAGES:
+            path = f"{self.config.pages_dir}/{name}.html"
+            content = templates.status_page(name)
+            if self.host.read_text(path) != content:
+                self.host.write_text(path, content, mode=0o644)
+
+    def _vhost_body(self, app: dict, app_type: ServiceType, paths: AppPaths, page: str | None = None) -> str:
+        if page:
+            return templates.placeholder_body(self.config.pages_dir, page)
         root = paths.current + (f"/{app['root_dir'].strip('/')}" if app.get("root_dir") else "")
         if app_type in PROXY_TYPES:
-            return templates.proxy_body(app["port"])
+            return templates.proxy_body(app["port"], self.config.pages_dir)
         if app_type == ServiceType.PHP:
             return templates.php_body(root, self._fpm_socket())
         return templates.static_body(root)
@@ -462,16 +487,32 @@ class Deployer:
         rlog.line(f"wrote {path} (nginx -t ok)")
         self._system(rlog, ["systemctl", "reload", "nginx"])
 
-    def _install_vhost(self, app: dict, app_type: ServiceType, paths: AppPaths, rlog: ReleaseLog) -> None:
+    def _has_cert(self, domain: str) -> bool:
+        return self.host.exists(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
+
+    def _install_vhost(self, app: dict, app_type: ServiceType, paths: AppPaths, rlog: ReleaseLog,
+                       page: str | None = None) -> None:
+        """Write the app vhost, or a placeholder serving the ``page`` status page."""
         available, enabled = vhost_paths(app["id"])
         conflict = domain_conflict(self.host, app["domain"], {available, enabled})
         if conflict:
             raise DeployError(f"{app['domain']} is already served by {conflict}")
         if app_type in PROXY_TYPES and self.host.read_text(UPGRADE_MAP_PATH) != templates.UPGRADE_MAP:
             self._nginx_apply(rlog, UPGRADE_MAP_PATH, templates.UPGRADE_MAP, None)
-        https = self.host.exists(f"/etc/letsencrypt/live/{app['domain']}/fullchain.pem")
-        content = templates.vhost(app["id"], app["domain"], self._vhost_body(app, app_type, paths), https)
+        self._ensure_pages()
+        body = self._vhost_body(app, app_type, paths, page)
+        content = templates.vhost(app["id"], app["domain"], body, self._has_cert(app["domain"]))
         self._nginx_apply(rlog, available, content, enabled)
+
+    def _prepare_domain(self, app: dict, app_type: ServiceType, paths: AppPaths, first: bool,
+                        rlog: ReleaseLog) -> None:
+        """Before building: the domain answers right away (status page on a first
+        deploy) and gets its certificate, so visitors never hit another site's vhost."""
+        rlog.step(f"Preparing {app['domain']}")
+        page = "deploying" if first else None
+        self._install_vhost(app, app_type, paths, rlog, page)
+        if not self._has_cert(app["domain"]) and self._ensure_certificate(app, rlog):
+            self._install_vhost(app, app_type, paths, rlog, page)  # now with HTTPS
 
     def _wait_dns(self, domain: str, rlog: ReleaseLog) -> None:
         """Wait (bounded) until a freshly created DNS record is visible."""
@@ -490,10 +531,11 @@ class Deployer:
                 return
             time.sleep(5)
 
-    def _ensure_certificate(self, app: dict, app_type: ServiceType, paths: AppPaths, rlog: ReleaseLog) -> None:
+    def _ensure_certificate(self, app: dict, rlog: ReleaseLog) -> bool:
+        """Request a certificate if missing. True when a new one was obtained."""
         domain = app["domain"]
-        if self.host.exists(f"/etc/letsencrypt/live/{domain}/fullchain.pem"):
-            return
+        if self._has_cert(domain):
+            return False
         self._wait_dns(domain, rlog)
         rlog.step(f"Requesting a certificate for {domain}")
         contact = ["-m", self.config.letsencrypt_email] if self.config.letsencrypt_email else \
@@ -503,8 +545,8 @@ class Deployer:
         if rc != 0:
             rlog.line(f"warning: no certificate for {domain} (DNS must point to this server); "
                       "the site is served over HTTP, the next deploy will retry")
-            return
-        self._install_vhost(app, app_type, paths, rlog)  # now with HTTPS
+            return False
+        return True
 
     def _health(self, app: dict, app_type: ServiceType, workdir: str, rlog: ReleaseLog,
                 port: int | None = None) -> None:
@@ -573,6 +615,23 @@ class Deployer:
         self.host.makedirs(paths.home)
         self._system(rlog, ["chown", f"{user}:{user}", self._r(paths.home)])
 
+        first = not self.host.exists(paths.current)
+        try:
+            self._managed_steps(app, app_type, release, paths, user, env_vars, gh, installation, commit, first, rlog)
+        except Exception:
+            if first and app["domain"]:
+                try:  # visitors see "not available" instead of another site or a raw error
+                    self._install_vhost(app, app_type, paths, rlog, page="unavailable")
+                except Exception as exc:  # noqa: BLE001 - best effort, the original error matters
+                    rlog.line(f"could not install the unavailable page: {exc}")
+            raise
+
+    def _managed_steps(self, app: dict, app_type: ServiceType, release: dict, paths: AppPaths, user: str,
+                       env_vars: dict, gh: GitHubApp, installation: int, commit: dict, first: bool,
+                       rlog: ReleaseLog) -> None:
+        if app["domain"]:
+            self._prepare_domain(app, app_type, paths, first, rlog)
+
         rlog.step("Cloning")
         tmp = f"{paths.releases}/.tmp-{release['id']}"
         self.host.remove(tmp)
@@ -615,8 +674,8 @@ class Deployer:
                     self.host.run(["systemctl", "restart", unit_name(app["id"])], timeout=120)
             raise
 
-        if app["domain"]:
-            self._ensure_certificate(app, app_type, paths, rlog)
+        if app["domain"] and self._ensure_certificate(app, rlog):  # retry if it failed while preparing
+            self._install_vhost(app, app_type, paths, rlog)
         self._mark_live(app, release["id"], rel)
         self._prune(app, paths, rlog)
 

@@ -15,7 +15,25 @@ map $http_upgrade $mas_connection_upgrade {
 }
 """
 
+# Served while the app restarts (502/503/504 from the backend) and by placeholder vhosts.
+STATUS_PAGE_LOCATION = """
+    location = /__mas/status.html {
+        alias @@PAGES@@/@@PAGE@@.html;
+        internal;
+        add_header Cache-Control "no-store" always;
+        add_header Retry-After "10" always;
+    }
+"""
+
+PLACEHOLDER_BODY = """
+    error_page 503 /__mas/status.html;
+    location / {
+        return 503;
+    }
+""" + STATUS_PAGE_LOCATION
+
 PROXY_BODY = """
+    error_page 502 503 504 =503 /__mas/status.html;
     location / {
         proxy_pass http://127.0.0.1:@@PORT@@;
         proxy_http_version 1.1;
@@ -26,8 +44,9 @@ PROXY_BODY = """
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $mas_connection_upgrade;
         proxy_read_timeout 120s;
+        proxy_intercept_errors off;
     }
-"""
+""" + STATUS_PAGE_LOCATION
 
 STATIC_BODY = """
     root @@ROOT@@;
@@ -102,9 +121,20 @@ ExecStart=@@EXEC@@
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
 ProtectSystem=full
 ProtectHome=yes
 PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target
@@ -123,8 +153,78 @@ def vhost(app_id: str, domain: str, body: str, https: bool) -> str:
     return fill(HEADER, app=app_id) + fill(server, domain=domain, app=app_id, body=body)
 
 
-def proxy_body(port: int) -> str:
-    return fill(PROXY_BODY, port=port)
+def proxy_body(port: int, pages_dir: str) -> str:
+    return fill(PROXY_BODY, port=port, pages=pages_dir, page="deploying")
+
+
+def placeholder_body(pages_dir: str, page: str) -> str:
+    return fill(PLACEHOLDER_BODY, pages=pages_dir, page=page)
+
+
+STATUS_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="@@REFRESH@@">
+<title>@@TITLE@@</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; overflow: hidden;
+         background: #05060a; color: #e4e4e7;
+         font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .aurora { position: fixed; inset: -30%; filter: blur(80px); opacity: .55; z-index: 0;
+            background: radial-gradient(40% 35% at 30% 30%, #6366f1 0, transparent 70%),
+                        radial-gradient(35% 30% at 70% 60%, #06b6d4 0, transparent 70%),
+                        radial-gradient(30% 30% at 50% 80%, #a855f7 0, transparent 70%);
+            animation: drift 18s ease-in-out infinite alternate; }
+  .grid { position: fixed; inset: 0; z-index: 0; opacity: .25;
+          background-image: linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+          background-size: 48px 48px;
+          mask-image: radial-gradient(circle at center, #000 30%, transparent 75%); }
+  .card { position: relative; z-index: 1; max-width: 26rem; margin: 1.5rem; padding: 2.25rem 2rem;
+          text-align: center; border-radius: 1.25rem; border: 1px solid rgba(255,255,255,.1);
+          background: rgba(10,11,16,.6); backdrop-filter: blur(18px);
+          box-shadow: 0 0 0 1px rgba(255,255,255,.02), 0 30px 80px -20px rgba(99,102,241,.35); }
+  .ring { width: 52px; height: 52px; margin: 0 auto 1.25rem; border-radius: 50%;
+          background: conic-gradient(from 0deg, #6366f1, #06b6d4, #a855f7, #6366f1);
+          -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 0);
+          mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 0);
+          animation: spin 1.1s linear infinite; }
+  .ring.off { animation: none; background: #3f3f46; }
+  h1 { margin: 0 0 .4rem; font-size: 1.3rem; font-weight: 600; letter-spacing: -.01em; }
+  p { margin: 0; color: #a1a1aa; }
+  .host { margin-top: 1.25rem; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: #71717a; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes drift { to { transform: translate3d(6%, -4%, 0) rotate(12deg); } }
+  @media (prefers-reduced-motion: reduce) { .ring, .aurora { animation: none; } }
+</style>
+</head>
+<body>
+<div class="aurora"></div><div class="grid"></div>
+<main class="card">
+  <div class="ring @@RING@@"></div>
+  <h1>@@TITLE@@</h1>
+  <p>@@TEXT@@</p>
+  <div class="host">served by mas</div>
+</main>
+</body>
+</html>
+"""
+
+STATUS_PAGES = {
+    "deploying": dict(title="Deploying…", refresh="8", ring="",
+                      text="This site is being deployed and will be live in a moment. This page refreshes by itself."),
+    "unavailable": dict(title="Not available yet", refresh="60", ring="off",
+                        text="The first deployment of this site did not succeed. The owner has been notified in "
+                             "the dashboard."),
+}
+
+
+def status_page(name: str) -> str:
+    return fill(STATUS_PAGE, **STATUS_PAGES[name])
 
 
 def static_body(root: str) -> str:

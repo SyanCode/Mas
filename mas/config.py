@@ -63,6 +63,7 @@ class Config:
     github_webhook_secret: str | None = None
     # [deploy]
     apps_dir: str = "/srv/mas/apps"
+    pages_dir: str = "/srv/mas/pages"  # status pages served by nginx (deploying, unavailable)
     keep_releases: int = 5
     letsencrypt_email: str | None = None
     port_min: int = 7100
