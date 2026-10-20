@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
-import re
 import time
 import urllib.error
 import urllib.request
@@ -31,7 +30,6 @@ TOKEN_PAGES = {
 }
 RIGHTS = [("GET", "/me"), ("GET", "/domain/zone"), ("GET", "/domain/zone/*"), ("POST", "/domain/zone/*"),
           ("PUT", "/domain/zone/*")]
-LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 RECORD_TTL = 300
 
 # (method, url, headers, body) -> (status, parsed JSON or None)
@@ -41,14 +39,6 @@ Opener = Callable[[str, str, dict, bytes | None], tuple[int, Any]]
 class OvhError(Exception):
     pass
 
-
-class DnsConflict(OvhError):
-    """The name already points somewhere else (``records`` describes what)."""
-
-    def __init__(self, kind: str, message: str, records: list[dict]) -> None:
-        super().__init__(message)
-        self.kind = kind  # "points-elsewhere" (can be overwritten) | "cname" (never touched)
-        self.records = records
 
 
 def token_url(endpoint: str) -> str:
@@ -75,16 +65,6 @@ def _urllib_opener(method: str, url: str, headers: dict, body: bytes | None) -> 
     except ValueError:
         return status, None
 
-
-def fqdn(zone: str, subdomain: str) -> str:
-    return f"{subdomain}.{zone}" if subdomain else zone
-
-
-def validate_subdomain(subdomain: str) -> str:
-    sub = subdomain.strip().lower().strip(".")
-    if sub and not all(LABEL_RE.fullmatch(label) for label in sub.split(".")):
-        raise OvhError("invalid subdomain: letters, digits and dashes, separated by dots")
-    return sub
 
 
 def validate_ip(value: str | None, version: int) -> str | None:
@@ -170,42 +150,3 @@ class OvhClient:
     def refresh(self, zone: str) -> None:
         self.request("POST", f"/domain/zone/{zone}/refresh")
 
-
-def point_domain(client: OvhClient, zone: str, subdomain: str, ipv4: str, ipv6: str | None = None,
-                 overwrite: bool = False) -> dict:
-    """Make ``subdomain.zone`` point to this server (A, and AAAA if ``ipv6``).
-
-    Existing records pointing elsewhere are only replaced with ``overwrite``;
-    a CNAME on that name is never touched.
-    """
-    if zone not in client.zones():
-        raise OvhError(f"{zone} is not a DNS zone of this OVH account")
-    sub = validate_subdomain(subdomain)
-    name = fqdn(zone, sub)
-    existing = client.records(zone, sub)
-    cnames = [r for r in existing if r.get("fieldType") == "CNAME"]
-    if cnames:
-        raise DnsConflict("cname", f"{name} is a CNAME to {cnames[0].get('target')}; change it in the OVH manager",
-                          cnames)
-
-    wanted = {"A": ipv4, **({"AAAA": ipv6} if ipv6 else {})}
-    elsewhere = [r for r in existing if r.get("fieldType") in wanted and r.get("target") != wanted[r["fieldType"]]]
-    if elsewhere and not overwrite:
-        targets = ", ".join(f"{r['fieldType']} {r.get('target')}" for r in elsewhere)
-        raise DnsConflict("points-elsewhere", f"{name} already points to {targets}", elsewhere)
-
-    changes = []
-    for ftype, target in wanted.items():
-        same_type = [r for r in existing if r.get("fieldType") == ftype]
-        if any(r.get("target") == target for r in same_type):
-            changes.append(f"{ftype} {target} (already set)")
-            continue
-        if same_type:
-            client.update_record(zone, same_type[0]["id"], target)
-            changes.append(f"{ftype} {same_type[0].get('target')} → {target}")
-        else:
-            client.create_record(zone, sub, ftype, target)
-            changes.append(f"{ftype} {target} (created)")
-    if any("already set" not in c for c in changes):
-        client.refresh(zone)
-    return {"domain": name, "changes": changes}

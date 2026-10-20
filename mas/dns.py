@@ -1,4 +1,4 @@
-"""DNS provider settings: OVH credentials (encrypted) and this server's public IPs."""
+"""Connected DNS providers (credentials encrypted at rest) and this server's public IPs."""
 
 from __future__ import annotations
 
@@ -6,49 +6,72 @@ import json
 
 from mas.config import Config
 from mas.db import Database
+from mas.dnsproviders import DnsError, Opener, Provider, make_provider
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet
 from mas.host import Host
-from mas.ovh import Opener, OvhClient, OvhCredentials
 
-OVH_KEY = "ovh_credentials"
+PROVIDERS_KEY = "dns_providers"
+LEGACY_OVH_KEY = "ovh_credentials"  # before multi-provider support
 IPV4_KEY = "dns_ipv4"
 IPV6_KEY = "dns_ipv6"
 
 
-def save_ovh(host: Host, config: Config, db: Database, creds: OvhCredentials | None) -> None:
-    if creds is None:
-        db.set_setting(OVH_KEY, None)
+def load_providers(host: Host, config: Config, db: Database) -> dict[str, dict]:
+    """``{type: {"creds": {...}, "account": str}}``."""
+    fernet = load_fernet(host, config.secret_key_path)
+    token = db.get_setting(PROVIDERS_KEY)
+    if token:
+        try:
+            return json.loads(decrypt_env(fernet, token).get("json", "{}"))
+        except (EnvError, ValueError):
+            return {}
+    legacy = db.get_setting(LEGACY_OVH_KEY)
+    if not legacy:
+        return {}
+    try:  # migrate the single OVH account of the previous version
+        creds = decrypt_env(fernet, legacy)
+    except EnvError:
+        return {}
+    account = json.loads(db.get_setting("ovh_account") or "{}").get("nichandle") or "OVH account"
+    providers = {"ovh": {"creds": creds, "account": account}}
+    save_providers(host, config, db, providers)
+    db.set_setting(LEGACY_OVH_KEY, None)
+    db.set_setting("ovh_account", None)
+    return providers
+
+
+def save_providers(host: Host, config: Config, db: Database, providers: dict[str, dict]) -> None:
+    if not providers:
+        db.set_setting(PROVIDERS_KEY, None)
         return
     fernet = load_fernet(host, config.secret_key_path)
-    db.set_setting(OVH_KEY, encrypt_env(fernet, {
-        "endpoint": creds.endpoint, "application_key": creds.application_key,
-        "application_secret": creds.application_secret, "consumer_key": creds.consumer_key,
-    }))
+    db.set_setting(PROVIDERS_KEY, encrypt_env(fernet, {"json": json.dumps(providers)}))
 
 
-def load_ovh_credentials(host: Host, config: Config, db: Database) -> OvhCredentials | None:
-    token = db.get_setting(OVH_KEY)
-    if not token:
-        return None
-    try:
-        data = decrypt_env(load_fernet(host, config.secret_key_path), token)
-    except EnvError:
-        return None
-    return OvhCredentials(**data)
+def provider_clients(host: Host, config: Config, db: Database, opener: Opener | None = None) -> list[Provider]:
+    clients = []
+    for ptype, entry in load_providers(host, config, db).items():
+        try:
+            clients.append(make_provider(ptype, entry["creds"], opener))
+        except DnsError:
+            continue
+    return clients
 
 
-def ovh_client(host: Host, config: Config, db: Database, opener: Opener | None = None) -> OvhClient | None:
-    creds = load_ovh_credentials(host, config, db)
-    if creds is None:
-        return None
-    return OvhClient(creds, opener) if opener else OvhClient(creds)
+def zone_index(host: Host, config: Config, db: Database, opener: Opener | None = None) -> tuple[dict[str, Provider],
+                                                                                               list[str]]:
+    """Map each zone to the provider that hosts it. Also returns per-provider errors."""
+    index: dict[str, Provider] = {}
+    errors = []
+    for provider in provider_clients(host, config, db, opener):
+        try:
+            for zone in provider.zones():
+                index.setdefault(zone, provider)
+        except DnsError as exc:
+            errors.append(f"{provider.label}: {exc}")
+    return index, errors
 
 
 def server_ips(db: Database, config: Config | None = None) -> tuple[str | None, str | None]:
     ipv4 = db.get_setting(IPV4_KEY) or (config.public_ip if config else None)
     return ipv4, db.get_setting(IPV6_KEY)
-
-
-def ovh_account(db: Database) -> dict | None:
-    raw = db.get_setting("ovh_account")
-    return json.loads(raw) if raw else None

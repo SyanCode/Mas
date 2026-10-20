@@ -14,14 +14,14 @@ from mas import auth
 from mas.api import create_app
 from mas.config import Config
 from mas.db import Database
-from mas.dns import IPV4_KEY, load_ovh_credentials, save_ovh
+from mas.dns import IPV4_KEY, load_providers, save_providers
+from mas.dnsproviders import CloudflareProvider, DnsConflict, DnsError, OvhProvider, point_domain
 from mas.host import FixtureHost
-from mas.ovh import (
-    DnsConflict, OvhClient, OvhCredentials, OvhError, point_domain, signature, token_url, validate_ip,
-)
+from mas.ovh import OvhError, signature, token_url, validate_ip
 
 IP = "93.184.216.34"
-CREDS = OvhCredentials("ovh-eu", "AK", "AS-secret", "CK-secret")
+CREDS = {"endpoint": "ovh-eu", "application_key": "AK", "application_secret": "AS-secret",
+         "consumer_key": "CK-secret"}
 
 
 class FakeOvh:
@@ -83,7 +83,7 @@ def test_signature_and_token_url():
 
 def test_point_domain_creates_and_is_idempotent():
     fake = FakeOvh()
-    client = OvhClient(CREDS, fake)
+    client = OvhProvider(CREDS, fake)
     result = point_domain(client, "example.com", "Test", IP, "2001:db8::1")
     assert result["domain"] == "test.example.com"
     assert {(r["fieldType"], r["subDomain"], r["target"]) for r in fake.records.values()} == {
@@ -98,7 +98,7 @@ def test_point_domain_creates_and_is_idempotent():
 
 def test_point_domain_conflicts():
     fake = FakeOvh()
-    client = OvhClient(CREDS, fake)
+    client = OvhProvider(CREDS, fake)
     rid = fake.add("example.com", "shop", "A", "1.2.3.4")
     with pytest.raises(DnsConflict) as exc:
         point_domain(client, "example.com", "shop", IP)
@@ -111,9 +111,9 @@ def test_point_domain_conflicts():
         point_domain(client, "example.com", "www", IP, overwrite=True)
     assert exc.value.kind == "cname"
 
-    with pytest.raises(OvhError):
+    with pytest.raises(DnsError):
         point_domain(client, "not-mine.com", "x", IP)
-    with pytest.raises(OvhError):
+    with pytest.raises(DnsError):
         point_domain(client, "example.com", "bad_label!", IP)
 
 
@@ -128,10 +128,22 @@ def test_credentials_are_encrypted_at_rest(tmp_path):
     host = FixtureHost(server.build(tmp_path / "srv"))
     db = Database(tmp_path / "mas.db")
     config = Config(secret_key_path="/etc/mas/secret.key")
-    save_ovh(host, config, db, CREDS)
-    raw = db.get_setting("ovh_credentials")
+    save_providers(host, config, db, {"ovh": {"creds": CREDS, "account": "ab12345-ovh"}})
+    raw = db.get_setting("dns_providers")
     assert "AS-secret" not in raw and "CK-secret" not in raw
-    assert load_ovh_credentials(host, config, db) == CREDS
+    assert load_providers(host, config, db)["ovh"]["creds"] == CREDS
+
+
+def test_legacy_ovh_setting_is_migrated(tmp_path):
+    from mas.envcrypt import encrypt_env, load_fernet
+
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    config = Config(secret_key_path="/etc/mas/secret.key")
+    db.set_setting("ovh_credentials", encrypt_env(load_fernet(host, config.secret_key_path), CREDS))
+    db.set_setting("ovh_account", json.dumps({"nichandle": "ab12345-ovh"}))
+    assert load_providers(host, config, db) == {"ovh": {"creds": CREDS, "account": "ab12345-ovh"}}
+    assert db.get_setting("ovh_credentials") is None and db.get_setting("dns_providers")
 
 
 # -- API -----------------------------------------------------------------------------
@@ -156,9 +168,7 @@ def api(tmp_path):
 
 
 def connect(client, h):
-    body = {"endpoint": "ovh-eu", "application_key": "AK", "application_secret": "AS-secret",
-            "consumer_key": "CK-secret"}
-    return client.post("/api/dns/ovh", json=body, headers=h)
+    return client.post("/api/dns/providers", json={"type": "ovh", "credentials": CREDS}, headers=h)
 
 
 def test_connect_and_settings(api):
@@ -166,10 +176,14 @@ def test_connect_and_settings(api):
     r = connect(client, h)
     assert r.status_code == 200 and r.json()["zones"] == ["example.com", "sxn.fr"]
     status = client.get("/api/dns/status").json()
-    assert status["provider"] == "ovh" and status["account"]["nichandle"] == "ab12345-ovh"
+    assert status["providers"] == [{"type": "ovh", "label": "OVHcloud", "account": "ab12345-ovh"}]
+    assert {p["type"] for p in status["catalog"]} >= {"ovh", "cloudflare", "gandi", "hetzner", "digitalocean",
+                                                      "porkbun"}
     assert client.put("/api/dns/settings", json={"ipv4": "192.168.1.10"}, headers=h).status_code == 400
     assert client.put("/api/dns/settings", json={"ipv4": IP}, headers=h).json()["ipv4"] == IP
-    assert client.get("/api/dns/zones").json() == ["example.com", "sxn.fr"]
+    assert [z["zone"] for z in client.get("/api/dns/zones").json()] == ["example.com", "sxn.fr"]
+    assert client.get("/api/dns/check?zone=../../me&subdomain=x").status_code == 400
+    assert client.get("/api/dns/check?zone=other.com&subdomain=x").status_code == 404
 
 
 def test_link_domain_creates_record_and_redeploys(api):
@@ -226,3 +240,37 @@ def test_deploy_waits_for_dns_before_certbot(tmp_path, monkeypatch):
     log.close()
     assert f"DNS: web.example.com → {IP}" in (tmp_path / "x.log").read_text(encoding="utf-8")
     assert answers == []
+
+
+class FakeCloudflare:
+    def __init__(self):
+        self.records = []
+
+    def __call__(self, method, url, headers, body):
+        assert headers["Authorization"] == "Bearer cf-token"
+        parsed = urlparse(url)
+        path, q = parsed.path.removeprefix("/client/v4"), parse_qs(parsed.query)
+        if path == "/user/tokens/verify":
+            return 200, {"success": True, "result": {"status": "active"}}
+        if path == "/zones":
+            return 200, {"success": True, "result": [{"id": "z1", "name": "example.org"}],
+                         "result_info": {"total_pages": 1}}
+        if path == "/zones/z1/dns_records" and method == "GET":
+            return 200, {"success": True, "result": [r for r in self.records
+                                                     if r["type"] == q["type"][0] and r["name"] == q["name"][0]]}
+        if path == "/zones/z1/dns_records" and method == "POST":
+            data = json.loads(body)
+            assert data["proxied"] is False
+            self.records.append({"id": f"r{len(self.records)}", **data})
+            return 200, {"success": True, "result": self.records[-1]}
+        return 404, {"success": False, "errors": [{"message": "not found"}]}
+
+
+def test_cloudflare_point_domain():
+    fake = FakeCloudflare()
+    cf = CloudflareProvider({"api_token": "cf-token"}, fake)
+    assert cf.verify() == "API token" and cf.zones() == ["example.org"]
+    result = point_domain(cf, "example.org", "app", IP)
+    assert result["provider"] == "Cloudflare" and result["domain"] == "app.example.org"
+    assert fake.records[0]["name"] == "app.example.org" and fake.records[0]["content"] == IP
+    assert all("already set" in c for c in point_domain(cf, "example.org", "app", IP)["changes"])
