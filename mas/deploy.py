@@ -540,8 +540,15 @@ class Deployer:
         rlog.step(f"Requesting a certificate for {domain}")
         contact = ["-m", self.config.letsencrypt_email] if self.config.letsencrypt_email else \
             ["--register-unsafely-without-email"]
-        rc = self._cmd(rlog, ["certbot", "certonly", "--nginx", "--non-interactive", "--agree-tos", *contact,
-                              "--cert-name", domain, "-d", domain], timeout=300, check=False)
+        certbot = ["certbot", "certonly", "--nginx", "--non-interactive", "--agree-tos", *contact,
+                   "--cert-name", domain, "-d", domain]
+        # mas.service has a read-only /etc (ProtectSystem=full): certbot's nginx plugin
+        # checkpoints and restores files it cannot write from inside the sandbox, so it
+        # runs as a transient unit of PID 1, like a certbot started from a shell.
+        if self.host.run(["systemctl", "is-system-running"]) is not None:
+            certbot = ["systemd-run", "--quiet", "--wait", "--pipe", "--collect", "--unit",
+                       f"mas-certbot-{int(time.time())}", *certbot]
+        rc = self._cmd(rlog, certbot, timeout=300, check=False)
         if rc != 0:
             rlog.line(f"warning: no certificate for {domain} (DNS must point to this server); "
                       "the site is served over HTTP, the next deploy will retry")

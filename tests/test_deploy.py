@@ -208,7 +208,7 @@ def test_managed_deploy_end_to_end(env):
     argvs = [a for a, _ in calls]
     assert ["runuser", "-u", "mas-web", "--", "npm", "ci", "--no-audit", "--no-fund"] in argvs
     assert ["runuser", "-u", "mas-web", "--", "npm", "run", "build"] in argvs
-    assert any(a[:2] == ["certbot", "certonly"] and "web.example.com" in a for a in argvs)
+    assert any("certonly" in a and "web.example.com" in a for a in argvs)
     assert ["systemctl", "restart", "mas-app-web.service"] in host.executed
     assert ["nginx", "-t"] in host.executed
     # the token reaches git through the environment only, and never the log
