@@ -26,6 +26,7 @@ SITE_GLOBS = [f"{NGINX_DIR}/sites-enabled/*", f"{NGINX_DIR}/conf.d/*.conf"]
 MAX_INCLUDE_DEPTH = 8
 REDIRECT_CODES = {"301", "302", "303", "307", "308"}
 LOCAL_HOSTS = {"localhost", "0.0.0.0", "::1", "::", "*"}
+DEFAULT_LOGS = ("/var/log/nginx/access.log", "/var/log/nginx/error.log")
 
 
 class NginxParseError(ValueError):
@@ -240,6 +241,7 @@ class ServerBlock:
     ssl_certificate: str | None = None
     locations: list[Location] = field(default_factory=list)
     redirect_url: str | None = None  # https redirect (return / rewrite / certbot `if`)
+    log_paths: list[str] = field(default_factory=list)
 
     @property
     def domains(self) -> list[str]:
@@ -274,6 +276,7 @@ class NginxSite:
     ssl_certificate: str | None = None
     ssl_expires: datetime | None = None
     redirect_to: str | None = None
+    log_paths: list[str] = field(default_factory=list)
 
     @property
     def primary_name(self) -> str | None:
@@ -370,6 +373,8 @@ def server_from_directive(d: Directive) -> ServerBlock:
             sb.ssl_on = True
         elif c.name == "ssl_certificate" and c.args and not sb.ssl_certificate:
             sb.ssl_certificate = c.args[0]
+        elif c.name in ("access_log", "error_log") and c.args and c.args[0].startswith("/"):
+            sb.log_paths.append(c.args[0])
         elif c.name == "return":
             sb.redirect_url = sb.redirect_url or _https_redirect(c.args)
         elif c.name == "rewrite" and len(c.args) >= 2 and c.args[1].startswith("https://"):
@@ -430,6 +435,7 @@ def _build_site(blocks: list[ServerBlock], upstreams: dict[str, list[str]]) -> N
         (loc.root for b in blocks for loc in b.locations if loc.root), None
     )
     site.ssl_certificate = next((b.ssl_certificate for b in blocks if b.ssl_certificate), None)
+    site.log_paths = _dedupe([p for b in blocks for p in b.log_paths]) or list(DEFAULT_LOGS)
     seen: set[tuple[str, str, str]] = set()
     for b in blocks:
         for loc in b.locations:

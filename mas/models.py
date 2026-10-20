@@ -66,6 +66,11 @@ class Service(BaseModel):
     ssl_certificate: str | None = None
     https_redirect: bool = False
     cmdline: str | None = None
+    log_paths: list[str] = Field(default_factory=list)  # files read by `mas logs`
+
+    # User metadata (stored in the database, applied after each scan).
+    display_name: str | None = None
+    notes: str | None = None
 
     @property
     def has_domain(self) -> bool:

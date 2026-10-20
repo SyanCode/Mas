@@ -59,6 +59,7 @@ class Backend:
     unit: str | None = None
     container_id: str | None = None
     cmdline: list[str] = field(default_factory=list)
+    log_paths: list[str] = field(default_factory=list)
 
 
 class Correlator:
@@ -112,7 +113,7 @@ class Correlator:
         return Backend(
             key=f"pm2:{a.user}:{a.name}", manager=Manager.PM2, name=a.name, status=Status(a.status),
             pid=a.pid, port=a.port, path=a.cwd or (proc.cwd if proc else None), user=a.user,
-            unit=a.name, cmdline=proc.cmdline if proc else [],
+            unit=a.name, cmdline=proc.cmdline if proc else [], log_paths=list(a.log_paths or []),
         )
 
     def _from_unit(self, u: SystemdUnit, proc: ProcessInfo | None = None) -> Backend:
@@ -207,7 +208,7 @@ class Correlator:
         svc = Service(
             id=sid, name=name, manager=b.manager, path=b.path, port=b.port, pid=b.pid,
             user=b.user, status=b.status, unit=b.unit, container_id=b.container_id,
-            cmdline=" ".join(b.cmdline) or None, **extra,
+            cmdline=" ".join(b.cmdline) or None, log_paths=list(b.log_paths), **extra,
         )
         svc.type = detect_type(self.host, b.path, proxy=True, cmdline=b.cmdline)
         return svc
@@ -274,7 +275,7 @@ class Correlator:
                 id=self._site_id(site), name=name, manager=Manager.PHP_FPM, path=site.root,
                 pid=pid, status=Status.RUNNING if up else Status.STOPPED,
                 unit=proc.systemd_unit if proc else None, upstream=target.raw,
-                routes=[f"{label}/"], **self._site_common(site),
+                routes=[f"{label}/"], log_paths=list(site.log_paths), **self._site_common(site),
             )
             svc.type = detect_type(self.host, site.root, fastcgi=True)
             self._add(svc)
@@ -283,7 +284,7 @@ class Correlator:
         svc = Service(
             id=self._site_id(site), name=name, manager=Manager.NGINX_STATIC, path=site.root,
             status=self._nginx_status(), upstream=site.redirect_to, unit="nginx.service",
-            **self._site_common(site),
+            log_paths=list(site.log_paths), **self._site_common(site),
         )
         svc.type = (
             detect_type(self.host, site.root, static_root=True) if site.root else ServiceType.UNKNOWN

@@ -121,16 +121,32 @@ class Host:
         except OSError:
             return None
 
+    def tail(self, path: str, lines: int, chunk: int = 64 * 1024) -> list[str] | None:
+        """Last ``lines`` lines of a file, reading backwards from the end."""
+        try:
+            with open(self.real(path), "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                end = pos = fh.tell()
+                data = b""
+                while pos > 0 and data.count(b"\n") <= lines and end - pos < MAX_READ_BYTES:
+                    step = min(chunk, pos)
+                    pos -= step
+                    fh.seek(pos)
+                    data = fh.read(step) + data
+        except OSError:
+            return None
+        return data.decode("utf-8", "replace").splitlines()[-lines:]
+
     # -- commands --------------------------------------------------------
 
-    def run(self, argv: list[str]) -> CommandResult | None:
+    def run(self, argv: list[str], timeout: float | None = None) -> CommandResult | None:
         """Run a command. Returns None when the binary is missing or times out."""
         try:
             proc = subprocess.run(
                 argv,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout,
+                timeout=timeout or self.timeout,
                 check=False,
                 stdin=subprocess.DEVNULL,
             )
@@ -148,18 +164,21 @@ class Host:
 
     # -- docker ----------------------------------------------------------
 
-    def docker_get(self, api_path: str) -> Any:
-        """GET a Docker Engine API path over the unix socket. Raises on failure."""
+    def docker_request(self, method: str, api_path: str) -> bytes:
+        """Call the Docker Engine API over the unix socket. Raises on failure."""
         conn = _UnixHTTPConnection(str(self.real(DOCKER_SOCKET)), self.timeout)
         try:
-            conn.request("GET", api_path)
+            conn.request(method, api_path)
             resp = conn.getresponse()
             body = resp.read()
-            if resp.status != 200:
-                raise OSError(f"docker API {api_path} returned HTTP {resp.status}")
-            return json.loads(body)
+            if resp.status not in (200, 204, 304):  # 304: already started/stopped
+                raise OSError(f"docker API {method} {api_path} returned HTTP {resp.status}")
+            return body
         finally:
             conn.close()
+
+    def docker_get(self, api_path: str) -> Any:
+        return json.loads(self.docker_request("GET", api_path))
 
 
 class FixtureHost(Host):
@@ -196,7 +215,7 @@ class FixtureHost(Host):
             return real.read_text(encoding="utf-8").strip()
         return None
 
-    def run(self, argv: list[str]) -> CommandResult | None:
+    def run(self, argv: list[str], timeout: float | None = None) -> CommandResult | None:
         self.executed.append(list(argv))
         joined = " ".join(argv)
         for pattern, spec in self._commands.items():
@@ -214,9 +233,12 @@ class FixtureHost(Host):
     def euid(self) -> int:
         return 0
 
-    def docker_get(self, api_path: str) -> Any:
+    def docker_request(self, method: str, api_path: str) -> bytes:
         if not self.exists(DOCKER_SOCKET):
             raise FileNotFoundError(DOCKER_SOCKET)
+        if method != "GET":
+            self.executed.append(["docker-api", method, api_path])
+            return b""
         if api_path not in self._docker:
             raise OSError(f"docker API {api_path} not in fixture")
-        return json.loads((self.fixture_dir / self._docker[api_path]).read_text(encoding="utf-8"))
+        return (self.fixture_dir / self._docker[api_path]).read_bytes()

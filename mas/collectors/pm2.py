@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 
 from mas.collectors import ScanContext
 from mas.collectors.processes import UserEntry
+from mas.host import Host
 
 PM2_STATUS = {"online": "running", "launching": "running", "stopped": "stopped",
               "stopping": "stopped", "errored": "errored", "one-launch-status": "stopped"}
@@ -30,13 +31,30 @@ class Pm2App:
     cwd: str | None = None
     script: str | None = None
     port: int | None = None
+    pm2_home: str | None = None
+    log_paths: list[str] | None = None
 
 
-def _find_pm2(ctx: ScanContext, home: str) -> str | None:
+def find_pm2(host: Host, home: str) -> str | None:
     candidates = ["/usr/local/bin/pm2", "/usr/bin/pm2"]
-    candidates += ctx.host.glob(f"{home}/.nvm/versions/node/*/bin/pm2")[::-1]
+    candidates += host.glob(f"{home}/.nvm/versions/node/*/bin/pm2")[::-1]
     candidates += [f"{home}/.npm-global/bin/pm2", f"{home}/.local/bin/pm2"]
-    return next((c for c in candidates if ctx.host.exists(c)), None)
+    return next((c for c in candidates if host.exists(c)), None)
+
+
+def pm2_command(host: Host, user: UserEntry, args: list[str]) -> list[str] | None:
+    """argv running ``pm2 <args>`` as ``user`` (None if pm2 or privileges are missing)."""
+    binary = find_pm2(host, user.home)
+    if binary is None:
+        return None
+    bindir = str(PurePosixPath(binary).parent)
+    cmd = ["env", f"PM2_HOME={user.home.rstrip('/')}/.pm2",
+           f"PATH={bindir}:/usr/local/bin:/usr/bin:/bin", binary, *args]
+    if host.euid == user.uid:
+        return cmd
+    if host.euid == 0:
+        return ["runuser", "-u", user.name, "--", *cmd]
+    return None
 
 
 def _daemon_alive(ctx: ScanContext, pm2_home: str) -> bool:
@@ -67,6 +85,9 @@ def parse_jlist(output: str, user: UserEntry) -> list[Pm2App]:
                 cwd=env.get("pm_cwd"),
                 script=env.get("pm_exec_path"),
                 port=int(port) if str(port).isdigit() else None,
+                pm2_home=f"{user.home.rstrip('/')}/.pm2",
+                log_paths=[p for p in (env.get("pm_out_log_path"), env.get("pm_err_log_path"))
+                           if isinstance(p, str) and p.startswith("/")],
             )
         )
     return apps
@@ -83,18 +104,11 @@ def collect(ctx: ScanContext, users: dict[int, UserEntry]) -> list[Pm2App]:
         if not _daemon_alive(ctx, pm2_home):
             ctx.warn(f"pm2: daemon not running for user {user.name}, skipped")
             continue
-        binary = _find_pm2(ctx, user.home)
-        if binary is None:
+        if find_pm2(ctx.host, user.home) is None:
             ctx.warn(f"pm2: binary not found for user {user.name}")
             continue
-        bindir = str(PurePosixPath(binary).parent)
-        cmd = ["env", f"PM2_HOME={pm2_home}", f"PATH={bindir}:/usr/local/bin:/usr/bin:/bin",
-               binary, "jlist"]
-        if ctx.host.euid == user.uid:
-            argv = cmd
-        elif ctx.host.euid == 0:
-            argv = ["runuser", "-u", user.name, "--", *cmd]
-        else:
+        argv = pm2_command(ctx.host, user, ["jlist"])
+        if argv is None:
             ctx.warn(f"pm2: cannot query user {user.name} without root")
             continue
         res = ctx.host.run(argv)

@@ -43,6 +43,17 @@ class Config:
     # only references system paths (colord, smartd, preload, ...).
     hide_os_daemons: bool = True
 
+    # [server]
+    port: int = 7070
+    cookie_secure: bool = True
+    session_hours: int = 12
+    scan_interval: int = 60
+    # [paths]
+    db_path: str = "/var/lib/mas/mas.db"
+    src_dir: str = "/opt/mas/src"
+    venv_dir: str = "/opt/mas/venv"
+    web_dir: str | None = None  # default: <src_dir>/web/out
+
     def unit_excluded(self, unit: str) -> bool:
         base = unit[: -len(".service")] if unit.endswith(".service") else unit
         return any(
@@ -74,4 +85,13 @@ def load_config(host: Host, path: str = CONFIG_PATH) -> Config:
         cfg.excluded_processes = [str(x) for x in scan["exclude_processes"]]
     if isinstance(scan.get("hide_os_daemons"), bool):
         cfg.hide_os_daemons = scan["hide_os_daemons"]
+
+    server = data.get("server", {})
+    for key, typ in (("port", int), ("cookie_secure", bool), ("session_hours", int), ("scan_interval", int)):
+        if isinstance(server.get(key), typ):
+            setattr(cfg, key, server[key])
+    paths = data.get("paths", {})
+    for key, attr in (("db", "db_path"), ("src", "src_dir"), ("venv", "venv_dir"), ("web", "web_dir")):
+        if isinstance(paths.get(key), str):
+            setattr(cfg, attr, paths[key])
     return cfg
