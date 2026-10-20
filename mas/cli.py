@@ -559,6 +559,137 @@ def rollback(ctx: typer.Context, app_id: Annotated[str, typer.Argument()],
         fail(f"rollback #{rid} failed")
 
 
+# -- DNS (OVH) ---------------------------------------------------------------------
+
+dns_app = typer.Typer(help="DNS provider (OVH) and this server's public IPs.", no_args_is_help=True)
+app.add_typer(dns_app, name="dns")
+
+
+@dns_app.command("connect")
+def dns_connect(
+    ctx: typer.Context,
+    endpoint: Annotated[str, typer.Option(help="ovh-eu, ovh-ca or ovh-us")] = "ovh-eu",
+) -> None:
+    """Connect an OVH account (application key, secret and consumer key)."""
+    import json
+
+    from mas.dns import save_ovh
+    from mas.ovh import ENDPOINTS, OvhClient, OvhCredentials, OvhError, token_url
+
+    env: Env = ctx.obj
+    if endpoint not in ENDPOINTS:
+        fail(f"endpoint must be one of {', '.join(ENDPOINTS)}")
+    console.print(f"Create a token here (rights are pre-filled):\n  {token_url(endpoint)}\n")
+    creds = OvhCredentials(endpoint, typer.prompt("Application key").strip(),
+                           typer.prompt("Application secret", hide_input=True).strip(),
+                           typer.prompt("Consumer key", hide_input=True).strip())
+    try:
+        client = OvhClient(creds)
+        me, zones = client.me(), client.zones()
+    except OvhError as exc:
+        fail(str(exc))
+        return
+    save_ovh(env.host, env.config, env.db, creds)
+    env.db.set_setting("ovh_account", json.dumps({"nichandle": me.get("nichandle"), "name": None}))
+    env.db.audit(actor(), "dns-connect", True, detail=f"OVH {me.get('nichandle')}")
+    console.print(f"[green]✓[/] connected as {me.get('nichandle')}: {', '.join(zones) or 'no DNS zone'}")
+
+
+@dns_app.command("status")
+def dns_status(ctx: typer.Context) -> None:
+    """Show the DNS provider and the IPs used for new records."""
+    from mas.dns import load_ovh_credentials, ovh_account, server_ips
+
+    env: Env = ctx.obj
+    creds = load_ovh_credentials(env.host, env.config, env.db)
+    account = ovh_account(env.db) or {}
+    ipv4, ipv6 = server_ips(env.db, env.config)
+    console.print(f"OVH: {account.get('nichandle') + ' (' + creds.endpoint + ')' if creds else '[dim]not connected[/]'}")
+    console.print(f"IPv4: {ipv4 or '[dim]not set (mas dns ip <address>)[/]'}")
+    console.print(f"IPv6: {ipv6 or '[dim]-[/]'}")
+
+
+@dns_app.command("ip")
+def dns_ip(ctx: typer.Context, ipv4: Annotated[str, typer.Argument(help="Public IPv4 of this server.")],
+           ipv6: Annotated[Optional[str], typer.Option(help="Public IPv6 (adds AAAA records).")] = None) -> None:
+    """Set the public IPs that new DNS records point to."""
+    from mas.dns import IPV4_KEY, IPV6_KEY
+    from mas.ovh import OvhError, validate_ip
+
+    env: Env = ctx.obj
+    try:
+        v4, v6 = validate_ip(ipv4, 4), validate_ip(ipv6, 6)
+    except OvhError as exc:
+        fail(str(exc))
+        return
+    env.db.set_setting(IPV4_KEY, v4)
+    env.db.set_setting(IPV6_KEY, v6)
+    console.print(f"[green]✓[/] new records will point to {v4}" + (f" and {v6}" if v6 else ""))
+
+
+@dns_app.command("zones")
+def dns_zones(ctx: typer.Context) -> None:
+    """List the domains of the OVH account."""
+    from mas.dns import ovh_client
+    from mas.ovh import OvhError
+
+    env: Env = ctx.obj
+    client = ovh_client(env.host, env.config, env.db) or fail("OVH not connected: mas dns connect")
+    try:
+        for zone in client.zones():
+            console.print(zone)
+    except OvhError as exc:
+        fail(str(exc))
+
+
+@app.command("domain")
+def set_domain(
+    ctx: typer.Context,
+    app_id: Annotated[str, typer.Argument(help="App id (see `mas apps`).")],
+    domain: Annotated[str, typer.Argument(help="e.g. test.example.com")],
+    no_dns: Annotated[bool, typer.Option("--no-dns", help="Do not create the DNS record.")] = False,
+    overwrite: Annotated[bool, typer.Option(help="Replace a record pointing elsewhere.")] = False,
+) -> None:
+    """Give an app a domain: DNS record at OVH, then nginx + HTTPS (redeploys)."""
+    from mas.deploy import DOMAIN_RE, domain_conflict, vhost_paths
+    from mas.dns import ovh_client, server_ips
+    from mas.ovh import OvhError, point_domain
+
+    env: Env = ctx.obj
+    domain = domain.strip().lower()
+    target = env.db.get_app(app_id)
+    if target is None:
+        fail(f"unknown app {app_id}")
+    if target["mode"] != "managed":
+        fail("an adopted service keeps its own nginx vhost and domain")
+    if not DOMAIN_RE.fullmatch(domain):
+        fail(f"invalid domain: {domain}")
+    conflict = domain_conflict(env.host, domain, set(vhost_paths(app_id)))
+    if conflict:
+        fail(f"{domain} is already served by {conflict}")
+    client = None if no_dns else ovh_client(env.host, env.config, env.db)
+    if client is not None:
+        ipv4, ipv6 = server_ips(env.db, env.config)
+        if not ipv4:
+            fail("set the server IP first: mas dns ip <address>")
+        try:
+            zones = [z for z in client.zones() if domain == z or domain.endswith("." + z)]
+            if not zones:
+                fail(f"no OVH zone for {domain} (use --no-dns if the DNS is managed elsewhere)")
+            zone = max(zones, key=len)
+            result = point_domain(client, zone, domain[: -len(zone)].rstrip("."), ipv4, ipv6, overwrite)
+        except OvhError as exc:
+            fail(f"{exc}" + ("" if overwrite else " (use --overwrite to replace it)"))
+            return
+        for change in result["changes"]:
+            console.print(f"DNS: {change}")
+    env.db.update_app(app_id, domain=domain)
+    env.db.audit(actor(), "app-domain", True, detail=f"{app_id} → {domain}")
+    rid = env.db.create_release(app_id, "manual", actor())
+    if not _deployer(env).run(rid, echo=lambda line: console.print(line, markup=False, highlight=False)):
+        fail(f"release #{rid} failed")
+
+
 # -- server ----------------------------------------------------------------------
 
 
