@@ -549,6 +549,12 @@ class Deployer:
             certbot = ["systemd-run", "--quiet", "--wait", "--pipe", "--collect", "--unit",
                        f"mas-certbot-{int(time.time())}", *certbot]
         rc = self._cmd(rlog, certbot, timeout=300, check=False)
+        if rc != 0 and self.config.dns_wait_seconds > 0:
+            # A just-created record is often not visible yet from every Let's Encrypt
+            # vantage point ("Timeout during connect"): one retry usually succeeds.
+            rlog.line("retrying in 20 s (new DNS records take a moment to be visible everywhere)")
+            time.sleep(20)
+            rc = self._cmd(rlog, certbot, timeout=300, check=False)
         if rc != 0:
             rlog.line(f"warning: no certificate for {domain} (DNS must point to this server); "
                       "the site is served over HTTP, the next deploy will retry")
