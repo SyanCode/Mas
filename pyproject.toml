@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mas"
-version = "0.1.0"
+version = "0.1.0b1"
 description = "Self-hosted server manager that discovers and adopts what is already running on your Debian + nginx box."
 readme = "README.md"
 license = { text = "MIT" }

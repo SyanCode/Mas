@@ -1,16 +1,33 @@
+<div align="center">
+
 # Mas
+
+**Your server, mapped and deployed.**
+Self-hosted dashboard that adopts what already runs on your Debian + nginx box, then deploys from GitHub on every push.
+
+![status: beta](https://img.shields.io/badge/status-beta-8b5cf6)
+![license: MIT](https://img.shields.io/badge/license-MIT-0ea5e9)
+![python 3.11+](https://img.shields.io/badge/python-3.11%2B-22c55e)
+![Debian + nginx](https://img.shields.io/badge/Debian%20%2B%20nginx-supported-f59e0b)
+
+![Mas dashboard: an app with its production deployment and live build log](docs/app.jpg)
+
+</div>
 
 **Mas maps the server you already have.** Point it at a Debian + nginx box that has been
 running for years, with a mix of PHP sites, Node apps under PM2, a few systemd units and a
 Docker container or two, and it tells you what is running, where, for which domain, under
 which user and from which git repository. Nothing gets reinstalled or broken.
 
-You then manage those services from the `mas` CLI or from a small web dashboard protected
-by a password and two-factor authentication, keep an eye on certificates and nginx, and
-deploy projects from GitHub on every push, Vercel-style, on the same machine.
+You then manage those services from the `mas` CLI or from a web dashboard protected by a
+password and two-factor authentication, keep an eye on certificates and nginx, link domains
+from your registrar (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun) and deploy
+projects from GitHub on every push, Vercel-style, on the same machine.
 
-> Status: **phase 3**: detection, CLI, dashboard with 2FA, actions and logs, health checks,
-> GitHub deployments with releases, rollback and adoption of existing services.
+> [!WARNING]
+> **Beta.** Mas runs as root and edits nginx, systemd and DNS. Every change is backed up and
+> validated (`nginx -t`) and discovery is read-only, but try it on a server you can restore
+> first, and read the [security model](#security-model). Feedback and issues are very welcome.
 
 ## Why another one?
 
@@ -29,18 +46,21 @@ Mas starts from the other end:
 | Detection               | n/a                          | Deterministic parsing, no AI          |
 
 Every detection is deterministic: config file parsing, `/proc`, `ss`, `systemctl`, `pm2 jlist`
-and the Docker socket. No AI model and no external API are involved.
+and the Docker socket. No AI model is involved anywhere, and discovery needs no external API
+(only the optional GitHub and DNS-provider integrations talk to their own APIs).
 
 ## Installation
 
 On the server (Debian 12+, as root):
 
 ```console
-$ mkdir -p /tmp/mas-src && tar -xzf mas.tar.gz -C /tmp/mas-src
-                                        # or: git clone https://github.com/<you>/mas /tmp/mas-src
-$ cd /tmp/mas-src
-$ sudo ./deploy/install.sh
+$ git clone https://github.com/SyanCode/Mas.git /opt/mas-install
+$ cd /opt/mas-install
+$ sudo ./deploy/install.sh --domain mas.example.com --email you@example.com
 ```
+
+Without `--domain` the dashboard stays private (SSH tunnel, see below). Updates:
+`sudo mas self-update` (git pull, reinstall, rebuild, restart).
 
 The installer is idempotent and asks for two things:
 
@@ -94,8 +114,9 @@ $ sudo mas user passwd [name]
 
 ## Dashboard
 
-![Services list placeholder](docs/screenshot-services.png)
-![Service page placeholder](docs/screenshot-service.png)
+![Overview: every service detected on the server](docs/overview.jpg)
+
+Press <kbd>⌘K</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd> anywhere to jump to a service, an app or a page.
 
 - Services list: status dot, domains (links), type, manager, port, SSL expiry (orange under
   14 days), GitHub repository; filters (with/without domain, issues) and search.
@@ -314,6 +335,15 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   `NoNewPrivileges=yes`, `ProtectSystem=full`, `PrivateTmp=yes`, `ProtectKernel*`, and
   `ReadWritePaths=` limited to `/var/lib/mas /srv/mas /etc/nginx /etc/mas /etc/systemd/system
   /etc/letsencrypt`.
+
+## Beta: known limitations
+
+- Debian (and derivatives) with nginx only; Apache/Caddy servers are not detected.
+- One admin account; no 2FA recovery codes yet (`sudo mas user 2fa-reset` on the server).
+- No pull-request preview deployments yet; one production branch per app.
+- DNS providers other than OVH and Cloudflare are implemented from their API documentation and
+  not yet battle-tested: please report issues.
+- The dashboard CSP keeps `'unsafe-inline'` (required by the static Next.js export).
 
 ## Development
 
