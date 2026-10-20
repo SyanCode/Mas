@@ -16,8 +16,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, auth
+from mas import __version__, api_deploy, auth
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
+from mas.deploy import Deployer
+from mas.github import GitHubApp
 from mas.config import Config, load_config
 from mas.db import Database
 from mas.host import Host
@@ -36,7 +38,8 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "same-origin",
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
+        "form-action 'self' https://github.com"  # GitHub App manifest form
     ),
 }
 
@@ -119,8 +122,27 @@ def create_app(
                 log.exception("background scan failed")
             await asyncio.sleep(max(10, config.scan_interval))
 
+    github_cache: dict = {}
+
+    def github_client() -> GitHubApp | None:
+        if not config.github_app_id:
+            return None
+        pem = host.read_bytes(config.github_private_key_path)
+        if not pem:
+            return None
+        key = (config.github_app_id, hash(pem))
+        if github_cache.get("key") != key:
+            github_cache.update(key=key, client=GitHubApp(config.github_app_id, pem))
+        return github_cache["client"]
+
+    deployer = Deployer(host, config, db, github_client, find_service=scanner.get,
+                        on_change=lambda: scanner.refresh())
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        with db.tx() as c:  # a restart interrupts running deployments
+            c.execute("UPDATE releases SET status = 'failed', error = 'interrupted (Mas restarted)' "
+                      "WHERE status IN ('queued', 'building')")
         task = asyncio.create_task(scan_loop()) if background else None
         yield
         if task:
@@ -336,6 +358,10 @@ def create_app(
         db.update_user(user["id"], totp_secret=None, totp_pending=None, totp_last_step=0)
         db.audit(s.username, "2fa-disable", True)
         return {"ok": True}
+
+    app.state.deployer = deployer
+    api_deploy.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
+                        deployer=deployer, github_client=github_client, reset_github=github_cache.clear)
 
     # -- dashboard ---------------------------------------------------------
 
