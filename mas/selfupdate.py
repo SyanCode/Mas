@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from mas.config import Config
@@ -97,12 +101,100 @@ def refresh_dashboard_vhost(src: Path, log=print) -> None:
     log(f"dashboard vhost updated (previous: {backup})")
 
 
+CHECK_TTL = 6 * 3600
+CHECK_TIMEOUT = 2
+
+
+def local_head(src: Path) -> tuple[str, str] | None:
+    """(branch, commit) of the source checkout, read from .git without running git
+    (git refuses a root-owned repository to other users)."""
+    git = src / ".git"
+    try:
+        head = (git / "HEAD").read_text(encoding="utf-8").strip()
+        if not head.startswith("ref: refs/heads/"):
+            return None  # detached
+        ref = head[len("ref: "):]
+        loose = git / ref
+        if loose.is_file():
+            return ref[len("refs/heads/"):], loose.read_text(encoding="utf-8").strip()
+        for line in (git / "packed-refs").read_text(encoding="utf-8").splitlines():
+            sha, _, name = line.partition(" ")
+            if name == ref:
+                return ref[len("refs/heads/"):], sha
+    except OSError:
+        return None
+    return None
+
+
+def _commits_behind(sha: str, branch: str) -> int:
+    slug = REPOSITORY.removeprefix("https://github.com/").removesuffix(".git")
+    req = urllib.request.Request(f"https://api.github.com/repos/{slug}/compare/{sha}...{branch}",
+                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "mas-update-check"})
+    try:
+        with urllib.request.urlopen(req, timeout=CHECK_TIMEOUT) as res:
+            data = json.load(res)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:  # commit unknown to GitHub (history rewritten): an update is needed
+            return 1
+        raise
+    return int(data.get("ahead_by", 0)) if data.get("status") in ("ahead", "diverged") else 0
+
+
+def update_available(config: Config, now: float | None = None, fetch=_commits_behind) -> int:
+    """Commits the installed Mas is behind the official repository (0 if unknown).
+
+    Cached for a few hours next to the database; skipped when the cache cannot be written
+    (not root), so a plain ``mas`` never waits on the network more than once in a while."""
+    head = local_head(Path(config.src_dir))
+    if head is None:
+        return 0
+    branch, sha = head
+    cache = Path(config.db_path).parent / "update-check.json"
+    now = now or time.time()
+    try:
+        cached = json.loads(cache.read_text(encoding="utf-8"))
+        if cached.get("sha") == sha and now - cached.get("checked_at", 0) < CHECK_TTL:
+            return int(cached.get("behind", 0))
+    except (OSError, ValueError):
+        pass
+    if not os.access(cache.parent, os.W_OK):
+        return 0
+    try:
+        behind = fetch(sha, branch)
+    except (OSError, ValueError):
+        behind = 0  # offline or rate-limited: retried after the TTL
+    try:
+        cache.write_text(json.dumps({"sha": sha, "checked_at": now, "behind": behind}), encoding="utf-8")
+    except OSError:
+        pass
+    return behind
+
+
+def _git_output(src: Path, *args: str) -> str:
+    proc = subprocess.run(["git", "-C", str(src), *args], capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise UpdateError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+    return proc.stdout.strip()
+
+
+def update_checkout(src: Path, log=print) -> None:
+    """Move the checkout to the published branch, even after a force-push; local edits stop it."""
+    branch = _git_output(src, "rev-parse", "--abbrev-ref", "HEAD")
+    if branch == "HEAD":
+        raise UpdateError(f"{src} is on a detached HEAD: check out a branch first")
+    changed = _git_output(src, "status", "--porcelain", "--untracked-files=no")
+    if changed:
+        raise UpdateError(f"{src} has local changes, nothing was updated:\n{changed}")
+    _run(["git", "-C", str(src), "fetch", "--prune", "origin"], log=log)
+    _run(["git", "-C", str(src), "reset", "--hard", f"origin/{branch}"], log=log)
+
+
 def self_update(config: Config, tarball: Path | None = None, restart: bool = True, log=print) -> None:
     src = Path(config.src_dir)
     if tarball is not None:
         replace_source(config, tarball, log=log)
     elif (src / ".git").exists():
-        _run(["git", "-C", str(src), "pull", "--ff-only"], log=log)
+        update_checkout(src, log=log)
     else:
         # Installed from an archive: switch to a git checkout of the official repository.
         log(f"{src} is not a git checkout, cloning {REPOSITORY}")

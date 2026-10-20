@@ -26,8 +26,7 @@ from mas.state import run_scan as run_scan_with_meta
 
 SSL_WARN_DAYS = 14
 
-app = typer.Typer(help="Mas: discover and manage what already runs on this server.",
-                  no_args_is_help=True, add_completion=False)
+app = typer.Typer(help="Mas: discover and manage what already runs on this server.", add_completion=False)
 user_app = typer.Typer(help="Manage the admin account and its two-factor authentication.",
                        no_args_is_help=True)
 nginx_app = typer.Typer(help="nginx helpers.", no_args_is_help=True)
@@ -74,7 +73,22 @@ def actor() -> str:
     return f"cli:{os.environ.get('SUDO_USER') or getpass.getuser()}"
 
 
-@app.callback()
+NO_UPDATE_CHECK = {"self-update", "serve"}
+
+
+def notify_update(config: Config) -> None:
+    """One line on stderr when the installed Mas is behind the official repository."""
+    from mas.selfupdate import update_available
+
+    if os.environ.get("MAS_NO_UPDATE_CHECK") or not err_console.is_terminal:
+        return
+    behind = update_available(config)
+    if behind:
+        err_console.print(f"[yellow]A new version of Mas is available[/] ({behind} commit{'s' if behind > 1 else ''} "
+                          "behind). Update with: [bold]sudo mas self-update[/]\n")
+
+
+@app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     version: Annotated[bool, typer.Option("--version", help="Show the version and exit.")] = False,
@@ -85,6 +99,11 @@ def main(
         console.print(f"mas {__version__}")
         raise typer.Exit()
     ctx.obj = Env(fixture, db)
+    if fixture is None and ctx.invoked_subcommand not in NO_UPDATE_CHECK:
+        notify_update(ctx.obj.config)
+    if ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
+        raise typer.Exit()
 
 
 # -- scan ----------------------------------------------------------------------

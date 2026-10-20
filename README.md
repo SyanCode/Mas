@@ -79,12 +79,18 @@ What gets installed: `/opt/mas/src` (source), `/opt/mas/venv`, `/etc/mas/config.
 ### Updating
 
 ```console
-$ sudo mas self-update                       # git pull (if installed from a clone)
+$ sudo mas self-update                       # follow the published branch (git checkout)
 $ sudo mas self-update --from mas.tar.gz     # from a `git archive` tarball
 ```
 
-It replaces the source (the previous one is kept as `/opt/mas/src.mas-bak-<date>`), reinstalls,
-rebuilds the dashboard and restarts `mas.service`.
+It updates the source, reinstalls, rebuilds the dashboard and restarts `mas.service`. A git
+checkout is moved to `origin/<branch>` even if that branch was force-pushed; it refuses to touch a
+checkout with local changes. An archive install keeps the previous source as
+`/opt/mas/src.mas-bak-<date>`.
+
+When a newer version is published, every `sudo mas …` command starts with a one-line reminder to
+run `sudo mas self-update` (checked against GitHub at most every 6 hours, 2 s timeout, silent when
+offline; `MAS_NO_UPDATE_CHECK=1` turns it off).
 
 ## CLI
 
