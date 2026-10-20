@@ -13,6 +13,7 @@ from pathlib import Path
 from mas.config import Config
 
 KEEP_BACKUPS = 2
+REPOSITORY = "https://github.com/SyanCode/Mas.git"
 
 
 class UpdateError(Exception):
@@ -103,7 +104,16 @@ def self_update(config: Config, tarball: Path | None = None, restart: bool = Tru
     elif (src / ".git").exists():
         _run(["git", "-C", str(src), "pull", "--ff-only"], log=log)
     else:
-        raise UpdateError(f"{src} is not a git checkout: use `mas self-update --from mas.tar.gz`")
+        # Installed from an archive: switch to a git checkout of the official repository.
+        log(f"{src} is not a git checkout, cloning {REPOSITORY}")
+        with tempfile.TemporaryDirectory(dir=src.parent) as tmp:
+            clone = Path(tmp) / "src"
+            _run(["git", "clone", "--quiet", REPOSITORY, str(clone)], log=log)
+            if src.exists():
+                backup = src.with_name(f"{src.name}.mas-bak-{time.strftime('%Y%m%d%H%M%S')}")
+                src.rename(backup)
+                log(f"previous source kept in {backup}")
+            shutil.move(str(clone), str(src))
 
     pip = Path(config.venv_dir) / "bin" / "pip"
     _run([str(pip), "install", "--quiet", "--upgrade", str(src)], log=log)
