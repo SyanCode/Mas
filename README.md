@@ -170,27 +170,42 @@ Every push to the branch then deploys automatically:
 
 The last 5 releases are kept; **Rollback** puts any of them back in one click (`mas rollback <app>`).
 
-### Domains (OVH)
+### Domains (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun)
 
 Mas can create the DNS records itself. In **Settings → Domains**:
 
 1. Set this server's **public IP** (Mas suggests the address your existing domains point to).
-2. Click **Create an API token** (OVH Europe, Canada or US): the OVH page opens with the needed
-   rights pre-filled (`GET /me`, `GET/POST/PUT /domain/zone/*`, never `DELETE`). Paste the
-   application key, application secret and consumer key; Mas checks them with OVH and stores
-   them encrypted.
+2. Connect one or more registrars. Each card links to the provider's token page and lists the
+   exact rights to give (read zones, create/update records; Mas never deletes a record). Keys are
+   verified with the provider, then stored encrypted.
 
-Then, on an app (or in the *New app* form), pick one of your domains and type a sub-domain
-(the app name by default). Mas checks the name live (free, already pointing here, pointing
-elsewhere, CNAME, already used by a site), creates the `A` (and `AAAA`) record, refreshes the
-zone, waits until the name resolves, then deploys with the nginx vhost and the HTTPS
-certificate. A record pointing elsewhere is only replaced if you tick the confirmation; a CNAME
-is never touched.
+| Provider | Credentials |
+|----------|-------------|
+| OVHcloud | application key + secret + consumer key (token page with pre-filled rights) |
+| Cloudflare | API token, template “Edit zone DNS” (records are created DNS-only, grey cloud) |
+| Gandi | Personal access token (LiveDNS) |
+| Hetzner DNS | API token |
+| DigitalOcean | API token with the `domain` scope |
+| Porkbun | API key + secret (enable API access on each domain) |
 
-CLI: `mas dns connect`, `mas dns ip <ipv4> [--ipv6 …]`, `mas dns zones`,
+Namecheap is not supported: its API needs a whitelisted IP and rewrites the whole zone on every change.
+
+Then, on an app (or in *New app*), pick one of your domains and a sub-domain (the app name by
+default). Mas checks the name live (free, already pointing here, pointing elsewhere, CNAME,
+already used), creates the `A` (and `AAAA`) record, waits until it resolves, then deploys with the
+nginx site and the HTTPS certificate. A record pointing elsewhere is only replaced after an explicit
+confirmation; a CNAME is never touched.
+
+CLI: `mas dns connect <provider>`, `mas dns ip <ipv4> [--ipv6 …]`, `mas dns zones`,
 `mas domain <app> <sub.example.com> [--overwrite | --no-dns]`.
 
-Without OVH, type the domain by hand and create the `A` record at your DNS provider.
+### While a site deploys
+
+On a first deployment the domain answers immediately with a **“Deploying…” page** (nginx placeholder
+vhost) and gets its certificate **before** the build, so visitors never land on another site's
+vhost (the `421 Misdirected Request` you would otherwise get over HTTP/2). The real site replaces
+it once the health check passes; if the first deployment fails, a “not available yet” page stays.
+Proxied apps also show the page during the second or two of a restart instead of a 502.
 
 ### Adopting an existing service
 
@@ -275,6 +290,13 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   get their secrets from a `0600` environment file; secrets are encrypted at rest in the database.
   Build commands you configure run as that unprivileged user. Generated files are backed up
   before being replaced and nginx is only reloaded after a successful `nginx -t`.
+- **Hardening from the security review**: build/start commands are single-line (no systemd
+  directive injection), the served folder cannot leave the release (`..` refused), GitHub paths
+  and refs are validated and URL-encoded, each webhook delivery is accepted once, replacing the 2FA
+  device requires a current code, password checks inside a session are rate-limited, the session
+  cookie is `__Host-` prefixed, `Permissions-Policy` and `Cross-Origin-Opener-Policy` headers are
+  set, and app units run with no capabilities (`CapabilityBoundingSet=`), `PrivateDevices`,
+  `ProtectKernel*`, `RestrictSUIDSGID`.
 - **Actions**: strict allow-list `(manager, action) → argv`, built from identifiers found by
   the scan (re-validated with regexes), executed without a shell. Stop and restart ask for
   confirmation. Every action, with its command and output, is written to the audit log.
