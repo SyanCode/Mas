@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Shell } from "@/components/Shell";
-import { Badge, Button, ConfirmDialog, ErrorText, Input, StatusDot } from "@/components/ui";
-import { api, ApiError, daysUntil, githubUrl, timeAgo, type Service } from "@/lib/api";
+import {
+  Badge, Button, ConfirmDialog, EmptyState, ErrorText, Input, Notice, PageHeader, Spinner, Stat, StatusDot,
+} from "@/components/ui";
+import { api, ApiError, daysUntil, githubUrl, timeAgo, type App, type Service } from "@/lib/api";
 
 interface ServicesResponse {
   scanned_at: string;
@@ -14,59 +16,54 @@ interface ServicesResponse {
 
 type Filter = "all" | "domains" | "nodomain" | "issues";
 
+const TYPE_TONE: Record<string, "sky" | "violet" | "emerald" | "amber" | "zinc"> = {
+  nextjs: "zinc", node: "emerald", python: "sky", php: "violet", static: "amber", unknown: "zinc",
+};
+
 function hasIssue(s: Service) {
   return s.status === "stopped" || s.status === "errored" || (s.ssl_expires !== null && daysUntil(s.ssl_expires) < 14);
 }
 
-function SslBadge({ iso }: { iso: string | null }) {
-  if (!iso) return null;
-  const days = daysUntil(iso);
-  if (days < 0) return <Badge tone="red">SSL expired</Badge>;
-  if (days < 14) return <Badge tone="amber">SSL {days}d</Badge>;
-  return <span className="text-xs text-zinc-500">SSL {days}d</span>;
-}
-
-function ServiceRow({ s }: { s: Service }) {
+function ServiceCard({ s }: { s: Service }) {
   const gh = githubUrl(s.git_remote);
+  const ssl = s.ssl_expires ? daysUntil(s.ssl_expires) : null;
   return (
-    <li className="group relative flex flex-col gap-2 px-4 py-3 hover:bg-zinc-50 sm:flex-row sm:items-center sm:gap-4 dark:hover:bg-zinc-800/40">
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <StatusDot status={s.status} />
+    <Link
+      href={`/service/?id=${encodeURIComponent(s.id)}`}
+      className="glass group relative flex flex-col gap-4 rounded-2xl p-5 transition duration-300 hover:-translate-y-0.5 hover:border-indigo-400/40 hover:shadow-[0_20px_60px_-25px_rgba(99,102,241,0.6)]"
+    >
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link href={`/service/?id=${encodeURIComponent(s.id)}`} className="font-medium after:absolute after:inset-0 hover:underline">
-            {s.display_name || s.name}
-          </Link>
-          <div className="flex flex-wrap gap-x-3 text-xs text-zinc-500">
-            {s.domains.length === 0 && <span className="italic">no domain</span>}
-            {s.domains.slice(0, 3).map((d) => (
-              <a key={d} href={`https://${d}`} target="_blank" rel="noreferrer" className="relative z-[1] hover:text-zinc-900 hover:underline dark:hover:text-zinc-100">
-                {d} ↗
-              </a>
-            ))}
-            {s.domains.length > 3 && <span>+{s.domains.length - 3}</span>}
+          <div className="flex items-center gap-2.5">
+            <StatusDot status={s.status} />
+            <h3 className="truncate font-semibold tracking-tight">{s.display_name || s.name}</h3>
           </div>
+          <p className="mt-1 truncate pl-5 text-xs text-zinc-500">
+            {s.domains.length ? s.domains.join(" · ") : <span className="italic">no domain</span>}
+          </p>
         </div>
+        <span className="text-zinc-400 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100">→</span>
       </div>
-      <div className="flex flex-wrap items-center gap-2 pl-5.5 sm:pl-0">
-        <Badge tone={s.type === "unknown" ? "zinc" : "sky"}>
-          {s.type}
-          {s.type_source === "manual" ? "*" : ""}
-        </Badge>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge tone={TYPE_TONE[s.type] ?? "zinc"}>{s.type}{s.type_source === "manual" ? "*" : ""}</Badge>
         <Badge>{s.manager}</Badge>
-        {s.port && <span className="mono text-xs text-zinc-500">:{s.port}</span>}
-        <SslBadge iso={s.ssl_expires} />
-        {gh && (
-          <a href={gh} target="_blank" rel="noreferrer" className="relative z-[1] text-xs text-zinc-500 hover:underline">
-            {gh.replace("https://github.com/", "")}
-          </a>
+        {s.port && <Badge className="mono">:{s.port}</Badge>}
+      </div>
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-zinc-200/70 pt-3 text-xs text-zinc-500 dark:border-white/[0.06]">
+        <span className="truncate">{gh ? gh.replace("https://github.com/", "") : s.path ?? "—"}</span>
+        {ssl !== null && (
+          <span className={ssl < 0 ? "text-rose-500" : ssl < 14 ? "text-amber-500" : ""}>
+            {ssl < 0 ? "SSL expired" : `SSL ${ssl}d`}
+          </span>
         )}
       </div>
-    </li>
+    </Link>
   );
 }
 
-export default function ServicesPage() {
+function Overview() {
   const [data, setData] = useState<ServicesResponse | null>(null);
+  const [apps, setApps] = useState<App[]>([]);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -76,6 +73,7 @@ export default function ServicesPage() {
 
   const load = useCallback(() => {
     api<ServicesResponse>("/services").then(setData).catch((e: ApiError) => setError(e.detail));
+    api<App[]>("/apps").then(setApps).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -106,73 +104,83 @@ export default function ServicesPage() {
     }
   }
 
+  const all = data?.services ?? [];
   const services = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (data?.services ?? []).filter((s) => {
+    return all.filter((s) => {
       if (filter === "domains" && s.domains.length === 0) return false;
       if (filter === "nodomain" && s.domains.length > 0) return false;
       if (filter === "issues" && !hasIssue(s)) return false;
       if (!q) return true;
-      return [s.name, s.display_name, s.id, s.type, s.manager, s.path, ...s.domains]
-        .some((v) => v && v.toLowerCase().includes(q));
+      return [s.name, s.display_name, s.id, s.type, s.manager, s.path, ...s.domains].some((v) => v && v.toLowerCase().includes(q));
     });
-  }, [data, query, filter]);
+  }, [all, query, filter]);
 
-  const counts = useMemo(() => {
-    const all = data?.services ?? [];
-    return {
-      all: all.length,
-      domains: all.filter((s) => s.domains.length > 0).length,
-      nodomain: all.filter((s) => s.domains.length === 0).length,
-      issues: all.filter(hasIssue).length,
-    };
-  }, [data]);
+  const running = all.filter((s) => s.status === "running").length;
+  const issues = all.filter(hasIssue).length;
+  const expiring = all.filter((s) => s.ssl_expires && daysUntil(s.ssl_expires) < 14).length;
+  const live = apps.filter((a) => a.current).length;
+  const counts: Record<Filter, number> = {
+    all: all.length,
+    domains: all.filter((s) => s.domains.length > 0).length,
+    nodomain: all.filter((s) => s.domains.length === 0).length,
+    issues,
+  };
 
   return (
-    <Shell>
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Services</h1>
-          <p className="text-sm text-zinc-500">{data ? `Scanned ${timeAgo(data.scanned_at)}` : "Scanning…"}</p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => setConfirmNginx(true)}>Reload nginx</Button>
-          <Button variant="primary" onClick={rescan} disabled={scanning}>
-            {scanning ? "Scanning…" : "Rescan"}
-          </Button>
-        </div>
+    <>
+      <PageHeader
+        eyebrow="Server"
+        title={<>Everything running <span className="text-gradient">on this machine</span></>}
+        subtitle={data ? `Scanned ${timeAgo(data.scanned_at)} · nginx, systemd, PM2, Docker, PHP-FPM` : "Scanning…"}
+        actions={
+          <>
+            <Button onClick={() => setConfirmNginx(true)}>Reload nginx</Button>
+            <Button variant="primary" onClick={rescan} disabled={scanning}>{scanning ? <Spinner /> : null}Rescan</Button>
+          </>
+        }
+      />
+
+      <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Services up" value={<>{running}<span className="text-lg text-zinc-500">/{all.length}</span></>} tone="emerald" />
+        <Stat label="Apps live" value={live} hint={<Link href="/apps/" className="hover:underline">{apps.length} deployed from GitHub →</Link>} tone="violet" />
+        <Stat label="Need attention" value={issues} tone={issues ? "red" : "zinc"} hint="stopped or certificate < 14 days" />
+        <Stat label="Certificates expiring" value={expiring} tone={expiring ? "amber" : "sky"} hint={<Link href="/health/" className="hover:underline">full health check →</Link>} />
       </div>
 
-      {notice && <p className="mb-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</p>}
-      {error && <div className="mb-3"><ErrorText><span className="whitespace-pre-wrap">{error}</span></ErrorText></div>}
+      <div className="mb-4 space-y-3">
+        <Notice>{notice}</Notice>
+        <ErrorText>{error ? <span className="whitespace-pre-wrap">{error}</span> : null}</ErrorText>
+      </div>
 
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="flex gap-1 text-sm">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="glass inline-flex rounded-xl p-1">
           {(["all", "domains", "nodomain", "issues"] as Filter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`rounded-md px-2.5 py-1 ${filter === f ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
+              className={`rounded-lg px-3 py-1.5 text-xs transition ${filter === f ? "bg-zinc-900 text-white shadow dark:bg-white dark:text-zinc-900" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"}`}
             >
               {{ all: "All", domains: "With domain", nodomain: "No domain", issues: "Issues" }[f]} <span className="opacity-60">{counts[f]}</span>
             </button>
           ))}
         </div>
-        <Input placeholder="Search name, domain, path…" value={query} onChange={(e) => setQuery(e.target.value)} className="sm:ml-auto sm:max-w-xs" />
+        <Input placeholder="Filter by name, domain, path…" value={query} onChange={(e) => setQuery(e.target.value)} className="sm:ml-auto sm:max-w-xs" />
       </div>
 
-      <ul className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
-        {services.map((s) => <ServiceRow key={s.id} s={s} />)}
-        {data && services.length === 0 && <li className="px-4 py-8 text-center text-sm text-zinc-500">No service matches.</li>}
-        {!data && !error && <li className="px-4 py-8 text-center text-sm text-zinc-500">Loading…</li>}
-      </ul>
+      {data && services.length === 0 ? (
+        <EmptyState title="No service matches">Try another filter.</EmptyState>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {services.map((s) => <ServiceCard key={s.id} s={s} />)}
+          {!data && Array.from({ length: 6 }).map((_, i) => <div key={i} className="glass shimmer h-40 rounded-2xl" />)}
+        </div>
+      )}
 
       {data && data.warnings.length > 0 && (
-        <details className="mt-4 text-sm text-zinc-500">
+        <details className="mt-8 text-sm text-zinc-500">
           <summary className="cursor-pointer">{data.warnings.length} scan warning(s)</summary>
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            {data.warnings.map((w) => <li key={w}>{w}</li>)}
-          </ul>
+          <ul className="mt-2 list-disc space-y-1 pl-5">{data.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
         </details>
       )}
 
@@ -184,6 +192,14 @@ export default function ServicesPage() {
         onConfirm={reloadNginx}
         onCancel={() => setConfirmNginx(false)}
       />
+    </>
+  );
+}
+
+export default function OverviewPage() {
+  return (
+    <Shell>
+      <Overview />
     </Shell>
   );
 }

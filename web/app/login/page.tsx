@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Button, ErrorText, Input } from "@/components/ui";
+import { Backdrop, Logo } from "@/components/Shell";
+import { Button, ErrorText, Input, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 
 const MESSAGES: Record<string, string> = {
@@ -43,46 +44,43 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <div>
-          <h1 className="text-lg font-semibold">mas</h1>
-          <p className="text-sm text-zinc-500">{needOtp ? "Enter the code from your authenticator app." : "Sign in to manage this server."}</p>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
+      <Backdrop />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-tr from-indigo-600/30 via-sky-500/20 to-fuchsia-500/30 blur-3xl" />
+      <form onSubmit={submit} className="glass ring-gradient relative w-full max-w-sm animate-fade-up space-y-5 rounded-3xl p-8 shadow-[0_40px_120px_-30px_rgba(99,102,241,0.6)] dark:bg-zinc-950/60">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Logo className="h-12 w-12" />
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">{needOtp ? "Two-factor check" : <>Welcome to <span className="text-gradient">mas</span></>}</h1>
+            <p className="mt-1 text-sm text-zinc-500">{needOtp ? "Enter the 6-digit code from your authenticator app." : "Your server, mapped and deployed."}</p>
+          </div>
         </div>
+
         {!needOtp ? (
-          <>
-            <label className="block space-y-1 text-sm">
-              <span>Username</span>
-              <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
-            </label>
-            <label className="block space-y-1 text-sm">
-              <span>Password</span>
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" autoFocus required />
-            </label>
-          </>
+          <div className="space-y-3">
+            <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="Username" required />
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="Password" autoFocus required />
+          </div>
         ) : (
-          <label className="block space-y-1 text-sm">
-            <span>6-digit code</span>
-            <Input
-              autoFocus
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              pattern="\d{6}"
-              placeholder="123456"
-              className="mono text-center text-lg tracking-[0.4em]"
-              required
-            />
-          </label>
+          <Input
+            autoFocus
+            value={otp}
+            onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="\d{6}"
+            placeholder="••••••"
+            className="mono h-14 text-center text-2xl tracking-[0.6em]"
+            required
+          />
         )}
         <ErrorText>{error}</ErrorText>
-        <Button variant="primary" type="submit" disabled={busy} className="w-full">
-          {busy ? "…" : needOtp ? "Verify" : "Sign in"}
+        <Button variant="glow" type="submit" disabled={busy} className="!h-10 w-full text-sm">
+          {busy ? <Spinner /> : null}{needOtp ? "Verify" : "Sign in"}
         </Button>
         {needOtp && (
           <button type="button" className="w-full text-xs text-zinc-500 hover:underline" onClick={() => { setNeedOtp(false); setOtp(""); setError(""); }}>
-            Back
+            ← Back
           </button>
         )}
       </form>

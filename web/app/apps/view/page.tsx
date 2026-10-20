@@ -5,12 +5,26 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
-import { Badge, Button, Card, ConfirmDialog, ErrorText, Input, ReleaseBadge } from "@/components/ui";
+import {
+  Badge, Button, Card, ConfirmDialog, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner, StatusDot,
+  Terminal, Textarea,
+} from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type Release } from "@/lib/api";
+
+const RUNNING = new Set(["queued", "building"]);
+
+function colorize(line: string) {
+  if (/^\d\d:\d\d:\d\d ==> /.test(line)) return "text-sky-300 font-medium";
+  if (/error|failed|FAILED/.test(line)) return "text-rose-300";
+  if (/warning/i.test(line)) return "text-amber-300";
+  if (/ \$ /.test(line)) return "text-zinc-500";
+  if (/is live|health: ok|✓/.test(line)) return "text-emerald-300";
+  return "text-zinc-300";
+}
 
 function BuildLog({ appId, release, onEnd }: { appId: string; release: Release; onEnd: () => void }) {
   const [lines, setLines] = useState<string[]>([]);
-  const box = useRef<HTMLPreElement>(null);
+  const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setLines([]);
@@ -29,9 +43,15 @@ function BuildLog({ appId, release, onEnd }: { appId: string; release: Release; 
   }, [lines]);
 
   return (
-    <pre ref={box} className="mono max-h-[30rem] min-h-[8rem] overflow-auto rounded-md bg-zinc-950 p-3 text-xs leading-relaxed text-zinc-200">
-      {lines.length ? lines.join("\n") : "Waiting for output…"}
-    </pre>
+    <Terminal title={`build #${release.id} · ${(release.sha ?? "").slice(0, 7)}`}>
+      <div ref={box} className="mono max-h-[32rem] min-h-[14rem] overflow-auto p-4 text-[12px] leading-[1.7]">
+        {lines.length === 0 && <span className="text-zinc-600">Waiting for output…</span>}
+        {lines.map((line, i) => (
+          <div key={i} className={`whitespace-pre-wrap break-all ${colorize(line)}`}>{line || " "}</div>
+        ))}
+        {RUNNING.has(release.status) && <div className="mt-1 h-4 w-2 animate-pulse bg-zinc-400" />}
+      </div>
+    </Terminal>
   );
 }
 
@@ -47,11 +67,9 @@ function DomainCard({ app, onLinked }: { app: App; onLinked: (releaseId: number)
     setBusy(true);
     setError("");
     try {
-      const r = await api<{ release_id: number; changes: string[] }>(`/apps/${encodeURIComponent(app.id)}/domain`, {
+      const r = await api<{ release_id: number }>(`/apps/${encodeURIComponent(app.id)}/domain`, {
         method: "POST",
-        body: choice.zone
-          ? { zone: choice.zone, subdomain: choice.subdomain, overwrite: choice.overwrite }
-          : { domain: choice.domain },
+        body: choice.zone ? { zone: choice.zone, subdomain: choice.subdomain, overwrite: choice.overwrite } : { domain: choice.domain },
       });
       setEditing(false);
       onLinked(r.release_id);
@@ -65,18 +83,21 @@ function DomainCard({ app, onLinked }: { app: App; onLinked: (releaseId: number)
   return (
     <Card title="Domain">
       {!editing && app.domain ? (
-        <div className="space-y-2 text-sm">
-          <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="font-medium hover:underline">{app.domain} ↗</a>
-          <div><Button onClick={() => setEditing(true)}>Change</Button></div>
+        <div className="flex items-center justify-between gap-2">
+          <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2 text-sm font-medium hover:underline">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_10px_2px_rgba(52,211,153,0.5)]" />
+            <span className="truncate">{app.domain}</span>
+          </a>
+          <Button variant="ghost" onClick={() => setEditing(true)}>Change</Button>
         </div>
       ) : (
-        <div className="space-y-3">
-          {!app.domain && <p className="text-sm text-zinc-500">This app has no address yet. Pick one: Mas creates the DNS record, the nginx site and the HTTPS certificate.</p>}
+        <div className="space-y-4">
+          {!app.domain && <p className="text-sm text-zinc-500">No address yet. Pick one: Mas creates the DNS record, the nginx site and the HTTPS certificate.</p>}
           <DomainPicker suggestion={app.id} onChange={onChange} />
           <ErrorText>{error}</ErrorText>
           <div className="flex gap-2">
-            <Button variant="primary" onClick={link} disabled={!choice || busy}>{busy ? "Linking…" : "Link domain"}</Button>
-            {app.domain && <Button onClick={() => setEditing(false)}>Cancel</Button>}
+            <Button variant="glow" onClick={link} disabled={!choice || busy}>{busy ? <Spinner /> : null}Link domain</Button>
+            {app.domain && <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>}
           </div>
         </div>
       )}
@@ -84,73 +105,97 @@ function DomainCard({ app, onLinked }: { app: App; onLinked: (releaseId: number)
   );
 }
 
-function Settings({ app, onSaved }: { app: App; onSaved: (a: App) => void }) {
+function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void }) {
   const [branch, setBranch] = useState(app.branch);
   const [buildCommand, setBuildCommand] = useState(app.build_command ?? "");
   const [startCommand, setStartCommand] = useState(app.start_command ?? "");
   const [autoDeploy, setAutoDeploy] = useState(app.auto_deploy);
   const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
 
   async function save() {
     setMsg("");
+    setError("");
     const body: Record<string, unknown> = { branch, build_command: buildCommand, auto_deploy: autoDeploy };
-    if (app.mode === "managed") Object.assign(body, { start_command: startCommand });
+    if (app.mode === "managed") body.start_command = startCommand;
     try {
       onSaved(await api<App>(`/apps/${encodeURIComponent(app.id)}`, { method: "PATCH", body }));
-      setMsg("Saved. Deploy to apply.");
+      setMsg("Saved. Redeploy to apply.");
     } catch (e) {
-      setMsg((e as ApiError).detail);
+      setError((e as ApiError).detail);
     }
   }
 
   return (
-    <Card title="Settings">
-      <div className="space-y-3 text-sm">
-        <label className="block space-y-1"><span className="text-zinc-500">Branch</span><Input value={branch} onChange={(e) => setBranch(e.target.value)} /></label>
-        <label className="block space-y-1"><span className="text-zinc-500">Build command</span><Input value={buildCommand} onChange={(e) => setBuildCommand(e.target.value)} placeholder="default" className="mono text-xs" /></label>
+    <Card title="Build & deploy">
+      <div className="space-y-4">
+        <Label title="Production branch"><Input value={branch} onChange={(e) => setBranch(e.target.value)} /></Label>
+        <Label title="Build command" hint="Empty: detected from the repository."><Input value={buildCommand} onChange={(e) => setBuildCommand(e.target.value)} placeholder="npm run build" className="mono text-xs" /></Label>
         {app.mode === "managed" && (
-          <label className="block space-y-1"><span className="text-zinc-500">Start command</span><Input value={startCommand} onChange={(e) => setStartCommand(e.target.value)} placeholder="default" className="mono text-xs" /></label>
+          <Label title="Start command"><Input value={startCommand} onChange={(e) => setStartCommand(e.target.value)} placeholder="next start / npm start" className="mono text-xs" /></Label>
         )}
-        <label className="flex items-center gap-2"><input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} /> Deploy on push</label>
-        <div className="flex items-center gap-3"><Button variant="primary" onClick={save}>Save</Button><span className="text-xs text-zinc-500">{msg}</span></div>
+        <label className="flex items-center justify-between gap-3 text-sm">
+          <span>Deploy on every push</span>
+          <button
+            type="button"
+            onClick={() => setAutoDeploy(!autoDeploy)}
+            className={`relative h-5 w-9 rounded-full transition ${autoDeploy ? "bg-gradient-to-r from-indigo-500 to-sky-500" : "bg-zinc-300 dark:bg-white/10"}`}
+          >
+            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${autoDeploy ? "left-[18px]" : "left-0.5"}`} />
+          </button>
+        </label>
+        <Notice>{msg}</Notice>
+        <ErrorText>{error}</ErrorText>
+        <Button variant="primary" onClick={save}>Save</Button>
       </div>
     </Card>
   );
 }
 
-function EnvEditor({ appId }: { appId: string }) {
+function EnvCard({ appId }: { appId: string }) {
   const [text, setText] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
 
   async function reveal() {
     try {
       setText((await api<{ text: string }>(`/apps/${encodeURIComponent(appId)}/env`)).text);
     } catch (e) {
-      setMsg((e as ApiError).detail);
+      setError((e as ApiError).detail);
     }
   }
 
   async function save() {
+    setError("");
     try {
       const r = await api<{ count: number }>(`/apps/${encodeURIComponent(appId)}/env`, { method: "PUT", body: { text: text ?? "" } });
-      setMsg(`${r.count} variable(s) saved. Deploy to apply.`);
+      setMsg(`${r.count} variable(s) saved, encrypted. Redeploy to apply.`);
     } catch (e) {
-      setMsg((e as ApiError).detail);
+      setError((e as ApiError).detail);
     }
   }
 
   return (
-    <Card title="Environment variables">
+    <Card title="Environment variables" actions={<Badge tone="violet">encrypted</Badge>}>
       {text === null ? (
-        <Button onClick={reveal}>Show and edit</Button>
+        <Button onClick={reveal}>Reveal and edit</Button>
       ) : (
-        <div className="space-y-2">
-          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} className="mono w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950" />
+        <div className="space-y-3">
+          <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={7} placeholder="KEY=value" />
           <Button variant="primary" onClick={save}>Save</Button>
         </div>
       )}
-      {msg && <p className="mt-2 text-xs text-zinc-500">{msg}</p>}
+      <div className="mt-3 space-y-2"><Notice>{msg}</Notice><ErrorText>{error}</ErrorText></div>
     </Card>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className="mt-1 truncate text-sm font-medium">{children}</div>
+    </div>
   );
 }
 
@@ -168,6 +213,13 @@ function AppView() {
     api<App>(`/apps/${encodeURIComponent(id)}`).then(setApp).catch((e: ApiError) => setError(e.detail));
   }, [id]);
   useEffect(() => { if (id) load(); }, [id, load]);
+
+  // Keep statuses fresh while something is building (also catches pushes from GitHub).
+  const busy = (app?.releases ?? []).some((r) => RUNNING.has(r.status));
+  useEffect(() => {
+    const t = setInterval(load, busy ? 3_000 : 15_000);
+    return () => clearInterval(t);
+  }, [busy, load]);
 
   async function post(path: string, body?: unknown) {
     try {
@@ -190,81 +242,108 @@ function AppView() {
   }
 
   if (error && !app) return <ErrorText>{error}</ErrorText>;
-  if (!app) return <p className="text-sm text-zinc-500">Loading…</p>;
+  if (!app) return <div className="glass shimmer h-48 rounded-2xl" />;
 
   const releases = app.releases ?? [];
-  const shownRelease = releases.find((r) => r.id === selected) ?? releases[0];
+  const shown = releases.find((r) => r.id === selected) ?? releases[0];
+  const current = app.current;
+  const building = releases.some((r) => RUNNING.has(r.status));
 
   return (
-    <div className="space-y-4">
-      <Link href="/apps/" className="text-sm text-zinc-500 hover:underline">← Apps</Link>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">{app.id}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
-            <Badge tone="sky">{app.type}</Badge>
-            {app.mode === "adopted" && <Badge>adopted · {app.path}</Badge>}
-            <a href={`https://github.com/${app.repo}`} target="_blank" rel="noreferrer" className="text-zinc-600 hover:underline dark:text-zinc-400">{app.repo}@{app.branch}</a>
-            {app.domain && <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="text-zinc-600 hover:underline dark:text-zinc-400">{app.domain} ↗</a>}
-            {app.port && <span className="mono text-xs text-zinc-500">:{app.port}</span>}
+    <div className="space-y-6">
+      <Link href="/apps/" className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white">← Apps</Link>
+
+      <div className="flex flex-wrap items-center justify-between gap-4 animate-fade-up">
+        <div className="flex min-w-0 items-center gap-4">
+          <Monogram name={app.id} size="lg" />
+          <div className="min-w-0">
+            <h1 className="truncate text-[28px] font-semibold tracking-[-0.02em]">{app.id}</h1>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+              <a href={`https://github.com/${app.repo}`} target="_blank" rel="noreferrer" className="hover:text-zinc-900 dark:hover:text-white">{app.repo}</a>
+              <span>·</span>
+              <Badge tone="sky">{app.type}</Badge>
+              {app.mode === "adopted" && <Badge tone="violet">adopted · {app.path}</Badge>}
+            </div>
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="primary" onClick={() => post("/deploy")}>Deploy now</Button>
-          <Button variant="danger" onClick={() => setConfirmDelete(true)}>Remove</Button>
+          {app.domain && (
+            <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="glass inline-flex h-8 items-center rounded-lg px-3 text-[13px] font-medium hover:bg-white/[0.08]">
+              Visit ↗
+            </a>
+          )}
+          <Button variant="glow" onClick={() => post("/deploy")} disabled={building}>{building ? <Spinner /> : null}{building ? "Deploying…" : "Redeploy"}</Button>
+          <Button variant="ghost" onClick={() => setConfirmDelete(true)}>Remove</Button>
         </div>
       </div>
+
       <ErrorText>{error}</ErrorText>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          <Card title={shownRelease ? <span className="flex items-center gap-2">Release #{shownRelease.id} <ReleaseBadge status={shownRelease.status} /></span> : "Build log"}>
-            {shownRelease ? (
-              <>
-                <p className="mb-2 text-xs text-zinc-500">
-                  <code>{(shownRelease.sha ?? "").slice(0, 7)}</code> {shownRelease.message} · {shownRelease.trigger}
-                  {shownRelease.actor ? ` by ${shownRelease.actor}` : ""} · {timeAgo(shownRelease.created_at)}
-                </p>
-                {shownRelease.error && <p className="mb-2 whitespace-pre-wrap text-sm text-red-600 dark:text-red-400">{shownRelease.error}</p>}
-                <BuildLog appId={app.id} release={shownRelease} onEnd={load} />
-              </>
-            ) : (
-              <p className="text-sm text-zinc-500">No deployment yet. Click “Deploy now”.</p>
-            )}
-          </Card>
-          <Card title="Releases">
-            <ul className="divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
-              {releases.map((r) => (
-                <li key={r.id} className={`flex flex-wrap items-center gap-2 py-2 ${r.id === shownRelease?.id ? "font-medium" : ""}`}>
-                  <button onClick={() => setSelected(r.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left hover:underline">
-                    <span className="text-zinc-500">#{r.id}</span>
-                    <ReleaseBadge status={r.status} />
-                    <code className="text-xs">{(r.sha ?? "").slice(0, 7)}</code>
-                    <span className="truncate">{r.message}</span>
+      <section className="glass ring-gradient relative overflow-hidden rounded-2xl p-6 animate-fade-up">
+        <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-indigo-500/20 blur-3xl" />
+        <div className="mb-5 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
+          <StatusDot status={current ? "live" : building ? "building" : "unknown"} size="sm" /> Production
+        </div>
+        <div className="grid grid-cols-2 gap-6 md:grid-cols-5">
+          <Field label="Status">{current ? <ReleaseBadge status="live" /> : building ? <ReleaseBadge status="building" /> : "Not deployed"}</Field>
+          <Field label="Domain">{app.domain ? <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="hover:underline">{app.domain}</a> : <span className="text-zinc-500">—</span>}</Field>
+          <Field label="Branch"><code className="text-xs">{app.branch}</code></Field>
+          <Field label="Commit">{current ? <span title={current.message ?? ""}><code className="text-xs">{(current.sha ?? "").slice(0, 7)}</code> {current.message}</span> : "—"}</Field>
+          <Field label="Deployed">{current ? `${timeAgo(current.created_at)}${current.actor ? ` by ${current.actor}` : ""}` : "—"}</Field>
+        </div>
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          {shown ? (
+            <div className="space-y-3 animate-fade-up">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-semibold">Deployment #{shown.id}</span>
+                <ReleaseBadge status={shown.status} />
+                <span className="text-zinc-500">{shown.trigger}{shown.actor ? ` by ${shown.actor}` : ""} · {timeAgo(shown.created_at)}</span>
+              </div>
+              {shown.error && <ErrorText><span className="whitespace-pre-wrap">{shown.error}</span></ErrorText>}
+              <BuildLog appId={app.id} release={shown} onEnd={load} />
+            </div>
+          ) : (
+            <Card><p className="text-sm text-zinc-500">No deployment yet. Click “Redeploy”.</p></Card>
+          )}
+
+          <Card title="Deployments" padded={false}>
+            <ol className="relative">
+              {releases.map((r, i) => (
+                <li key={r.id} className={`group relative flex items-center gap-4 px-5 py-3 transition hover:bg-zinc-50 dark:hover:bg-white/[0.03] ${r.id === shown?.id ? "bg-indigo-500/[0.06]" : ""}`}>
+                  <div className="relative flex w-3 justify-center self-stretch">
+                    {i < releases.length - 1 && <span className="absolute top-1/2 h-full w-px bg-zinc-200 dark:bg-white/[0.08]" />}
+                    <span className="relative mt-[calc(50%-6px)]"><StatusDot status={r.status} size="sm" /></span>
+                  </div>
+                  <button onClick={() => setSelected(r.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <code className="text-xs text-zinc-500">{(r.sha ?? "").slice(0, 7) || "—"}</code>
+                    <span className="truncate text-sm">{r.message || r.trigger}</span>
                   </button>
-                  <span className="text-xs text-zinc-500">{timeAgo(r.created_at)}</span>
+                  {r.id === app.current_release && <Badge tone="emerald">current</Badge>}
+                  <span className="hidden text-xs text-zinc-500 sm:block">{timeAgo(r.created_at)}</span>
                   {r.path && r.status === "superseded" && (
-                    <Button className="!px-2 !py-0.5 text-xs" onClick={() => setConfirmRollback(r)}>Rollback</Button>
+                    <Button className="!h-7 opacity-0 transition group-hover:opacity-100" onClick={() => setConfirmRollback(r)}>Rollback</Button>
                   )}
                 </li>
               ))}
-              {releases.length === 0 && <li className="py-2 text-zinc-500">No release yet.</li>}
-            </ul>
+              {releases.length === 0 && <li className="px-5 py-4 text-sm text-zinc-500">No deployment yet.</li>}
+            </ol>
           </Card>
         </div>
-        <div className="space-y-4">
-          {app.mode === "managed" && (
-            <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />
-          )}
-          <Settings app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />
-          {app.mode === "managed" && <EnvEditor appId={app.id} />}
+
+        <div className="space-y-6">
+          {app.mode === "managed" && <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
+          <SettingsCard app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />
+          {app.mode === "managed" && <EnvCard appId={app.id} />}
         </div>
       </div>
 
       <ConfirmDialog
         open={confirmRollback !== null}
-        title={`Roll back to release #${confirmRollback?.id ?? ""}?`}
-        message={<>Commit <code>{(confirmRollback?.sha ?? "").slice(0, 7)}</code> goes back to production; the current release stays available.</>}
+        title={`Roll back to #${confirmRollback?.id ?? ""}?`}
+        message={<>Commit <code>{(confirmRollback?.sha ?? "").slice(0, 7)}</code> goes back to production instantly; the current release stays available.</>}
         confirmLabel="Roll back"
         onConfirm={() => {
           const target = confirmRollback;
@@ -279,7 +358,7 @@ function AppView() {
         message={
           app.mode === "adopted" ? "Mas stops deploying this service; the service itself is not touched." : (
             <span className="block space-y-2">
-              <span className="block">The systemd unit and the nginx vhost are removed (backups are kept). The site goes offline.</span>
+              <span className="block">The systemd unit and the nginx site are removed (backups are kept). The site goes offline.</span>
               <label className="flex items-center gap-2"><input type="checkbox" checked={purge} onChange={(e) => setPurge(e.target.checked)} /> Also delete /srv/mas/apps/{app.id}</label>
             </span>
           )
@@ -296,7 +375,7 @@ function AppView() {
 export default function AppViewPage() {
   return (
     <Shell>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
+      <Suspense fallback={<div className="glass shimmer h-48 rounded-2xl" />}>
         <AppView />
       </Suspense>
     </Shell>

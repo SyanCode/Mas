@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
-import { Button, Card, ErrorText, Input } from "@/components/ui";
+import { Button, Card, ErrorText, Input, PageHeader } from "@/components/ui";
 import { api, ApiError, SERVICE_TYPES, type App, type Repo } from "@/lib/api";
 
 const DEPLOYABLE = SERVICE_TYPES.filter((t) => t !== "unknown");
@@ -92,10 +92,10 @@ function NewApp() {
     return (
       <div className="space-y-4">
         <Link href="/apps/" className="text-sm text-zinc-500 hover:underline">← Apps</Link>
-        <h1 className="text-xl font-semibold">New app · choose a repository</h1>
+        <PageHeader eyebrow="New app" title={<>Import a <span className="text-gradient">Git repository</span></>} subtitle="Every push to the branch you pick deploys automatically." />
         <ErrorText>{error}</ErrorText>
         <Input placeholder="Filter repositories…" value={filter} onChange={(e) => setFilter(e.target.value)} autoFocus />
-        <ul className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+        <ul className="divide-y divide-zinc-200 overflow-hidden glass rounded-2xl">
           {shown.map((r) => (
             <li key={r.full_name}>
               <button onClick={() => setRepo(r)} className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
@@ -121,7 +121,7 @@ function NewApp() {
   return (
     <form onSubmit={submit} className="space-y-4">
       <button type="button" onClick={() => setRepo(null)} className="text-sm text-zinc-500 hover:underline">← Repositories</button>
-      <h1 className="text-xl font-semibold">New app · {repo.full_name}</h1>
+      <PageHeader eyebrow="New app" title={repo.full_name} subtitle="Review the settings, then deploy." />
       <Card title="Basics">
         <div className="grid gap-3 text-sm sm:grid-cols-2">
           <label className="space-y-1">
@@ -188,7 +188,7 @@ function NewApp() {
         </div>
       </Card>
       <ErrorText>{error}</ErrorText>
-      <Button variant="primary" type="submit" disabled={busy || !type}>{busy ? "Creating…" : "Create and deploy"}</Button>
+      <Button variant="glow" type="submit" disabled={busy || !type} className="!h-10 px-6">{busy ? "Creating…" : "Deploy"}</Button>
     </form>
   );
 }

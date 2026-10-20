@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
-import { ErrorText } from "@/components/ui";
+import { ErrorText, PageHeader } from "@/components/ui";
 import { api, ApiError, type HistoryEntry } from "@/lib/api";
 
 function History() {
@@ -16,9 +16,9 @@ function History() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">History</h1>
+      <PageHeader eyebrow="Audit log" title="Activity" subtitle="Every login, action, deployment and setting change." />
       <ErrorText>{error}</ErrorText>
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="overflow-x-auto glass rounded-2xl">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
             <tr>

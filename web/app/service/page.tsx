@@ -66,7 +66,7 @@ function Logs({ id }: { id: string }) {
         </div>
       )}
       <ErrorText>{error || src?.error}</ErrorText>
-      <pre className="mono max-h-[28rem] overflow-auto rounded-md bg-zinc-950 p-3 text-xs leading-relaxed text-zinc-200">
+      <pre className="mono max-h-[28rem] overflow-auto rounded-xl border border-zinc-800 bg-[#07080b] p-4 text-xs leading-relaxed text-zinc-300">
         {src ? (src.lines.length ? src.lines.join("\n") : "(empty)") : "Loading…"}
       </pre>
     </Card>
@@ -175,7 +175,7 @@ function ServiceDetail() {
         <div>
           <div className="flex items-center gap-2">
             <StatusDot status={svc.status} />
-            <h1 className="text-xl font-semibold">{svc.display_name || svc.name}</h1>
+            <h1 className="text-[28px] font-semibold tracking-[-0.02em]">{svc.display_name || svc.name}</h1>
             <span className="text-sm text-zinc-500">{svc.status}</span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2">

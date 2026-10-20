@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
-import { Badge, Button, CopyCode, ErrorText } from "@/components/ui";
+import { Badge, Button, CopyCode, ErrorText, PageHeader, Spinner } from "@/components/ui";
 import { api, ApiError, timeAgo, type Check } from "@/lib/api";
 
 const TONE = { error: "red", warning: "amber", info: "sky" } as const;
@@ -33,16 +33,12 @@ function Health() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Health</h1>
-          <p className="text-sm text-zinc-500">
-            Certificates, certbot renewal, nginx and DNS.{" "}
-            {checkedAt ? `Checked ${timeAgo(new Date(checkedAt * 1000).toISOString())}.` : ""}
-          </p>
-        </div>
-        <Button variant="primary" onClick={() => load(true)} disabled={busy}>{busy ? "Checking…" : "Check again"}</Button>
-      </div>
+      <PageHeader
+        eyebrow="Diagnostics"
+        title="Health"
+        subtitle={<>Certificates, certbot renewal, nginx and DNS.{" "}{checkedAt ? `Checked ${timeAgo(new Date(checkedAt * 1000).toISOString())}.` : ""}</>}
+        actions={<Button variant="primary" onClick={() => load(true)} disabled={busy}>{busy ? <Spinner /> : null}Check again</Button>}
+      />
       <ErrorText>{error}</ErrorText>
       {checks && (
         <div className="flex gap-3 text-sm">
@@ -58,7 +54,7 @@ function Health() {
       )}
       <ul className="space-y-3">
         {(checks ?? []).map((c) => (
-          <li key={`${c.category}-${c.title}`} className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <li key={`${c.category}-${c.title}`} className={`glass animate-fade-up rounded-2xl border-l-2 p-5 ${c.level === "error" ? "border-l-rose-500" : c.level === "warning" ? "border-l-amber-400" : "border-l-sky-400"}`}>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={TONE[c.level]}>{c.level}</Badge>
               <span className="font-medium">{c.title}</span>

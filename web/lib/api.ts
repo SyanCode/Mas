@@ -134,18 +134,38 @@ export interface Repo {
   installation_id: number;
 }
 
+export interface ProviderField {
+  name: string;
+  label: string;
+  secret: boolean;
+  options: string[];
+}
+
+export interface ProviderInfo {
+  type: string;
+  label: string;
+  help: string;
+  token_urls: Record<string, string>;
+  fields: ProviderField[];
+}
+
 export interface DnsStatus {
-  provider: "ovh" | null;
-  endpoint: string | null;
-  account: { nichandle: string; name: string | null } | null;
+  providers: { type: string; label: string; account: string | null }[];
+  catalog: ProviderInfo[];
   ipv4: string | null;
   ipv6: string | null;
   suggested_ipv4: string | null;
-  token_urls: Record<string, string>;
+}
+
+export interface DnsZone {
+  zone: string;
+  provider: string;
+  label: string;
 }
 
 export interface DnsCheck {
   domain: string;
+  provider: string;
   records: { type: string; target: string }[];
   points_here: boolean;
   points_elsewhere: boolean;

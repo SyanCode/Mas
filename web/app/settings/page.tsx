@@ -2,8 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { Shell, useSession } from "@/components/Shell";
-import { Badge, Button, Card, ErrorText, Input } from "@/components/ui";
-import { api, ApiError, type DnsStatus, type GitHubStatus } from "@/lib/api";
+import { Badge, Button, Card, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner } from "@/components/ui";
+import { api, ApiError, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
 
 function PasswordForm() {
   const [current, setCurrent] = useState("");
@@ -58,7 +58,8 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
     e.preventDefault();
     setError("");
     try {
-      setSetup(await api<Setup>("/account/totp/setup", { method: "POST", body: { password } }));
+      setSetup(await api<Setup>("/account/totp/setup", { method: "POST", body: { password, code: enabled ? code : undefined } }));
+      setCode("");
       setStep("scan");
     } catch (err) {
       setError((err as ApiError).detail);
@@ -127,8 +128,9 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
 
         {step === "password" && (
           <form onSubmit={start} className="space-y-3">
-            <p>Confirm your password to continue.</p>
+            <p>{enabled ? "Confirm with your password and the current code of your authenticator." : "Confirm your password to continue."}</p>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" autoFocus required />
+            {enabled && codeInput}
             <ErrorText>{error}</ErrorText>
             <div className="flex gap-2"><Button variant="primary" type="submit">Continue</Button><Button type="button" onClick={reset}>Cancel</Button></div>
           </form>
@@ -246,10 +248,8 @@ function GitHubCard() {
 
 function DomainsCard() {
   const [status, setStatus] = useState<DnsStatus | null>(null);
-  const [endpoint, setEndpoint] = useState("ovh-eu");
-  const [ak, setAk] = useState("");
-  const [as, setAs] = useState("");
-  const [ck, setCk] = useState("");
+  const [adding, setAdding] = useState<ProviderInfo | null>(null);
+  const [creds, setCreds] = useState<Record<string, string>>({});
   const [ipv4, setIpv4] = useState("");
   const [ipv6, setIpv6] = useState("");
   const [msg, setMsg] = useState("");
@@ -263,17 +263,23 @@ function DomainsCard() {
   }).catch((e: ApiError) => setError(e.detail));
   useEffect(() => { load(); }, []);
 
-  async function connect(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
+  function start(p: ProviderInfo) {
+    setAdding(p);
     setError("");
     setMsg("");
+    setCreds(Object.fromEntries(p.fields.filter((f) => f.options.length).map((f) => [f.name, f.options[0]])));
+  }
+
+  async function connect(e: FormEvent) {
+    e.preventDefault();
+    if (!adding) return;
+    setBusy(true);
+    setError("");
     try {
-      const r = await api<{ zones: string[] }>("/dns/ovh", {
-        method: "POST", body: { endpoint, application_key: ak, application_secret: as, consumer_key: ck },
-      });
-      setAk(""); setAs(""); setCk("");
-      setMsg(`Connected: ${r.zones.length} domain(s) (${r.zones.join(", ")}).`);
+      const r = await api<{ account: string; zones: string[] }>("/dns/providers", { method: "POST", body: { type: adding.type, credentials: creds } });
+      setMsg(`${adding.label} connected (${r.account}): ${r.zones.length} domain(s).`);
+      setAdding(null);
+      setCreds({});
       load();
     } catch (err) {
       setError((err as ApiError).detail);
@@ -294,63 +300,85 @@ function DomainsCard() {
     }
   }
 
-  async function disconnect() {
-    await api("/dns/ovh", { method: "DELETE" }).catch(() => {});
-    setMsg("");
+  async function disconnect(type: string) {
+    await api(`/dns/providers/${type}`, { method: "DELETE" }).catch(() => {});
     load();
   }
 
+  const connected = new Set(status?.providers.map((p) => p.type));
+  const tokenUrl = adding ? adding.token_urls[creds.endpoint ?? "default"] ?? Object.values(adding.token_urls)[0] : null;
+
   return (
-    <Card title="Domains" actions={status?.provider ? <Badge tone="emerald">OVH connected</Badge> : <Badge>not connected</Badge>}>
-      <div className="max-w-xl space-y-4 text-sm">
-        {msg && <p className="text-emerald-700 dark:text-emerald-400">{msg}</p>}
+    <Card title="Domains" actions={<Badge tone={status?.providers.length ? "emerald" : "zinc"}>{status?.providers.length ?? 0} registrar(s)</Badge>}>
+      <div className="space-y-6 text-sm">
+        <Notice>{msg}</Notice>
         <ErrorText>{error}</ErrorText>
 
         <form onSubmit={saveIps} className="space-y-2">
-          <p className="font-medium">This server&apos;s public address</p>
+          <div className="font-medium">This server&apos;s public address</div>
           <p className="text-xs text-zinc-500">
             New domains point here.{" "}
-            {status && !status.ipv4 && status.suggested_ipv4 && <>Suggested from your existing domains: <code>{status.suggested_ipv4}</code>.</>}
+            {status && !status.ipv4 && status.suggested_ipv4 && <>Detected from your existing domains: <code>{status.suggested_ipv4}</code>.</>}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Input value={ipv4} onChange={(e) => setIpv4(e.target.value.trim())} placeholder="IPv4, e.g. 93.184.216.34" className="max-w-[14rem]" />
-            <Input value={ipv6} onChange={(e) => setIpv6(e.target.value.trim())} placeholder="IPv6 (optional)" className="max-w-[16rem]" />
+            <Input value={ipv4} onChange={(e) => setIpv4(e.target.value.trim())} placeholder="IPv4" className="mono max-w-[13rem]" />
+            <Input value={ipv6} onChange={(e) => setIpv6(e.target.value.trim())} placeholder="IPv6 (optional)" className="mono max-w-[17rem]" />
             <Button type="submit">Save</Button>
           </div>
         </form>
 
-        {status?.provider ? (
+        {status && status.providers.length > 0 && (
           <div className="space-y-2">
-            <p>
-              OVH account <code>{status.account?.nichandle}</code> ({status.endpoint}). Mas can create sub-domains in
-              your zones and link them to apps.
-            </p>
-            <Button variant="danger" onClick={disconnect}>Disconnect</Button>
+            <div className="font-medium">Connected</div>
+            {status.providers.map((p) => (
+              <div key={p.type} className="flex items-center justify-between rounded-xl border border-zinc-200 px-3 py-2 dark:border-white/[0.08]">
+                <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_2px_rgba(52,211,153,0.5)]" />{p.label} <span className="text-xs text-zinc-500">{p.account}</span></span>
+                <Button variant="ghost" onClick={() => disconnect(p.type)}>Disconnect</Button>
+              </div>
+            ))}
           </div>
-        ) : (
-          <form onSubmit={connect} className="space-y-2">
-            <p className="font-medium">Connect OVH</p>
-            <ol className="list-decimal space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
-              <li>
-                <select value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className="mr-2 rounded border border-zinc-300 bg-transparent px-1 py-0.5 dark:border-zinc-700">
-                  <option value="ovh-eu">OVH Europe</option>
-                  <option value="ovh-ca">OVH Canada</option>
-                  <option value="ovh-us">OVH US</option>
-                </select>
-                {status && (
-                  <a href={status.token_urls[endpoint]} target="_blank" rel="noreferrer" className="font-medium underline">
-                    Create an API token ↗
-                  </a>
-                )}{" "}
-                (rights are pre-filled: read your domains, create/update DNS records; never delete). Validity: Unlimited.
-              </li>
-              <li>Paste the three keys OVH shows:</li>
-            </ol>
-            <Input value={ak} onChange={(e) => setAk(e.target.value.trim())} placeholder="Application key" required />
-            <Input type="password" value={as} onChange={(e) => setAs(e.target.value.trim())} placeholder="Application secret" required />
-            <Input type="password" value={ck} onChange={(e) => setCk(e.target.value.trim())} placeholder="Consumer key" required />
-            <Button variant="primary" type="submit" disabled={busy}>{busy ? "Checking…" : "Connect"}</Button>
-            <p className="text-xs text-zinc-500">Keys are verified with OVH, then stored encrypted on this server.</p>
+        )}
+
+        <div className="space-y-2">
+          <div className="font-medium">Connect a registrar</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {status?.catalog.map((p) => (
+              <button
+                key={p.type}
+                type="button"
+                onClick={() => start(p)}
+                className={`glass rounded-xl px-3 py-3 text-left transition hover:border-indigo-400/50 ${adding?.type === p.type ? "ring-2 ring-indigo-500/50" : ""}`}
+              >
+                <div className="font-medium">{p.label}</div>
+                <div className="text-xs text-zinc-500">{connected.has(p.type) ? "connected · replace keys" : "API token"}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {adding && (
+          <form onSubmit={connect} className="space-y-3 rounded-xl border border-indigo-400/30 bg-indigo-500/[0.04] p-4">
+            <div className="font-medium">{adding.label}</div>
+            <p className="text-xs text-zinc-500">
+              {adding.help}{" "}
+              {tokenUrl && <a href={tokenUrl} target="_blank" rel="noreferrer" className="font-medium text-indigo-500 hover:underline">Open the token page ↗</a>}
+            </p>
+            {adding.fields.map((f) => (
+              <Label key={f.name} title={f.label}>
+                {f.options.length ? (
+                  <Select value={creds[f.name] ?? ""} onChange={(e) => setCreds({ ...creds, [f.name]: e.target.value })}>
+                    {f.options.map((o) => <option key={o}>{o}</option>)}
+                  </Select>
+                ) : (
+                  <Input type={f.secret ? "password" : "text"} value={creds[f.name] ?? ""} onChange={(e) => setCreds({ ...creds, [f.name]: e.target.value.trim() })} required autoComplete="off" />
+                )}
+              </Label>
+            ))}
+            <div className="flex gap-2">
+              <Button variant="glow" type="submit" disabled={busy}>{busy ? <Spinner /> : null}Verify &amp; connect</Button>
+              <Button type="button" variant="ghost" onClick={() => setAdding(null)}>Cancel</Button>
+            </div>
+            <p className="text-xs text-zinc-500">Keys are checked with {adding.label}, then stored encrypted on this server. Mas never deletes DNS records.</p>
           </form>
         )}
       </div>
@@ -362,7 +390,7 @@ function Settings() {
   const session = useSession();
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Settings</h1>
+      <PageHeader eyebrow="Configuration" title="Settings" subtitle="Domains, GitHub and account security." />
       <DomainsCard />
       <GitHubCard />
       <TwoFactor enabled={!!session?.totp_enabled} />

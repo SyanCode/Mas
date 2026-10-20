@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 // Applied before paint to avoid a flash of the wrong theme.
-const themeScript = `try{var t=localStorage.getItem("mas-theme")||"system";var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d)}catch(e){}`;
+const themeScript = `try{var t=localStorage.getItem("mas-theme")||"dark";var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d)}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
