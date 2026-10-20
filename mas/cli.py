@@ -393,6 +393,172 @@ def user_delete(ctx: typer.Context, username: Annotated[str, typer.Argument()]) 
     console.print(f"[green]✓[/] user {username} deleted")
 
 
+# -- health (phase 2.5) ------------------------------------------------------------
+
+LEVEL_STYLE = {"error": "[bold red]error[/]", "warning": "[dark_orange]warn [/]", "info": "[cyan]info [/]"}
+
+
+@app.command()
+def doctor(
+    ctx: typer.Context,
+    no_dns: Annotated[bool, typer.Option("--no-dns", help="Skip DNS resolution checks.")] = False,
+) -> None:
+    """Check certificates, certbot renewal, nginx and DNS (read-only)."""
+    from mas.health import run_checks
+
+    env: Env = ctx.obj
+    checks = run_checks(env.host, env.config, dns=not no_dns)
+    if not checks:
+        console.print("[green]✓[/] no problem found")
+        return
+    for c in checks:
+        console.print(f"{LEVEL_STYLE[c.level]} [bold]{c.title}[/] [dim]({c.category})[/]")
+        if c.detail:
+            console.print(f"       {c.detail}", markup=False, highlight=False)
+        if c.fix:
+            console.print(f"       [green]fix:[/] {c.fix}", highlight=False)
+    errors = sum(c.level == "error" for c in checks)
+    console.print(f"\n{errors} error(s), {sum(c.level == 'warning' for c in checks)} warning(s)")
+    if errors:
+        raise typer.Exit(1)
+
+
+# -- GitHub & deployments (phase 3) ------------------------------------------------
+
+github_app = typer.Typer(help="GitHub App configuration.", no_args_is_help=True)
+app.add_typer(github_app, name="github")
+
+
+def _github_client(env: Env):
+    from mas.github import GitHubApp
+
+    if not env.config.github_app_id:
+        return None
+    pem = env.host.read_bytes(env.config.github_private_key_path)
+    return GitHubApp(env.config.github_app_id, pem) if pem else None
+
+
+def _deployer(env: Env):
+    from mas.deploy import Deployer
+    from mas.state import Scanner
+
+    scanner = Scanner(env.host, env.config, env.db)
+    return Deployer(env.host, env.config, env.db, lambda: _github_client(env), find_service=scanner.get)
+
+
+@github_app.command("setup")
+def github_setup(ctx: typer.Context) -> None:
+    """Configure an existing GitHub App by hand (the dashboard can create one for you)."""
+    import secrets as pysecrets
+
+    from mas.config import save_section
+
+    env: Env = ctx.obj
+    console.print("Create the App on https://github.com/settings/apps/new (see README), then:")
+    app_id = typer.prompt("App ID", type=int)
+    slug = typer.prompt("App slug (github.com/apps/<slug>)")
+    pem_file = Path(typer.prompt("Path to the downloaded private key (.pem)"))
+    if not pem_file.is_file():
+        fail(f"{pem_file} not found")
+    secret = typer.prompt("Webhook secret (empty = generate one)", default="", show_default=False) or \
+        pysecrets.token_urlsafe(32)
+    env.host.write_text(env.config.github_private_key_path, pem_file.read_text(), mode=0o600)
+    save_section(env.host, "github", {"app_id": app_id, "app_slug": slug,
+                                      "private_key_path": env.config.github_private_key_path,
+                                      "webhook_secret": secret})
+    env.db.audit(actor(), "github-app-setup", True, detail=f"app {slug} ({app_id})")
+    console.print(f"[green]✓[/] saved. Webhook secret to paste in the App settings: [bold]{secret}[/]")
+    console.print("Restart Mas to apply: sudo systemctl restart mas")
+
+
+@github_app.command("status")
+def github_status(ctx: typer.Context) -> None:
+    """Show the GitHub App and its installations."""
+    from mas.github import GitHubError
+
+    env: Env = ctx.obj
+    gh = _github_client(env)
+    if gh is None:
+        fail("GitHub App not configured: Settings → GitHub in the dashboard, or `mas github setup`")
+    try:
+        console.print(f"App [bold]{env.config.github_app_slug}[/] (id {env.config.github_app_id})")
+        for inst in gh.installations():
+            console.print(f"  installed on {inst.get('account', {}).get('login')} (installation {inst['id']})")
+    except GitHubError as exc:
+        fail(str(exc))
+
+
+@app.command("apps")
+def apps_list(ctx: typer.Context) -> None:
+    """List apps deployed from GitHub."""
+    env: Env = ctx.obj
+    table = Table(header_style="bold")
+    for col in ("App", "Repository", "Domain", "Type", "Mode", "Live release", "Last deploy"):
+        table.add_column(col)
+    for a in env.db.list_apps():
+        live = env.db.get_release(a["current_release"]) if a["current_release"] else None
+        last = (env.db.list_releases(a["id"], 1) or [None])[0]
+        table.add_row(a["id"], f"{a['repo']}@{a['branch']}", a["domain"] or "-", a["type"], a["mode"],
+                      f"#{live['id']} {(live['sha'] or '')[:7]}" if live else "-",
+                      f"#{last['id']} {last['status']}" if last else "-")
+    console.print(table)
+
+
+@app.command()
+def deploy(ctx: typer.Context, app_id: Annotated[str, typer.Argument(help="App id (see `mas apps`).")]) -> None:
+    """Deploy the latest commit of an app's branch now (logs printed live)."""
+    env: Env = ctx.obj
+    if env.db.get_app(app_id) is None:
+        fail(f"unknown app {app_id} (see `mas apps`)")
+    deployer = _deployer(env)
+    rid = env.db.create_release(app_id, "manual", actor())
+    ok = deployer.run(rid, echo=lambda line: console.print(line, markup=False, highlight=False))
+    if not ok:
+        fail(f"release #{rid} failed")
+
+
+@app.command()
+def releases(ctx: typer.Context, app_id: Annotated[str, typer.Argument()],
+             limit: Annotated[int, typer.Option("--limit", "-n")] = 15) -> None:
+    """List the releases of an app."""
+    env: Env = ctx.obj
+    table = Table(header_style="bold")
+    for col in ("#", "Status", "Commit", "Trigger", "By", "When", "Folder"):
+        table.add_column(col)
+    style = {"live": "green", "failed": "red", "building": "yellow", "queued": "yellow"}
+    for r in env.db.list_releases(app_id, limit):
+        table.add_row(str(r["id"]), f"[{style.get(r['status'], 'dim')}]{r['status']}[/]",
+                      f"{(r['sha'] or '')[:7]} {r['message'] or ''}"[:60], r["trigger"], r["actor"] or "-",
+                      r["created_at"][:16].replace("T", " "), "kept" if r["path"] else "-")
+    console.print(table)
+
+
+@app.command()
+def rollback(ctx: typer.Context, app_id: Annotated[str, typer.Argument()],
+             release_id: Annotated[Optional[int], typer.Argument(help="Release to restore (default: previous).")]
+             = None, yes: YesOption = False) -> None:
+    """Put a previous release back in production."""
+    env: Env = ctx.obj
+    app_row = env.db.get_app(app_id)
+    if app_row is None:
+        fail(f"unknown app {app_id}")
+    if release_id is None:
+        candidates = [r for r in env.db.list_releases(app_id, 50)
+                      if r["path"] and r["id"] != app_row["current_release"] and r["status"] in ("superseded", "live")]
+        if not candidates:
+            fail("no previous release available")
+        release_id = candidates[0]["id"]
+    target = env.db.get_release(release_id)
+    if not target or target["app_id"] != app_id or not target["path"]:
+        fail("this release is not available anymore")
+    if not yes:
+        typer.confirm(f"Roll {app_id} back to release #{release_id}?", abort=True)
+    rid = env.db.create_release(app_id, "rollback", actor(), target["sha"])
+    env.db.update_release(rid, path=target["path"], message=f"Rollback to #{release_id}: {target['message'] or ''}")
+    if not _deployer(env).run(rid, echo=lambda line: console.print(line, markup=False, highlight=False)):
+        fail(f"rollback #{rid} failed")
+
+
 # -- server ----------------------------------------------------------------------
 
 
