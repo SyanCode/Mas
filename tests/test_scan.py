@@ -58,6 +58,7 @@ def test_static_vhost_with_several_names(services):
 def test_docker_behind_upstream(services):
     g = services["grafana.example.com"]
     assert g.manager == Manager.DOCKER and g.unit == "monitoring-grafana-1"
+    # the proxied port, not the lowest published one (2025)
     assert g.port == 3001 and g.path == "/opt/monitoring"
 
 
@@ -85,9 +86,25 @@ def test_system_services_are_excluded(services):
     assert not names & {"sshd", "systemd-resolve", "nginx", "docker-proxy"}
 
 
+def test_socket_activated_port_goes_to_the_service(services):
+    assert services["systemd-mariadb"].port == 3306
+    assert all(s.pid != 1 for s in services.values())
+
+
+def test_os_daemons_are_hidden(services, server_dir):
+    assert "systemd-colord" not in services
+    bot = services["systemd-bot"]  # no port, but runs code from /opt
+    assert bot.type == ServiceType.PYTHON and bot.user == "alice"
+
+    from mas.config import Config
+
+    res = scan(FixtureHost(server_dir), config=Config(hide_os_daemons=False))
+    assert "systemd-colord" in {s.id for s in res.services}
+
+
 def test_each_backend_appears_once(result):
     ids = [s.id for s in result.services]
-    assert len(ids) == len(set(ids)) == 13
+    assert len(ids) == len(set(ids)) == 14
 
 
 def test_docker_absent_does_not_break_scan(tmp_path):

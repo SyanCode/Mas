@@ -24,6 +24,15 @@ def test_parse_ss_tcp_merges_ipv4_ipv6_and_strips_interface():
     ]
 
 
+def test_socket_activation_pid1_is_ignored():
+    (sock,) = ports.parse_ss_tcp(
+        'LISTEN 0 80 127.0.0.1:3306 0.0.0.0:* users:(("systemd",pid=1,fd=50),("mariadbd",pid=2213,fd=20))\n'
+    )
+    assert (sock.process, sock.pid) == ("mariadbd", 2213)
+    (alone,) = ports.parse_ss_tcp('LISTEN 0 80 0.0.0.0:631 0.0.0.0:* users:(("systemd",pid=1,fd=9))\n')
+    assert (alone.process, alone.pid) == ("systemd", 1)
+
+
 def test_parse_ss_unix():
     (sock,) = ports.parse_ss_unix(
         'u_str LISTEN 0 511 /run/php/php8.2-fpm.sock 21345 * 0 users:(("php-fpm8.2",pid=900,fd=8))\n'
@@ -63,7 +72,8 @@ def test_read_process(ctx):
 
 def test_systemd_filters_system_units(ctx):
     units = {u.name: u for u in systemd.collect(ctx)}
-    assert set(units) == {"api.service", "mariadb.service", "prometheus-node-exporter.service"}
+    assert set(units) == {"api.service", "bot.service", "colord.service", "mariadb.service",
+                          "prometheus-node-exporter.service"}
     api = units["api.service"]
     assert api.main_pid == 3000 and api.working_directory == "/srv/api" and api.user == "api"
     assert api.exec_start.startswith("/srv/api/.venv/bin/gunicorn")
@@ -118,7 +128,7 @@ def test_pm2_not_queried_when_daemon_down(tmp_path):
 def test_docker_containers(ctx):
     containers = {c.name: c for c in docker.collect(ctx)}
     grafana = containers["monitoring-grafana-1"]
-    assert grafana.public_ports == [3001] and grafana.working_dir == "/opt/monitoring"
+    assert grafana.public_ports == [2025, 3001] and grafana.working_dir == "/opt/monitoring"
     assert containers["old-redis"].status == "stopped"
 
 

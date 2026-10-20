@@ -324,6 +324,8 @@ def build(dest: Path, *, docker: bool = True) -> Path:
           cgroup="/system.slice/mariadb.service")
     _proc(root, 900, name="php-fpm8.2", argv=["php-fpm: master process (/etc/php/8.2/fpm/php-fpm.conf)"],
           cwd="/", uid=0, cgroup="/system.slice/php8.2-fpm.service")
+    _proc(root, 6001, name="python3", argv=["/usr/bin/python3", "/opt/bot/main.py"], cwd="/",
+          uid=1000, cgroup="/system.slice/bot.service")
     _write(root, "/run/php/php8.2-fpm.sock", "")
 
     # -- pm2 ---------------------------------------------------------------
@@ -336,7 +338,8 @@ def build(dest: Path, *, docker: bool = True) -> Path:
         _write(dest, "docker/containers.json", json.dumps([
             {"Id": GRAFANA_ID, "Names": ["/monitoring-grafana-1"], "Image": "grafana/grafana:11.2.0",
              "State": "running", "Status": "Up 3 days",
-             "Ports": [{"IP": "0.0.0.0", "PrivatePort": 3000, "PublicPort": 3001, "Type": "tcp"},
+             "Ports": [{"IP": "0.0.0.0", "PrivatePort": 25, "PublicPort": 2025, "Type": "tcp"},
+                       {"IP": "0.0.0.0", "PrivatePort": 3000, "PublicPort": 3001, "Type": "tcp"},
                        {"IP": "::", "PrivatePort": 3000, "PublicPort": 3001, "Type": "tcp"}],
              "Labels": {"com.docker.compose.project": "monitoring",
                         "com.docker.compose.project.working_dir": "/opt/monitoring",
@@ -361,7 +364,7 @@ def build(dest: Path, *, docker: bool = True) -> Path:
         LISTEN 0      4096            [::]:3001          [::]:*    users:(("docker-proxy",pid=4101,fd=4))
         LISTEN 0      4096               *:9100             *:*    users:(("prometheus-node",pid=4001,fd=3))
         LISTEN 0      5            0.0.0.0:5055       0.0.0.0:*    users:(("python3",pid=5001,fd=3))
-        LISTEN 0      80         127.0.0.1:3306       0.0.0.0:*    users:(("mariadbd",pid=800,fd=20))
+        LISTEN 0      80         127.0.0.1:3306       0.0.0.0:*    users:(("systemd",pid=1,fd=50),("mariadbd",pid=800,fd=20))
         """)
     _write(dest, "commands/ss-unix.txt", """
         u_str LISTEN 0      511    /run/php/php8.2-fpm.sock 21345            * 0     users:(("php-fpm8.2",pid=901,fd=10),("php-fpm8.2",pid=900,fd=8))
@@ -369,6 +372,8 @@ def build(dest: Path, *, docker: bool = True) -> Path:
         """)
     units = [
         ("api.service", "Acme API (gunicorn)"),
+        ("bot.service", "Discord bot"),
+        ("colord.service", "Manage, Install and Generate Color Profiles"),
         ("cron.service", "Regular background program processing daemon"),
         ("dbus.service", "D-Bus System Message Bus"),
         ("docker.service", "Docker Application Container Engine"),
@@ -400,6 +405,26 @@ def build(dest: Path, *, docker: bool = True) -> Path:
         User=mysql
         ExecStart={ path=/usr/sbin/mariadbd ; argv[]=/usr/sbin/mariadbd $MYSQLD_OPTS ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
         FragmentPath=/lib/systemd/system/mariadb.service
+        ActiveState=active
+        SubState=running
+
+        Id=bot.service
+        Description=Discord bot
+        MainPID=6001
+        WorkingDirectory=
+        User=alice
+        ExecStart={ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /opt/bot/main.py ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+        FragmentPath=/etc/systemd/system/bot.service
+        ActiveState=active
+        SubState=running
+
+        Id=colord.service
+        Description=Manage, Install and Generate Color Profiles
+        MainPID=2134
+        WorkingDirectory=
+        User=colord
+        ExecStart={ path=/usr/libexec/colord ; argv[]=/usr/libexec/colord ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
+        FragmentPath=/lib/systemd/system/colord.service
         ActiveState=active
         SubState=running
 

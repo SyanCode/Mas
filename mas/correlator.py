@@ -36,6 +36,9 @@ log = logging.getLogger(__name__)
 # Local DNS stubs are never user services.
 IGNORED_ADDRESSES = {"127.0.0.53", "127.0.0.54"}
 
+SYSTEM_PATH_PREFIXES = ("/usr/", "/bin/", "/sbin/", "/lib/", "/lib64/", "/run/", "/etc/",
+                        "/var/run/", "/var/lib/", "/dev/", "/proc/", "/sys/")
+
 
 def slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9.]+", "-", value.lower()).strip("-.") or "service"
@@ -159,7 +162,9 @@ class Correlator:
         if target.kind == "tcp" and target.is_local and target.port:
             port = target.port
             if port in self.docker_by_port:
-                return self._from_container(self.docker_by_port[port])
+                backend = self._from_container(self.docker_by_port[port])
+                backend.port = port  # the port nginx uses, not the lowest published one
+                return backend
             sock = self.by_port.get(port)
             if sock is None:
                 # Nothing listens: the app behind the vhost is down (or ss failed).
@@ -316,11 +321,23 @@ class Correlator:
                 continue
             self.add_unclaimed(b)
         for u in self.units.values():
+            if f"systemd:{u.name}" not in self.claimed and self._is_os_daemon(u):
+                continue
             self.add_unclaimed(self._from_unit(u))
 
         for svc in self.services.values():
             self._enrich_git(svc)
         return sorted(self.services.values(), key=lambda s: (not s.domains, s.name.lower()))
+
+    def _is_os_daemon(self, u: SystemdUnit) -> bool:
+        """A unit with no port (checked by the caller), no working directory and a
+        command that only touches system paths (colord, smartd, preload...)."""
+        if not self.config.hide_os_daemons or not u.exec_start:
+            return False
+        if u.working_directory and u.working_directory != "/":
+            return False
+        paths = re.findall(r"(?:^|[\s=:])(/[^\s;'\"]+)", u.exec_start)
+        return bool(paths) and all(p.startswith(SYSTEM_PATH_PREFIXES) for p in paths)
 
     def _enrich_git(self, svc: Service) -> None:
         try:

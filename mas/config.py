@@ -39,6 +39,9 @@ DEFAULT_EXCLUDED_PROCESSES = [
 class Config:
     excluded_units: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDED_UNITS))
     excluded_processes: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDED_PROCESSES))
+    # Hide systemd units with no port, no working directory and a command that
+    # only references system paths (colord, smartd, preload, ...).
+    hide_os_daemons: bool = True
 
     def unit_excluded(self, unit: str) -> bool:
         base = unit[: -len(".service")] if unit.endswith(".service") else unit
@@ -69,4 +72,6 @@ def load_config(host: Host, path: str = CONFIG_PATH) -> Config:
         cfg.excluded_units += [str(x) for x in scan["extra_exclude_units"]]
     if isinstance(scan.get("exclude_processes"), list):
         cfg.excluded_processes = [str(x) for x in scan["exclude_processes"]]
+    if isinstance(scan.get("hide_os_daemons"), bool):
+        cfg.hide_os_daemons = scan["hide_os_daemons"]
     return cfg

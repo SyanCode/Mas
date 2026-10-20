@@ -20,7 +20,7 @@ class ListeningSocket:
     @property
     def pid(self) -> int | None:
         # ss lists workers before the master; the lowest pid is usually the parent.
-        return min(self.pids) if self.pids else None
+        return self.pids[0] if self.pids else None
 
     @property
     def is_loopback(self) -> bool:
@@ -37,10 +37,18 @@ def _split_local(local: str) -> tuple[str, int | None]:
 
 
 def _users(text: str) -> tuple[str | None, list[int]]:
-    found = _USERS_RE.findall(text)
-    if not found:
+    """Return the owning process name and its pids, lowest (master) first.
+
+    With socket activation systemd (PID 1) holds the socket too; the real
+    service is the other process, so PID 1 only counts when it is alone.
+    """
+    owners = {int(pid): name for name, pid in _USERS_RE.findall(text)}
+    if len(owners) > 1:
+        owners.pop(1, None)
+    if not owners:
         return None, []
-    return found[0][0], sorted({int(pid) for _, pid in found})
+    pids = sorted(owners)
+    return owners[pids[0]], pids
 
 
 def parse_ss_tcp(output: str) -> list[ListeningSocket]:
