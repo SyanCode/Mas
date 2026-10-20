@@ -119,9 +119,13 @@ def check_certificates(host: Host, sites: list[NginxSite], lineages: list[Lineag
                                     "certbot renews 30 days before expiry: the renewal is failing.",
                                     f"sudo certbot renew --cert-name {lin.name} --dry-run"))
         if not used:
-            checks.append(Check("info", "certificates", f"{lin.name}: not used by any enabled site",
-                                f"No enabled nginx vhost serves {', '.join(lin.domains) or lin.name}; certbot still "
-                                "tries to renew it.", f"sudo certbot delete --cert-name {lin.name}"))
+            checks.append(Check(
+                "info", "certificates", f"{lin.name}: not used by any enabled site",
+                f"No nginx vhost loaded from nginx.conf serves {', '.join(lin.domains) or lin.name}; certbot still "
+                "tries to renew it. Make sure no other program (Docker, another web server) uses it before removing.",
+                f"sudo grep -R '{lin.name}' /etc/nginx /etc/docker /opt 2>/dev/null   # then, if really unused: "
+                f"sudo certbot delete --cert-name {lin.name}",
+            ))
 
         auth = lin.params.get("authenticator", "")
         hooks = " ".join(lin.params.get(k, "") for k in ("pre_hook", "post_hook"))

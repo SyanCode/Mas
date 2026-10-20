@@ -50,6 +50,22 @@ def test_broken_file_does_not_break_collection(server_dir, tmp_path):
     assert "app.example.com" in {s.primary_name for s in sites}
 
 
+def test_vhosts_included_from_nginx_conf_anywhere(tmp_path):
+    from mas.host import FixtureHost
+
+    dest = server.build(tmp_path / "srv")
+    conf = dest / "root/etc/nginx/nginx.conf"
+    conf.write_text(conf.read_text().replace("include /etc/nginx/sites-enabled/*;",
+                                             "include /etc/nginx/sites-enabled/*;\n    include vhosts/*.conf;"))
+    (dest / "root/etc/nginx/vhosts").mkdir()
+    (dest / "root/etc/nginx/vhosts/maint.conf").write_text(
+        "server { listen 80; server_name maint.example.com; location / { proxy_pass http://127.0.0.1:9091; } }\n")
+    (dest / "root/etc/nginx/vhosts/.hidden.conf").write_text("server { server_name hidden.example.com; root /x; }\n")
+    sites = {s.primary_name for s in nginx.collect(ScanContext(FixtureHost(dest)))}
+    assert "maint.example.com" in sites and "app.example.com" in sites
+    assert "hidden.example.com" not in sites
+
+
 def test_missing_nginx_dir(tmp_path):
     from mas.host import Host
 

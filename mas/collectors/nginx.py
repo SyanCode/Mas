@@ -173,6 +173,8 @@ def _expand_includes(
                 ctx.warn(f"nginx: {d.file}:{d.line}: include {d.args[0]} not found")
                 matches = []
             for match in matches:
+                if PurePosixPath(match).name.startswith("."):
+                    continue  # nginx's glob() skips hidden files too
                 if match in stack:
                     ctx.warn(f"nginx: include loop on {match}")
                 elif ctx.host.is_file(match):
@@ -508,21 +510,21 @@ def collect(ctx: ScanContext) -> list[NginxSite]:
         ctx.warn(f"nginx: {NGINX_DIR} not found, no vhost detected")
         return []
 
-    files = [
-        f
-        for pattern in SITE_GLOBS
-        for f in host.glob(pattern)
-        if not PurePosixPath(f).name.startswith(".") and host.is_file(f)
-    ]
-    directives = [d for f in files for d in load(ctx, f)]
+    main_conf = f"{NGINX_DIR}/nginx.conf"
+    if host.is_file(main_conf):
+        # Follow nginx.conf and its includes, exactly like nginx: vhosts may live
+        # anywhere (sites-enabled, conf.d, a custom vhosts/ folder…).
+        directives = load(ctx, main_conf)
+    else:
+        files = [
+            f
+            for pattern in SITE_GLOBS
+            for f in host.glob(pattern)
+            if not PurePosixPath(f).name.startswith(".") and host.is_file(f)
+        ]
+        directives = [d for f in files for d in load(ctx, f)]
 
     upstreams: dict[str, list[str]] = {}
-    main_conf = host.read_text(f"{NGINX_DIR}/nginx.conf")
-    if main_conf:
-        try:  # only for upstream blocks; its includes are the files above
-            _walk_upstreams(parse(main_conf, f"{NGINX_DIR}/nginx.conf"), upstreams)
-        except NginxParseError as exc:
-            ctx.warn(f"nginx: cannot parse {exc}")
     _walk_upstreams(directives, upstreams)
 
     blocks = [server_from_directive(d) for d in _walk_servers(directives)]
