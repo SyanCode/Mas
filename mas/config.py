@@ -68,6 +68,7 @@ class Config:
     port_min: int = 7100
     port_max: int = 7999
     healthcheck_timeout: int = 60
+    dns_wait_seconds: int = 120  # wait for a new DNS record before certbot
     public_ip: str | None = None  # [health] override for DNS checks
 
     @property

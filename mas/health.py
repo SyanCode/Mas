@@ -186,7 +186,7 @@ def _resolve(name: str) -> list[str]:
         return []
 
 
-def check_dns(names: set[str], public_ip: str | None, resolver=_resolve) -> list[Check]:
+def resolve_all(names: set[str], resolver=_resolve) -> dict[str, list[str]]:
     names = {n for n in names if "." in n and not n.startswith(("*", "~"))}
     results: dict[str, list[str]] = {}
     with ThreadPoolExecutor(max_workers=16) as pool:
@@ -194,12 +194,25 @@ def check_dns(names: set[str], public_ip: str | None, resolver=_resolve) -> list
         done, _ = wait(futures, timeout=15)
         for fut in done:
             results[futures[fut]] = fut.result()
+    return results
 
-    server_ip = public_ip
-    if not server_ip:
-        counts = Counter(ip for ips in results.values() for ip in ips)
-        if counts and counts.most_common(1)[0][1] >= 2:
-            server_ip = counts.most_common(1)[0][0]
+
+def majority_ip(results: dict[str, list[str]]) -> str | None:
+    """The address most served domains resolve to (at least two): this server."""
+    counts = Counter(ip for ips in results.values() for ip in ips)
+    if counts and counts.most_common(1)[0][1] >= 2:
+        return counts.most_common(1)[0][0]
+    return None
+
+
+def guess_public_ip(host: Host, resolver=_resolve) -> str | None:
+    sites = nginx_collector.collect(ScanContext(host))
+    return majority_ip(resolve_all({n for s in sites for n in s.names}, resolver))
+
+
+def check_dns(names: set[str], public_ip: str | None, resolver=_resolve) -> list[Check]:
+    results = resolve_all(names, resolver)
+    server_ip = public_ip or majority_ip(results)
     checks = []
     for name, ips in sorted(results.items()):
         if not ips:
@@ -213,7 +226,7 @@ def check_dns(names: set[str], public_ip: str | None, resolver=_resolve) -> list
     return checks
 
 
-def run_checks(host: Host, config: Config | None = None, dns: bool = True) -> list[Check]:
+def run_checks(host: Host, config: Config | None = None, dns: bool = True, public_ip: str | None = None) -> list[Check]:
     ctx = ScanContext(host, config or Config())
     sites = nginx_collector.collect(ctx)
     sockets = ports_collector.collect(ctx)
@@ -221,6 +234,6 @@ def run_checks(host: Host, config: Config | None = None, dns: bool = True) -> li
     checks = check_nginx(host, sites, sockets) + check_certificates(host, sites, lineages)
     if dns:
         names = {n for s in sites for n in s.names} | {d for lin in lineages for d in lin.domains}
-        checks += check_dns(names, ctx.config.public_ip)
+        checks += check_dns(names, public_ip or ctx.config.public_ip)
     order = {"error": 0, "warning": 1, "info": 2}
     return sorted(checks, key=lambda c: (order[c.level], c.category, c.title))

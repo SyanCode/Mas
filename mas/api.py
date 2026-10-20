@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_deploy, auth
+from mas import __version__, api_deploy, api_dns, auth
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.deploy import Deployer
 from mas.github import GitHubApp
@@ -105,6 +105,7 @@ def create_app(
     db: Database | None = None,
     background: bool = True,
     web_dir: Path | None = None,
+    ovh_opener=None,  # tests: fake OVH API
 ) -> FastAPI:
     host = host or Host()
     config = config or load_config(host)
@@ -362,6 +363,8 @@ def create_app(
     app.state.deployer = deployer
     api_deploy.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
                         deployer=deployer, github_client=github_client, reset_github=github_cache.clear)
+    api_dns.register(app, host=host, config=config, db=db, current_session=current_session, deployer=deployer,
+                     opener=ovh_opener)
 
     # -- dashboard ---------------------------------------------------------
 

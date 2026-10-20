@@ -43,7 +43,9 @@ from mas.collectors.ports import parse_ss_tcp
 from mas.collectors.processes import load_users
 from mas.config import Config
 from mas.db import Database
+from mas.dns import server_ips
 from mas.envcrypt import EnvError, decrypt_env, load_fernet, systemd_env_file
+from mas.health import _resolve
 from mas.github import GitHubApp, GitHubError, git_auth_env
 from mas.host import Host
 from mas.models import Service, ServiceType
@@ -236,8 +238,10 @@ class Deployer:
         find_service: Callable[[str], Service | None] = lambda _id: None,
         health_check: Callable[[str, str | None, float], tuple[bool, str]] = http_health,
         on_change: Callable[[], None] | None = None,
+        resolver: Callable[[str], list[str]] = _resolve,
     ) -> None:
         self.host, self.config, self.db = host, config, db
+        self.resolver = resolver
         self.github = github
         self.find_service = find_service
         self.health_check = health_check
@@ -469,10 +473,28 @@ class Deployer:
         content = templates.vhost(app["id"], app["domain"], self._vhost_body(app, app_type, paths), https)
         self._nginx_apply(rlog, available, content, enabled)
 
+    def _wait_dns(self, domain: str, rlog: ReleaseLog) -> None:
+        """Wait (bounded) until a freshly created DNS record is visible."""
+        expected = server_ips(self.db, self.config)[0]
+        if not expected or self.config.dns_wait_seconds <= 0:
+            return
+        deadline = time.monotonic() + self.config.dns_wait_seconds
+        while True:
+            ips = self.resolver(domain)
+            if expected in ips:
+                rlog.line(f"DNS: {domain} → {expected}")
+                return
+            if time.monotonic() >= deadline:
+                rlog.line(f"DNS: {domain} resolves to {', '.join(ips) or 'nothing'} (expected {expected}), "
+                          "trying anyway")
+                return
+            time.sleep(5)
+
     def _ensure_certificate(self, app: dict, app_type: ServiceType, paths: AppPaths, rlog: ReleaseLog) -> None:
         domain = app["domain"]
         if self.host.exists(f"/etc/letsencrypt/live/{domain}/fullchain.pem"):
             return
+        self._wait_dns(domain, rlog)
         rlog.step(f"Requesting a certificate for {domain}")
         contact = ["-m", self.config.letsencrypt_email] if self.config.letsencrypt_email else \
             ["--register-unsafely-without-email"]

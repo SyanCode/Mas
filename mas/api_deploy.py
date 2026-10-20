@@ -24,6 +24,7 @@ from mas.db import Database
 from mas.deploy import (
     PROXY_TYPES, DeployError, Deployer, allocate_port, suggest_start_command, validate_app,
 )
+from mas.dns import server_ips
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env
 from mas.github import GitHubApp, GitHubError, convert_manifest, repo_from_remote, verify_signature
 from mas.health import run_checks
@@ -132,7 +133,7 @@ def register(
     async def health_checks(refresh: bool = False, _=Depends(current_session)) -> dict:
         cached_at = health_cache.get("at", 0.0)
         if refresh or time.time() - float(cached_at) > HEALTH_TTL:
-            checks = await asyncio.to_thread(run_checks, host, config)
+            checks = await asyncio.to_thread(run_checks, host, config, True, server_ips(db, config)[0])
             health_cache.update(at=time.time(), checks=[c.as_dict() for c in checks])
         return {"checked_at": health_cache["at"], "checks": health_cache["checks"]}
 
