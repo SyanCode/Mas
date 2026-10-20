@@ -124,6 +124,12 @@ $ sudo mas user passwd [name]
 
 Press <kbd>⌘K</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd> anywhere to jump to a service, an app or a page.
 
+The dashboard speaks **English, French, Spanish and German**: the browser language is used by
+default, and the picker in the user menu (and on the sign-in page) remembers your choice. The
+English text is the key (`t("Deploy Supabase")`), translations live in `web/locales/<lang>.json`,
+and `tests/test_i18n.py` fails if a text has no translation. Adding a language is one JSON file
+plus one line in `web/lib/i18n.tsx`.
+
 - Services list: status dot, domains (links), type, manager, port, SSL expiry (orange under
   14 days), GitHub repository; filters (with/without domain, issues) and search.
 - Service page: details, logs (refresh / auto-refresh), actions with confirmation for stop and

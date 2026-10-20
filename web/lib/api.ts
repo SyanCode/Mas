@@ -1,3 +1,5 @@
+import { tr } from "@/lib/i18n";
+
 export type Status = "running" | "stopped" | "errored" | "unknown";
 export type ServiceType = "php" | "nextjs" | "node" | "python" | "static" | "unknown";
 export const SERVICE_TYPES: ServiceType[] = ["php", "nextjs", "node", "python", "static", "unknown"];
@@ -286,8 +288,8 @@ export function daysUntil(iso: string): number {
 
 export function timeAgo(iso: string): string {
   const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return `${Math.max(s, 0)}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return `${Math.floor(s / 86400)} d ago`;
+  if (s < 60) return tr("{n}s ago", { n: Math.max(s, 0) });
+  if (s < 3600) return tr("{n} min ago", { n: Math.floor(s / 60) });
+  if (s < 86400) return tr("{n} h ago", { n: Math.floor(s / 3600) });
+  return tr("{n} d ago", { n: Math.floor(s / 86400) });
 }

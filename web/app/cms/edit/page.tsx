@@ -6,6 +6,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Shell } from "@/components/Shell";
 import { Button, Card, ErrorText, Input, Label, Notice, PageHeader, ReleaseBadge, Select, Spinner } from "@/components/ui";
 import { api, ApiError, uploadFile, type CmsField, type CmsPage, type CmsSite, type ReleaseStatus } from "@/lib/api";
+import { tr, useT } from "@/lib/i18n";
 
 type Values = Record<string, unknown>;
 type Previews = Record<string, string>; // "mas-upload:…" → object URL
@@ -26,7 +27,7 @@ async function prepareImage(file: File, maxKb: number): Promise<Blob> {
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.85));
-    if (!blob) throw new Error("this image cannot be read");
+    if (!blob) throw new Error(tr("this image cannot be read"));
     if (blob.size <= limit || scale < 0.15) return blob;
     scale *= 0.75;
   }
@@ -47,6 +48,7 @@ interface InputProps {
 }
 
 function ImageInput({ appId, field, value, onChange, previews, addPreview }: InputProps & { value: string }) {
+  const t = useT();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -74,11 +76,11 @@ function ImageInput({ appId, field, value, onChange, previews, addPreview }: Inp
       <div className="flex items-center gap-3">
         <div className="flex h-24 w-36 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-zinc-300 bg-zinc-100 dark:border-white/10 dark:bg-black/40">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          {src ? <img src={src} alt="" className="h-full w-full object-cover" /> : <span className="text-xs text-zinc-500">No image</span>}
+          {src ? <img src={src} alt="" className="h-full w-full object-cover" /> : <span className="text-xs text-zinc-500">{t("No image")}</span>}
         </div>
         <div className="flex flex-col gap-1.5">
-          <Button type="button" onClick={() => input.current?.click()} disabled={busy}>{busy ? <Spinner /> : null}{value ? "Replace" : "Upload"}</Button>
-          {value && !field.required && <Button type="button" variant="ghost" onClick={() => onChange("")}>Remove</Button>}
+          <Button type="button" onClick={() => input.current?.click()} disabled={busy}>{busy ? <Spinner /> : null}{value ? t("Replace") : t("Upload")}</Button>
+          {value && !field.required && <Button type="button" variant="ghost" onClick={() => onChange("")}>{t("Remove")}</Button>}
         </div>
         <input ref={input} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
       </div>
@@ -88,6 +90,7 @@ function ImageInput({ appId, field, value, onChange, previews, addPreview }: Inp
 }
 
 function FieldInput(props: InputProps) {
+  const t = useT();
   const { field, value, onChange } = props;
   const text = typeof value === "string" ? value : "";
   const title = `${field.label}${field.required ? " *" : ""}`;
@@ -103,7 +106,7 @@ function FieldInput(props: InputProps) {
     case "textarea":
     case "markdown":
       return (
-        <Label title={title} hint={<span className="flex justify-between gap-2"><span>{hint ?? (field.type === "markdown" ? "Markdown: **bold**, *italic*, [link](https://…), blank line = new paragraph" : "")}</span><Counter value={text} max={field.max} /></span>}>
+        <Label title={title} hint={<span className="flex justify-between gap-2"><span>{hint ?? (field.type === "markdown" ? t("Markdown: **bold**, *italic*, [link](https://…), blank line = new paragraph") : "")}</span><Counter value={text} max={field.max} /></span>}>
           <textarea value={text} maxLength={field.max} placeholder={field.placeholder} rows={field.type === "markdown" ? 10 : 4}
             onChange={(e) => onChange(e.target.value)} className={FIELD_CLASS} />
         </Label>
@@ -136,7 +139,7 @@ function FieldInput(props: InputProps) {
     case "email":
     case "date":
       return (
-        <Label title={title} hint={hint ?? (field.type === "url" ? "https://…, /page, mailto: or tel:" : undefined)}>
+        <Label title={title} hint={hint ?? (field.type === "url" ? t("https://…, /page, mailto: or tel:") : undefined)}>
           <Input type={field.type === "url" ? "text" : field.type} value={text} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} />
         </Label>
       );
@@ -167,6 +170,7 @@ function emptyItem(fields: CmsField[]): Values {
 }
 
 function ListInput(props: InputProps) {
+  const t = useT();
   const { field, onChange } = props;
   const items = Array.isArray(props.value) ? (props.value as Values[]) : [];
   const subs = field.fields ?? [];
@@ -187,11 +191,11 @@ function ListInput(props: InputProps) {
       {items.map((item, i) => (
         <div key={i} className="space-y-3 rounded-xl border border-zinc-200/80 p-4 dark:border-white/[0.06]">
           <div className="flex items-center justify-between text-xs text-zinc-500">
-            <span>{field.item_label ?? "Item"} {i + 1}</span>
+            <span>{field.item_label ?? t("Item")} {i + 1}</span>
             <div className="flex gap-1">
-              <Button type="button" variant="ghost" disabled={i === 0} onClick={() => move(i, -1)} title="Move up">↑</Button>
-              <Button type="button" variant="ghost" disabled={i === items.length - 1} onClick={() => move(i, 1)} title="Move down">↓</Button>
-              <Button type="button" variant="ghost" disabled={items.length <= (field.min_items ?? 0)} onClick={() => onChange(items.filter((_, j) => j !== i))}>Remove</Button>
+              <Button type="button" variant="ghost" disabled={i === 0} onClick={() => move(i, -1)} title={t("Move up")}>↑</Button>
+              <Button type="button" variant="ghost" disabled={i === items.length - 1} onClick={() => move(i, 1)} title={t("Move down")}>↓</Button>
+              <Button type="button" variant="ghost" disabled={items.length <= (field.min_items ?? 0)} onClick={() => onChange(items.filter((_, j) => j !== i))}>{t("Remove")}</Button>
             </div>
           </div>
           {subs.map((sub) => (
@@ -200,7 +204,7 @@ function ListInput(props: InputProps) {
           ))}
         </div>
       ))}
-      <Button type="button" disabled={items.length >= max} onClick={() => onChange([...items, emptyItem(subs)])}>+ Add {(field.item_label ?? "item").toLowerCase()}</Button>
+      <Button type="button" disabled={items.length >= max} onClick={() => onChange([...items, emptyItem(subs)])}>+ {t("Add")} {(field.item_label ?? t("item")).toLowerCase()}</Button>
     </div>
   );
 }
@@ -208,6 +212,7 @@ function ListInput(props: InputProps) {
 type Publish = { phase: "saving" | "waiting" | ReleaseStatus; after: number; startedAt: number } | null;
 
 function Editor() {
+  const t = useT();
   const appId = useSearchParams().get("app") ?? "";
   const [site, setSite] = useState<(CmsSite & { pages: CmsPage[] }) | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
@@ -264,7 +269,7 @@ function Editor() {
       setNote("");
       if (r.unchanged) {
         setPublish(null);
-        setMsg("Nothing changed.");
+        setMsg(t("Nothing changed."));
       } else {
         setPublish({ phase: "waiting", after, startedAt: Date.now() });
       }
@@ -276,15 +281,15 @@ function Editor() {
   }
 
   function switchPage(id: string) {
-    if (dirty && !window.confirm("Discard the changes on this page?")) return;
+    if (dirty && !window.confirm(t("Discard the changes on this page?"))) return;
     if (page) setValues({ ...values, [page.id]: page.values });
     setPageId(id);
   }
 
-  if (!appId) return <ErrorText>No site selected.</ErrorText>;
+  if (!appId) return <ErrorText>{t("No site selected.")}</ErrorText>;
   if (!site) {
     return error
-      ? <div className="space-y-4"><ErrorText>{error}</ErrorText><Link href="/cms/" className="text-sm text-indigo-500 hover:underline">← My sites</Link></div>
+      ? <div className="space-y-4"><ErrorText>{error}</ErrorText><Link href="/cms/" className="text-sm text-indigo-500 hover:underline">← {t("My sites")}</Link></div>
       : <div className="glass shimmer h-64 rounded-2xl" />;
   }
 
@@ -293,18 +298,18 @@ function Editor() {
 
   return (
     <>
-      <PageHeader eyebrow={<Link href="/cms/" className="hover:underline">← My sites</Link>} title={site.name}
+      <PageHeader eyebrow={<Link href="/cms/" className="hover:underline">← {t("My sites")}</Link>} title={site.name}
         subtitle={site.domain ?? undefined}
-        actions={site.url ? <a href={site.url} target="_blank" rel="noreferrer" className="glass inline-flex h-8 items-center rounded-lg px-3 text-[13px] font-medium hover:bg-white/[0.08]">View site ↗</a> : null} />
+        actions={site.url ? <a href={site.url} target="_blank" rel="noreferrer" className="glass inline-flex h-8 items-center rounded-lg px-3 text-[13px] font-medium hover:bg-white/[0.08]">{t("View site")} ↗</a> : null} />
       <div className="mb-4 space-y-3">
         <ErrorText>{error}</ErrorText>
         <Notice>{msg}</Notice>
         {status && (
           <div className="glass flex items-center gap-3 rounded-xl px-4 py-3 text-sm">
-            {status === "waiting" ? <><Spinner /> Saved. Publishing your changes…</>
-              : status === "live" ? <><ReleaseBadge status="live" /> Your changes are online.{site.url && <a href={site.url} target="_blank" rel="noreferrer" className="text-indigo-500 hover:underline">View ↗</a>}</>
-              : status === "failed" ? <><ReleaseBadge status="failed" /> Saved, but the site could not be rebuilt. Your administrator can see why in Mas.</>
-              : <><ReleaseBadge status={status} /> Publishing your changes…</>}
+            {status === "waiting" ? <><Spinner /> {t("Saved. Publishing your changes…")}</>
+              : status === "live" ? <><ReleaseBadge status="live" /> {t("Your changes are online.")}{site.url && <a href={site.url} target="_blank" rel="noreferrer" className="text-indigo-500 hover:underline">{t("View")} ↗</a>}</>
+              : status === "failed" ? <><ReleaseBadge status="failed" /> {t("Saved, but the site could not be rebuilt. Your administrator can see why in Mas.")}</>
+              : <><ReleaseBadge status={status} /> {t("Publishing your changes…")}</>}
           </div>
         )}
       </div>
@@ -331,9 +336,9 @@ function Editor() {
                     onChange={(v) => setValues({ ...values, [page.id]: { ...current, [f.key]: v } })} />
                 ))}
                 <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200/80 bg-white/90 p-3 backdrop-blur dark:border-white/[0.08] dark:bg-zinc-950/90">
-                  <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={100} placeholder="What did you change? (optional)" className="min-w-[12rem] flex-1" />
-                  {dirty && <Button type="button" variant="ghost" onClick={() => setValues({ ...values, [page.id]: page.values })}>Discard</Button>}
-                  <Button variant="glow" disabled={!dirty || busy}>{busy ? <Spinner /> : null}Publish</Button>
+                  <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={100} placeholder={t("What did you change? (optional)")} className="min-w-[12rem] flex-1" />
+                  {dirty && <Button type="button" variant="ghost" onClick={() => setValues({ ...values, [page.id]: page.values })}>{t("Discard")}</Button>}
+                  <Button variant="glow" disabled={!dirty || busy}>{busy ? <Spinner /> : null}{t("Publish")}</Button>
                 </div>
               </form>
             </Card>

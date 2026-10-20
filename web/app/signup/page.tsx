@@ -5,8 +5,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Backdrop, Logo } from "@/components/Shell";
 import { Button, ErrorText, Input, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
+import { LanguagePicker, useT } from "@/lib/i18n";
 
 export default function SignupPage() {
+  const t = useT();
   const [info, setInfo] = useState<{ open: boolean; code_required: boolean; invite: boolean | null } | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
   const [username, setUsername] = useState("");
@@ -28,7 +30,7 @@ export default function SignupPage() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (password !== confirm) {
-      setError("The two passwords are different.");
+      setError(t("The two passwords are different."));
       return;
     }
     setBusy(true);
@@ -54,39 +56,40 @@ export default function SignupPage() {
         <div className="flex flex-col items-center gap-3 text-center">
           <Logo className="h-12 w-12" />
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">Create your account</h1>
-            <p className="mt-1 text-sm text-zinc-500">To edit the content of your website.</p>
+            <h1 className="text-xl font-semibold tracking-tight">{t("Create your account")}</h1>
+            <p className="mt-1 text-sm text-zinc-500">{t("To edit the content of your website.")}</p>
           </div>
         </div>
 
         {info === null ? (
           <div className="flex justify-center"><Spinner /></div>
         ) : invite && !invited ? (
-          <p className="text-center text-sm text-zinc-500">This invitation link was already used or has expired. Ask your administrator for a new one.</p>
+          <p className="text-center text-sm text-zinc-500">{t("This invitation link was already used or has expired. Ask your administrator for a new one.")}</p>
         ) : !invited && !info.open ? (
-          <p className="text-center text-sm text-zinc-500">Sign-up is closed. Ask the administrator of this server for an account.</p>
+          <p className="text-center text-sm text-zinc-500">{t("Sign-up is closed. Ask the administrator of this server for an account.")}</p>
         ) : (
           <>
             <div className="space-y-3">
-              <Input value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} autoComplete="username" placeholder="Username (lowercase)" autoFocus required />
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder="Password (10 characters or more)" required />
-              <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" placeholder="Password again" required />
+              <Input value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} autoComplete="username" placeholder={t("Username (lowercase)")} autoFocus required />
+              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" placeholder={t("Password (10 characters or more)")} required />
+              <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" placeholder={t("Password again")} required />
               {!invited && info.code_required && (
-                <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Invitation code" autoComplete="off" required />
+                <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder={t("Invitation code")} autoComplete="off" required />
               )}
             </div>
             <ErrorText>{error}</ErrorText>
             <Button variant="glow" type="submit" disabled={busy} className="!h-10 w-full text-sm">
-              {busy ? <Spinner /> : null}Create my account
+              {busy ? <Spinner /> : null}{t("Create my account")}
             </Button>
             <p className="text-center text-xs text-zinc-500">
-              {invited ? "You were invited: your site is ready as soon as the account is created." : "Your administrator then gives you access to your site."}
+              {invited ? t("You were invited: your site is ready as soon as the account is created.") : t("Your administrator then gives you access to your site.")}
             </p>
           </>
         )}
         <p className="text-center text-xs text-zinc-500">
-          Already have an account? <Link href="/login/" className="font-medium text-indigo-500 hover:underline">Sign in</Link>
+          {t("Already have an account?")} <Link href="/login/" className="font-medium text-indigo-500 hover:underline">{t("Sign in")}</Link>
         </p>
+        <div className="flex justify-center"><LanguagePicker /></div>
       </form>
     </main>
   );

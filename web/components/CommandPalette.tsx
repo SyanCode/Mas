@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type App, type Service } from "@/lib/api";
 import { Kbd, StatusDot } from "@/components/ui";
+import { msg, useT } from "@/lib/i18n";
 
 interface Item {
   label: string;
@@ -13,17 +14,21 @@ interface Item {
 }
 
 const PAGES: Item[] = [
-  { label: "Overview", hint: "services on this server", href: "/", group: "Pages" },
-  { label: "Apps", hint: "deployments from GitHub", href: "/apps/", group: "Pages" },
-  { label: "New app", hint: "deploy a repository", href: "/apps/new/", group: "Pages" },
-  { label: "Databases", hint: "self-hosted Supabase", href: "/databases/", group: "Pages" },
-  { label: "Health", hint: "certificates, nginx, DNS", href: "/health/", group: "Pages" },
-  { label: "Activity", hint: "audit log", href: "/history/", group: "Pages" },
-  { label: "Settings", hint: "domains, GitHub, security", href: "/settings/", group: "Pages" },
+  { label: msg("Overview"), hint: msg("services on this server"), href: "/", group: "Pages" },
+  { label: msg("Apps"), hint: msg("deployments from GitHub"), href: "/apps/", group: "Pages" },
+  { label: msg("New app"), hint: msg("deploy a repository"), href: "/apps/new/", group: "Pages" },
+  { label: msg("Databases"), hint: msg("self-hosted Supabase"), href: "/databases/", group: "Pages" },
+  { label: msg("Health"), hint: msg("certificates, nginx, DNS"), href: "/health/", group: "Pages" },
+  { label: msg("Activity"), hint: msg("audit log"), href: "/history/", group: "Pages" },
+  { label: msg("Settings"), hint: msg("domains, GitHub, security"), href: "/settings/", group: "Pages" },
 ];
 
 /** ⌘K / Ctrl+K: jump to any service, app or page. */
+// Group names shown in the list.
+const GROUPS: Record<string, string> = { Pages: msg("Pages"), Apps: msg("Apps"), Services: msg("Services") };
+
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<Item[]>(PAGES);
   const [active, setActive] = useState(0);
@@ -79,7 +84,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
               if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
               if (e.key === "Enter") go(shown[active]);
             }}
-            placeholder="Search services, apps, pages…"
+            placeholder={t("Search services, apps, pages…")}
             className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
           />
           <Kbd>esc</Kbd>
@@ -88,7 +93,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           {shown.map((item, i) => (
             <li key={`${item.group}-${item.href}`}>
               {(i === 0 || shown[i - 1].group !== item.group) && (
-                <div className="px-2 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500">{item.group}</div>
+                <div className="px-2 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500">{t(GROUPS[item.group] ?? item.group)}</div>
               )}
               <button
                 onMouseEnter={() => setActive(i)}
@@ -96,13 +101,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${i === active ? "bg-zinc-100 dark:bg-white/[0.07]" : ""}`}
               >
                 {item.status ? <StatusDot status={item.status} size="sm" /> : <span className="h-2 w-2 rounded-full bg-indigo-400/60" />}
-                <span className="font-medium">{item.label}</span>
-                <span className="truncate text-xs text-zinc-500">{item.hint}</span>
+                <span className="font-medium">{item.group === "Pages" ? t(item.label) : item.label}</span>
+                <span className="truncate text-xs text-zinc-500">{item.group === "Pages" ? t(item.hint) : item.hint}</span>
                 {i === active && <span className="ml-auto text-xs text-zinc-500">↵</span>}
               </button>
             </li>
           ))}
-          {shown.length === 0 && <li className="px-3 py-8 text-center text-sm text-zinc-500">Nothing found.</li>}
+          {shown.length === 0 && <li className="px-3 py-8 text-center text-sm text-zinc-500">{t("Nothing found.")}</li>}
         </ul>
       </div>
     </div>

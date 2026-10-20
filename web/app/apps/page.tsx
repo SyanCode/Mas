@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
 import { Badge, EmptyState, ErrorText, Monogram, PageHeader, ReleaseBadge, StatusDot } from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type GitHubStatus } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 function hue(name: string) {
   let h = 0;
@@ -13,6 +14,7 @@ function hue(name: string) {
 }
 
 function AppCard({ a }: { a: App }) {
+  const t = useT();
   const last = a.last_release;
   const h = hue(a.id);
   return (
@@ -27,7 +29,7 @@ function AppCard({ a }: { a: App }) {
         <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.08)_1px,transparent_1px)] [background-size:22px_22px]" />
         <div className="absolute bottom-3 left-4 flex items-center gap-3">
           <Monogram name={a.id} />
-          <span className="text-sm font-medium text-white/90 drop-shadow">{a.domain ?? "no domain yet"}</span>
+          <span className="text-sm font-medium text-white/90 drop-shadow">{a.domain ?? t("no domain yet")}</span>
         </div>
         {last && <div className="absolute right-3 top-3"><ReleaseBadge status={last.status} /></div>}
       </div>
@@ -36,7 +38,7 @@ function AppCard({ a }: { a: App }) {
           <h3 className="truncate font-semibold tracking-tight">{a.id}</h3>
           <div className="flex gap-1.5">
             <Badge tone="sky">{a.type}</Badge>
-            {a.mode === "adopted" && <Badge tone="violet">adopted</Badge>}
+            {a.mode === "adopted" && <Badge tone="violet">{t("adopted")}</Badge>}
           </div>
         </div>
         <p className="truncate text-xs text-zinc-500">
@@ -51,7 +53,7 @@ function AppCard({ a }: { a: App }) {
               <span className="ml-auto shrink-0">{timeAgo(last.created_at)}</span>
             </>
           ) : (
-            <span>Never deployed</span>
+            <span>{t("Never deployed")}</span>
           )}
         </div>
       </div>
@@ -60,6 +62,7 @@ function AppCard({ a }: { a: App }) {
 }
 
 function Apps() {
+  const t = useT();
   const [apps, setApps] = useState<App[] | null>(null);
   const [github, setGithub] = useState<GitHubStatus | null>(null);
   const [error, setError] = useState("");
@@ -68,28 +71,28 @@ function Apps() {
     const load = () => api<App[]>("/apps").then(setApps).catch((e: ApiError) => setError(e.detail));
     load();
     api<GitHubStatus>("/github/status").then(setGithub).catch(() => {});
-    const t = setInterval(load, 8_000);
-    return () => clearInterval(t);
+    const timer = setInterval(load, 8_000);
+    return () => clearInterval(timer);
   }, []);
 
   const newButton = github?.configured ? (
     <Link href="/apps/new/" className="inline-flex h-9 items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 via-sky-500 to-fuchsia-500 px-4 text-sm font-medium text-white shadow-[0_0_30px_-8px_rgba(99,102,241,0.9)] transition hover:brightness-110">
-      <span className="text-base leading-none">+</span> New app
+      <span className="text-base leading-none">+</span> {t("New app")}
     </Link>
   ) : null;
 
   return (
     <>
-      <PageHeader eyebrow="Deployments" title="Apps" subtitle="Push to GitHub, Mas builds and ships it. Atomic releases, instant rollback." actions={newButton} />
+      <PageHeader eyebrow={t("Deployments")} title={t("Apps")} subtitle={t("Push to GitHub, Mas builds and ships it. Atomic releases, instant rollback.")} actions={newButton} />
       <ErrorText>{error}</ErrorText>
       {github && !github.configured && (
-        <EmptyState title="Connect GitHub to start deploying" action={<Link href="/settings/" className="text-sm font-medium text-indigo-500 hover:underline">Settings → GitHub →</Link>}>
-          One click creates a private GitHub App on your account; then pick a repository and Mas deploys every push.
+        <EmptyState title={t("Connect GitHub to start deploying")} action={<Link href="/settings/" className="text-sm font-medium text-indigo-500 hover:underline">{t("Settings")} → GitHub →</Link>}>
+          {t("One click creates a private GitHub App on your account; then pick a repository and Mas deploys every push.")}
         </EmptyState>
       )}
       {apps && apps.length === 0 && github?.configured && (
-        <EmptyState title="No app yet" action={newButton}>
-          Deploy a repository, or open a detected service with a GitHub remote and click “Connect to GitHub”.
+        <EmptyState title={t("No app yet")} action={newButton}>
+          {t("Deploy a repository, or open a detected service with a GitHub remote and click “Connect to GitHub”.")}
         </EmptyState>
       )}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">

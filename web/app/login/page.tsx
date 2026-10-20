@@ -5,10 +5,11 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Backdrop, Logo } from "@/components/Shell";
 import { Button, ErrorText, Input, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
+import { LanguagePicker, msg, useT } from "@/lib/i18n";
 
 const MESSAGES: Record<string, string> = {
-  invalid: "Wrong username or password.",
-  otp_invalid: "Wrong or already used code. Wait for the next one.",
+  invalid: msg("Wrong username or password."),
+  otp_invalid: msg("Wrong or already used code. Wait for the next one."),
 };
 
 function safeNext(): string {
@@ -17,6 +18,7 @@ function safeNext(): string {
 }
 
 export default function LoginPage() {
+  const t = useT();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
@@ -45,7 +47,7 @@ export default function LoginPage() {
       if (detail === "otp_required") {
         setNeedOtp(true);
       } else {
-        setError(MESSAGES[detail] ?? detail);
+        setError(MESSAGES[detail] ? t(MESSAGES[detail]) : detail);
         if (detail === "otp_invalid") setOtp("");
       }
     } finally {
@@ -61,15 +63,15 @@ export default function LoginPage() {
         <div className="flex flex-col items-center gap-3 text-center">
           <Logo className="h-12 w-12" />
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">{needOtp ? "Two-factor check" : <>Welcome to <span className="text-gradient">mas</span></>}</h1>
-            <p className="mt-1 text-sm text-zinc-500">{needOtp ? "Enter the 6-digit code from your authenticator app." : "Your server, mapped and deployed."}</p>
+            <h1 className="text-xl font-semibold tracking-tight">{needOtp ? t("Two-factor check") : <>{t("Welcome to")} <span className="text-gradient">mas</span></>}</h1>
+            <p className="mt-1 text-sm text-zinc-500">{needOtp ? t("Enter the 6-digit code from your authenticator app.") : t("Your server, mapped and deployed.")}</p>
           </div>
         </div>
 
         {!needOtp ? (
           <div className="space-y-3">
-            <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="Username" required />
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="Password" autoFocus required />
+            <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder={t("Username")} required />
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder={t("Password")} autoFocus required />
           </div>
         ) : (
           <Input
@@ -86,18 +88,19 @@ export default function LoginPage() {
         )}
         <ErrorText>{error}</ErrorText>
         <Button variant="glow" type="submit" disabled={busy} className="!h-10 w-full text-sm">
-          {busy ? <Spinner /> : null}{needOtp ? "Verify" : "Sign in"}
+          {busy ? <Spinner /> : null}{needOtp ? t("Verify") : t("Sign in")}
         </Button>
         {needOtp && (
           <button type="button" className="w-full text-xs text-zinc-500 hover:underline" onClick={() => { setNeedOtp(false); setOtp(""); setError(""); }}>
-            ← Back
+            ← {t("Back")}
           </button>
         )}
         {!needOtp && signupOpen && (
           <p className="text-center text-xs text-zinc-500">
-            No account yet? <Link href="/signup/" className="font-medium text-indigo-500 hover:underline">Create one</Link>
+            {t("No account yet?")} <Link href="/signup/" className="font-medium text-indigo-500 hover:underline">{t("Create one")}</Link>
           </p>
         )}
+        <div className="flex justify-center"><LanguagePicker /></div>
       </form>
     </main>
   );

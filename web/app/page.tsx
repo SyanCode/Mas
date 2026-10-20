@@ -7,6 +7,7 @@ import {
   Badge, Button, ConfirmDialog, EmptyState, ErrorText, Input, Notice, PageHeader, Spinner, Stat, StatusDot,
 } from "@/components/ui";
 import { api, ApiError, daysUntil, githubUrl, timeAgo, type App, type Service } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 interface ServicesResponse {
   scanned_at: string;
@@ -25,6 +26,7 @@ function hasIssue(s: Service) {
 }
 
 function ServiceCard({ s }: { s: Service }) {
+  const t = useT();
   const gh = githubUrl(s.git_remote);
   const ssl = s.ssl_expires ? daysUntil(s.ssl_expires) : null;
   return (
@@ -39,7 +41,7 @@ function ServiceCard({ s }: { s: Service }) {
             <h3 className="truncate font-semibold tracking-tight">{s.display_name || s.name}</h3>
           </div>
           <p className="mt-1 truncate pl-5 text-xs text-zinc-500">
-            {s.domains.length ? s.domains.join(" · ") : <span className="italic">no domain</span>}
+            {s.domains.length ? s.domains.join(" · ") : <span className="italic">{t("no domain")}</span>}
           </p>
         </div>
         <span className="text-zinc-400 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100">→</span>
@@ -53,7 +55,7 @@ function ServiceCard({ s }: { s: Service }) {
         <span className="truncate">{gh ? gh.replace("https://github.com/", "") : s.path ?? "—"}</span>
         {ssl !== null && (
           <span className={ssl < 0 ? "text-rose-500" : ssl < 14 ? "text-amber-500" : ""}>
-            {ssl < 0 ? "SSL expired" : `SSL ${ssl}d`}
+            {ssl < 0 ? t("SSL expired") : t("SSL {n}d", { n: ssl })}
           </span>
         )}
       </div>
@@ -62,6 +64,7 @@ function ServiceCard({ s }: { s: Service }) {
 }
 
 function Overview() {
+  const t = useT();
   const [data, setData] = useState<ServicesResponse | null>(null);
   const [apps, setApps] = useState<App[]>([]);
   const [error, setError] = useState("");
@@ -78,8 +81,8 @@ function Overview() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 30_000);
-    return () => clearInterval(t);
+    const timer = setInterval(load, 30_000);
+    return () => clearInterval(timer);
   }, [load]);
 
   async function rescan() {
@@ -98,7 +101,7 @@ function Overview() {
     setConfirmNginx(false);
     try {
       await api("/nginx/reload", { method: "POST" });
-      setNotice("nginx configuration is valid and was reloaded.");
+      setNotice(t("nginx configuration is valid and was reloaded."));
     } catch (e) {
       setError((e as ApiError).detail);
     }
@@ -130,22 +133,22 @@ function Overview() {
   return (
     <>
       <PageHeader
-        eyebrow="Server"
-        title={<>Everything running <span className="text-gradient">on this machine</span></>}
-        subtitle={data ? `Scanned ${timeAgo(data.scanned_at)} · nginx, systemd, PM2, Docker, PHP-FPM` : "Scanning…"}
+        eyebrow={t("Server")}
+        title={<>{t("Everything running")} <span className="text-gradient">{t("on this machine")}</span></>}
+        subtitle={data ? `${t("Scanned {when}", { when: timeAgo(data.scanned_at) })} · nginx, systemd, PM2, Docker, PHP-FPM` : t("Scanning…")}
         actions={
           <>
-            <Button onClick={() => setConfirmNginx(true)}>Reload nginx</Button>
-            <Button variant="primary" onClick={rescan} disabled={scanning}>{scanning ? <Spinner /> : null}Rescan</Button>
+            <Button onClick={() => setConfirmNginx(true)}>{t("Reload nginx")}</Button>
+            <Button variant="primary" onClick={rescan} disabled={scanning}>{scanning ? <Spinner /> : null}{t("Rescan")}</Button>
           </>
         }
       />
 
       <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Services up" value={<>{running}<span className="text-lg text-zinc-500">/{all.length}</span></>} tone="emerald" />
-        <Stat label="Apps live" value={live} hint={<Link href="/apps/" className="hover:underline">{apps.length} deployed from GitHub →</Link>} tone="violet" />
-        <Stat label="Need attention" value={issues} tone={issues ? "red" : "zinc"} hint="stopped or certificate < 14 days" />
-        <Stat label="Certificates expiring" value={expiring} tone={expiring ? "amber" : "sky"} hint={<Link href="/health/" className="hover:underline">full health check →</Link>} />
+        <Stat label={t("Services up")} value={<>{running}<span className="text-lg text-zinc-500">/{all.length}</span></>} tone="emerald" />
+        <Stat label={t("Apps live")} value={live} hint={<Link href="/apps/" className="hover:underline">{t("{n} deployed from GitHub", { n: apps.length })} →</Link>} tone="violet" />
+        <Stat label={t("Need attention")} value={issues} tone={issues ? "red" : "zinc"} hint={t("stopped or certificate < 14 days")} />
+        <Stat label={t("Certificates expiring")} value={expiring} tone={expiring ? "amber" : "sky"} hint={<Link href="/health/" className="hover:underline">{t("full health check")} →</Link>} />
       </div>
 
       <div className="mb-4 space-y-3">
@@ -161,15 +164,15 @@ function Overview() {
               onClick={() => setFilter(f)}
               className={`rounded-lg px-3 py-1.5 text-xs transition ${filter === f ? "bg-zinc-900 text-white shadow dark:bg-white dark:text-zinc-900" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"}`}
             >
-              {{ all: "All", domains: "With domain", nodomain: "No domain", issues: "Issues" }[f]} <span className="opacity-60">{counts[f]}</span>
+              {{ all: t("All"), domains: t("With domain"), nodomain: t("No domain"), issues: t("Issues") }[f]} <span className="opacity-60">{counts[f]}</span>
             </button>
           ))}
         </div>
-        <Input placeholder="Filter by name, domain, path…" value={query} onChange={(e) => setQuery(e.target.value)} className="sm:ml-auto sm:max-w-xs" />
+        <Input placeholder={t("Filter by name, domain, path…")} value={query} onChange={(e) => setQuery(e.target.value)} className="sm:ml-auto sm:max-w-xs" />
       </div>
 
       {data && services.length === 0 ? (
-        <EmptyState title="No service matches">Try another filter.</EmptyState>
+        <EmptyState title={t("No service matches")}>{t("Try another filter.")}</EmptyState>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {services.map((s) => <ServiceCard key={s.id} s={s} />)}
@@ -179,16 +182,16 @@ function Overview() {
 
       {data && data.warnings.length > 0 && (
         <details className="mt-8 text-sm text-zinc-500">
-          <summary className="cursor-pointer">{data.warnings.length} scan warning(s)</summary>
+          <summary className="cursor-pointer">{t("{n} scan warning(s)", { n: data.warnings.length })}</summary>
           <ul className="mt-2 list-disc space-y-1 pl-5">{data.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
         </details>
       )}
 
       <ConfirmDialog
         open={confirmNginx}
-        title="Reload nginx?"
-        message="Mas runs `nginx -t` first and only reloads if the configuration is valid."
-        confirmLabel="Reload"
+        title={t("Reload nginx?")}
+        message={t("Mas runs `nginx -t` first and only reloads if the configuration is valid.")}
+        confirmLabel={t("Reload")}
         onConfirm={reloadNginx}
         onCancel={() => setConfirmNginx(false)}
       />

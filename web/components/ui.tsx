@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import type { Status } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 // -- status -------------------------------------------------------------------
 
@@ -48,11 +49,12 @@ export function Badge({ children, tone = "zinc", className = "" }: { children: R
 }
 
 export function ReleaseBadge({ status }: { status: string }) {
+  const t = useT();
   const tone = ({ live: "emerald", failed: "red", building: "amber", queued: "amber" } as Record<string, Tone>)[status] ?? "zinc";
   return (
     <Badge tone={tone}>
       <StatusDot status={status} size="sm" />
-      {status === "live" ? "Ready" : status === "building" ? "Building" : status === "queued" ? "Queued" : status === "failed" ? "Error" : "Superseded"}
+      {status === "live" ? t("Ready") : status === "building" ? t("Building") : status === "queued" ? t("Queued") : status === "failed" ? t("Error") : t("Superseded")}
     </Badge>
   );
 }
@@ -196,6 +198,7 @@ export function Kbd({ children }: { children: ReactNode }) {
 }
 
 export function CopyCode({ text }: { text: string }) {
+  const t = useT();
   return (
     <div className="group relative">
       <pre className="mono overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-200 bg-zinc-50 p-3 pr-16 text-xs dark:border-white/[0.06] dark:bg-black/40">{text}</pre>
@@ -203,20 +206,23 @@ export function CopyCode({ text }: { text: string }) {
         onClick={() => navigator.clipboard?.writeText(text)}
         className="absolute right-2 top-2 rounded-md border border-zinc-300 bg-white px-2 py-0.5 text-[11px] opacity-70 transition hover:opacity-100 dark:border-white/10 dark:bg-zinc-900"
       >
-        Copy
+        {t("Copy")}
       </button>
     </div>
   );
 }
 
+// Plain strings (API errors among them) are translated when the dictionary knows them.
 export function ErrorText({ children }: { children: ReactNode }) {
+  const t = useT();
   if (!children) return null;
-  return <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-300">{children}</p>;
+  return <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-300">{typeof children === "string" ? t(children) : children}</p>;
 }
 
 export function Notice({ children }: { children: ReactNode }) {
+  const t = useT();
   if (!children) return null;
-  return <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">{children}</p>;
+  return <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">{typeof children === "string" ? t(children) : children}</p>;
 }
 
 export function ConfirmDialog({
@@ -225,6 +231,7 @@ export function ConfirmDialog({
   open: boolean; title: string; message: ReactNode; confirmLabel: string; danger?: boolean;
   onConfirm: () => void; onCancel: () => void;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = ref.current;
@@ -242,7 +249,7 @@ export function ConfirmDialog({
         <h3 className="text-base font-semibold">{title}</h3>
         <div className="text-sm text-zinc-600 dark:text-zinc-400">{message}</div>
         <div className="flex justify-end gap-2 pt-3">
-          <Button onClick={onCancel}>Cancel</Button>
+          <Button onClick={onCancel}>{t("Cancel")}</Button>
           <Button variant={danger ? "danger" : "primary"} onClick={onConfirm} autoFocus>{confirmLabel}</Button>
         </div>
       </div>
