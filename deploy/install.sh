@@ -104,7 +104,18 @@ scan_interval = 60
 extra_exclude_units = []
 # Hide systemd units with no port and only system paths in their command
 hide_os_daemons = true
+
+[deploy]
+# Apps deployed from GitHub: /srv/mas/apps/<app>, ports 7100-7999, 5 releases kept
+keep_releases = 5
 EOF
+fi
+if [ -n "$EMAIL" ] && ! grep -q '^letsencrypt_email' "$ETC/config.toml"; then
+    if grep -q '^\[deploy\]' "$ETC/config.toml"; then
+        sed -i "/^\[deploy\]/a letsencrypt_email = \"$EMAIL\"" "$ETC/config.toml"
+    else
+        printf '\n[deploy]\nletsencrypt_email = "%s"\n' "$EMAIL" >> "$ETC/config.toml"
+    fi
 fi
 
 # -- admin account (before the service, so the dashboard is never open) ------
