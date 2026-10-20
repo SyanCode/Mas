@@ -16,6 +16,7 @@ const PAGES: Item[] = [
   { label: "Overview", hint: "services on this server", href: "/", group: "Pages" },
   { label: "Apps", hint: "deployments from GitHub", href: "/apps/", group: "Pages" },
   { label: "New app", hint: "deploy a repository", href: "/apps/new/", group: "Pages" },
+  { label: "Databases", hint: "self-hosted Supabase", href: "/databases/", group: "Pages" },
   { label: "Health", hint: "certificates, nginx, DNS", href: "/health/", group: "Pages" },
   { label: "Activity", hint: "audit log", href: "/history/", group: "Pages" },
   { label: "Settings", hint: "domains, GitHub, security", href: "/settings/", group: "Pages" },

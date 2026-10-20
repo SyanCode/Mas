@@ -37,6 +37,7 @@ export function Logo({ className = "h-6 w-6" }: { className?: string }) {
 const NAV = [
   { href: "/", label: "Overview", match: (p: string) => p === "/" || p.startsWith("/service") },
   { href: "/apps/", label: "Apps", match: (p: string) => p.startsWith("/apps") },
+  { href: "/databases/", label: "Databases", match: (p: string) => p.startsWith("/databases") },
   { href: "/health/", label: "Health", match: (p: string) => p.startsWith("/health") },
   { href: "/history/", label: "Activity", match: (p: string) => p.startsWith("/history") },
   { href: "/settings/", label: "Settings", match: (p: string) => p.startsWith("/settings") },

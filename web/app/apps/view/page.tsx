@@ -105,6 +105,42 @@ function DomainCard({ app, onLinked }: { app: App; onLinked: (releaseId: number)
   );
 }
 
+function SupabaseCard({ app, onLinked }: { app: App; onLinked: (releaseId: number) => void }) {
+  const [status, setStatus] = useState<string | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api<{ instance: { status: string } | null }>("/supabase").then((r) => setStatus(r.instance?.status ?? null)).catch(() => setStatus(null));
+  }, []);
+
+  async function connect() {
+    setBusy(true);
+    setError("");
+    try {
+      onLinked((await api<{ release_id: number }>(`/apps/${encodeURIComponent(app.id)}/supabase`, { method: "POST" })).release_id);
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (status === undefined) return null;
+  return (
+    <Card title="Supabase" actions={status === "running" ? <Badge tone="emerald">available</Badge> : null}>
+      {status === "running" ? (
+        <div className="space-y-3 text-sm">
+          <p className="text-zinc-500">Adds <code>SUPABASE_URL</code>, the anon and service_role keys and <code>DATABASE_URL</code> to this app, then redeploys.</p>
+          <ErrorText>{error}</ErrorText>
+          <Button variant="primary" onClick={connect} disabled={busy}>{busy ? <Spinner /> : null}Connect Supabase</Button>
+        </div>
+      ) : (
+        <p className="text-sm text-zinc-500">Need a database? <Link href="/databases/" className="font-medium text-indigo-500 hover:underline">Deploy Supabase on this server →</Link></p>
+      )}
+    </Card>
+  );
+}
+
 function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void }) {
   const [branch, setBranch] = useState(app.branch);
   const [buildCommand, setBuildCommand] = useState(app.build_command ?? "");
@@ -336,6 +372,7 @@ function AppView() {
         <div className="space-y-6">
           {app.mode === "managed" && <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           <SettingsCard app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />
+          {app.mode === "managed" && <SupabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           {app.mode === "managed" && <EnvCard appId={app.id} />}
         </div>
       </div>
