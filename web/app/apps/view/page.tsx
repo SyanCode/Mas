@@ -12,6 +12,49 @@ import {
 import { api, ApiError, timeAgo, type App, type Release } from "@/lib/api";
 
 const RUNNING = new Set(["queued", "building"]);
+const BALANCED_TYPES = new Set(["nextjs", "node", "python"]);
+
+function LoadBalancingCard({ app, onSaved }: { app: App; onSaved: (releaseId: number) => void }) {
+  const [instances, setInstances] = useState(app.instances);
+  const [backends, setBackends] = useState(app.backends.join("\n"));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const list = backends.split(/\s+/).filter(Boolean);
+  const changed = instances !== app.instances || list.join() !== app.backends.join();
+  const total = instances + list.length;
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await api<{ release_id: number }>(`/apps/${encodeURIComponent(app.id)}/scaling`,
+        { method: "PUT", body: { instances, backends: list } });
+      onSaved(r.release_id);
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Load balancing" actions={total > 1 ? <Badge tone="emerald">{total} backends</Badge> : <Badge>single</Badge>}>
+      <div className="space-y-4 text-sm">
+        <Label title="Instances on this server" hint={`Ports ${app.instance_ports.join(", ")}. One per CPU core is a good maximum; redeploys restart them one by one.`}>
+          <Input type="number" min={1} max={16} value={instances} onChange={(e) => setInstances(Math.max(1, Math.min(16, Number(e.target.value) || 1)))} />
+        </Label>
+        <Label title="Other servers (optional)" hint="One host:port per line, for copies of this app you run elsewhere (private network). nginx skips a server that stops answering.">
+          <Textarea rows={3} value={backends} onChange={(e) => setBackends(e.target.value)} placeholder="10.0.0.12:3000" />
+        </Label>
+        {total > 1 && (
+          <p className="text-xs text-zinc-500">Requests are spread over every instance: keep sessions, uploads and caches in a shared place (database, Supabase storage), not in memory or on local disk.</p>
+        )}
+        <ErrorText>{error}</ErrorText>
+        <Button variant="primary" disabled={!changed || busy} onClick={save}>{busy ? <Spinner /> : null}Apply and redeploy</Button>
+      </div>
+    </Card>
+  );
+}
 
 function colorize(line: string) {
   if (/^\d\d:\d\d:\d\d ==> /.test(line)) return "text-sky-300 font-medium";
@@ -546,6 +589,9 @@ function AppView() {
         <div className="space-y-6">
           {app.mode === "managed" && <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           <SettingsCard app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />
+          {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && (
+            <LoadBalancingCard key={`${app.instances}-${app.backends.join()}`} app={app} onSaved={(rid) => { setSelected(rid); load(); }} />
+          )}
           {app.mode === "managed" && <SupabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           {app.installation_id && <CmsCard appId={app.id} />}
           {app.mode === "managed" && <EnvCard appId={app.id} />}

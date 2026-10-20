@@ -127,12 +127,14 @@ CREATE TABLE IF NOT EXISTS settings (
 MIGRATIONS = [
     ("supabase", "components TEXT"),  # JSON list of enabled optional components
     ("users", "role TEXT NOT NULL DEFAULT 'admin'"),  # admin | editor (CMS only)
+    ("apps", "extra_ports TEXT"),  # load balancing: JSON ports of instances 2..N on this server
+    ("apps", "backends TEXT"),     # load balancing: JSON ["host:port"] of servers outside Mas
 ]
 ROLES = ("admin", "editor")
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
-              "current_release"}
+              "current_release", "extra_ports", "backends"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
 
 

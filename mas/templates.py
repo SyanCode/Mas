@@ -35,7 +35,7 @@ PLACEHOLDER_BODY = """
 PROXY_BODY = """
     error_page 502 503 504 =503 /__mas/status.html;
     location / {
-        proxy_pass http://127.0.0.1:@@PORT@@;
+        proxy_pass http://@@TARGET@@;@@NEXT_UPSTREAM@@
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -168,13 +168,27 @@ def fill(template: str, **values: object) -> str:
     return out
 
 
-def vhost(app_id: str, domain: str, body: str, https: bool) -> str:
+def vhost(app_id: str, domain: str, body: str, https: bool, upstream: str = "") -> str:
     server = HTTPS_SERVERS if https else HTTP_SERVER
-    return fill(HEADER, app=app_id) + fill(server, domain=domain, app=app_id, body=body)
+    return fill(HEADER, app=app_id) + upstream + fill(server, domain=domain, app=app_id, body=body)
 
 
-def proxy_body(port: int, pages_dir: str) -> str:
-    return fill(PROXY_BODY, port=port, pages=pages_dir, page="deploying")
+def upstream_name(app_id: str) -> str:
+    return "mas_app_" + app_id.replace("-", "_")
+
+
+def upstream_block(app_id: str, servers: list[str]) -> str:
+    """Load balancing over several backends; one that fails is skipped for 10 s (passive check)."""
+    lines = "".join(f"    server {s} max_fails=2 fail_timeout=10s;\n" for s in servers)
+    return f"upstream {upstream_name(app_id)} {{\n    least_conn;\n{lines}}}\n\n"
+
+
+def proxy_body(port: int, pages_dir: str, upstream: str | None = None) -> str:
+    # With an upstream, a request that hits a restarting or dead backend is retried on the next one.
+    next_upstream = ("\n        proxy_next_upstream error timeout http_502 http_503 http_504;"
+                     "\n        proxy_next_upstream_tries 3;") if upstream else ""
+    return fill(PROXY_BODY, target=upstream or f"127.0.0.1:{port}", next_upstream=next_upstream,
+                pages=pages_dir, page="deploying")
 
 
 def supabase_body(port: int, pages_dir: str) -> str:

@@ -22,8 +22,8 @@ from pydantic import BaseModel, Field
 from mas.config import Config, save_section
 from mas.db import Database
 from mas.deploy import (
-    BRANCH_RE, PROXY_TYPES, REPO_RE, DeployError, Deployer, allocate_port, suggest_start_command, validate_app,
-    validate_commands,
+    BRANCH_RE, MAX_INSTANCES, PROXY_TYPES, REPO_RE, DeployError, Deployer, allocate_port, app_backends,
+    app_instances, suggest_start_command, used_ports, validate_app, validate_backends, validate_commands,
 )
 from mas.dns import server_ips
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env
@@ -77,6 +77,11 @@ class PatchApp(BaseModel):
     auto_deploy: bool | None = None
 
 
+class ScalingBody(BaseModel):
+    instances: int = Field(ge=1, le=MAX_INSTANCES)
+    backends: list[str] = Field(default_factory=list, max_length=MAX_INSTANCES)
+
+
 class EnvBody(BaseModel):
     text: str = Field(max_length=65536)
 
@@ -89,6 +94,10 @@ def app_payload(app: dict, db: Database) -> dict:
     data = {k: v for k, v in app.items() if k != "env"}
     data["auto_deploy"] = bool(app["auto_deploy"])
     data["has_env"] = bool(app["env"])
+    data["instances"] = len(app_instances(app)) or 1
+    data["instance_ports"] = [p for _, p in app_instances(app)]
+    data["backends"] = app_backends(app)
+    data.pop("extra_ports", None)
     releases = db.list_releases(app["id"], 1)
     data["last_release"] = releases[0] if releases else None
     data["current"] = db.get_release(app["current_release"]) if app["current_release"] else None
@@ -388,6 +397,29 @@ def register(
         db.update_app(app_id, env=token)
         db.audit(s.username, "app-env", True, detail=f"{app_id}: {len(env)} variable(s)")
         return {"ok": True, "count": len(env)}
+
+    @app.put("/api/apps/{app_id}/scaling")
+    def set_scaling(app_id: str, body: ScalingBody, s=Depends(current_session)) -> dict:
+        """Load balancing: instances on this server and/or backends outside Mas, then redeploy."""
+        current = find_app(app_id)
+        if current["mode"] != "managed" or ServiceType(current["type"]) not in PROXY_TYPES or not current["port"]:
+            raise HTTPException(400, "load balancing applies to Node.js, Next.js and Python apps deployed by Mas")
+        try:
+            backends = validate_backends(body.backends)
+        except DeployError as exc:
+            raise HTTPException(400, str(exc)) from None
+        extra = [p for _, p in app_instances(current)][1:body.instances]
+        if len(extra) < body.instances - 1:
+            used = used_ports(host, db)
+            free = [p for p in range(config.port_min, config.port_max + 1) if p not in used]
+            if len(free) < body.instances - 1 - len(extra):
+                raise HTTPException(409, "not enough free ports")
+            extra += free[:body.instances - 1 - len(extra)]
+        db.update_app(app_id, extra_ports=json.dumps(extra), backends=json.dumps(backends))
+        db.audit(s.username, "app-scaling", True,
+                 detail=f"{app_id}: {body.instances} instance(s), backends: {', '.join(backends) or 'none'}")
+        rid = deployer.enqueue(app_id, "manual", s.username)
+        return app_payload(db.get_app(app_id), db) | {"release_id": rid}
 
     @app.post("/api/apps/{app_id}/deploy")
     def deploy_now(app_id: str, s=Depends(current_session)) -> dict:

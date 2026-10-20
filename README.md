@@ -332,6 +332,23 @@ Edited by <editor>`) on top of the version the editor opened: if someone pushed 
 editor is asked to reload instead of overwriting. Undo a change with `git revert` or roll back
 the deployment in Mas.
 
+### Load balancing
+
+The **Load balancing** card of a Node.js, Next.js or Python app spreads its traffic:
+
+- **Instances on this server**: Mas runs the app N times (`mas-app-<id>.service`,
+  `mas-app-<id>.2.service`…, each on its own loopback port) to use every CPU core. A redeploy
+  restarts them one at a time and checks each one before the next, so the site never goes down;
+  if an instance does not come back, the release is rolled back.
+- **Other servers**: `host:port` of copies of the app you run elsewhere, typically over a
+  private network. They are added to the same pool.
+
+With more than one backend the vhost gets an nginx `upstream` (`least_conn`): a backend that
+fails twice is skipped for 10 s, and a request that hits a restarting or dead backend is retried
+on the next one. Spreading requests means the app must not keep state in memory or on local disk
+(sessions, uploads, caches): use the database or Supabase storage. Static and PHP sites are
+served by nginx directly and need none of this.
+
 ### While a site deploys
 
 On a first deployment the domain answers immediately with a **“Deploying…” page** (nginx placeholder
@@ -485,6 +502,9 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Phase 3: deploy from GitHub.** GitHub App (manifest flow), signed webhooks, atomic
       releases, generated systemd unit and nginx vhost, certbot, health check with automatic
       rollback, 5 releases kept, live build logs (SSE), adoption of detected services.
+- [x] **Load balancing on one server**: several instances per app, outside backends, rolling restarts.
+- [ ] **Cluster**: choose the role at install time (`standalone`, `primary`, `node`); a primary
+      deploys an app on several nodes through a Mas agent and balances between them.
 - [ ] Later: preview deployments per pull request, recovery codes for 2FA, notifications.
 
 ## License

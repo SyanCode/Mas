@@ -106,6 +106,37 @@ def env_file(app_id: str) -> str:
     return f"{ENV_DIR}/{app_id}.env"
 
 
+MAX_INSTANCES = 16
+BACKEND_RE = re.compile(r"^(?:\[[0-9A-Fa-f:]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?):(\d{1,5})$")
+
+
+def app_instances(app: dict) -> list[tuple[str, int]]:
+    """(systemd unit, port) of every local instance. The first keeps the historical unit name;
+    the others are ``mas-app-<id>.<n>.service`` (app ids have no dot: no clash with another app)."""
+    ports = [app["port"], *json.loads(app.get("extra_ports") or "[]")]
+    return [(unit_name(app["id"]) if i == 0 else f"mas-app-{app['id']}.{i + 1}.service", p)
+            for i, p in enumerate(ports) if p]
+
+
+def app_backends(app: dict) -> list[str]:
+    return json.loads(app.get("backends") or "[]")
+
+
+def validate_backends(backends: list[str]) -> list[str]:
+    out = []
+    for b in backends:
+        b = b.strip()
+        if not b:
+            continue
+        m = BACKEND_RE.fullmatch(b)
+        if not m or not 0 < int(m.group(1)) < 65536:
+            raise DeployError(f"backend {b!r}: use host:port, e.g. 10.0.0.12:3000")
+        out.append(b)
+    if len(out) > MAX_INSTANCES:
+        raise DeployError(f"at most {MAX_INSTANCES} backends")
+    return list(dict.fromkeys(out))
+
+
 # -- validation & creation ---------------------------------------------------
 
 
@@ -137,7 +168,7 @@ def validate_commands(build_command: str | None, start_command: str | None, root
 
 
 def used_ports(host: Host, db: Database) -> set[int]:
-    used = {a["port"] for a in db.list_apps() if a["port"]}
+    used = {p for a in db.list_apps() for _, p in app_instances(a)}
     res = host.run(["ss", "-tlnH"])
     if res is not None and res.ok:
         used |= {s.port for s in parse_ss_tcp(res.stdout) if s.port}
@@ -431,26 +462,60 @@ class Deployer:
         return {**app, "root_dir": "out"}
 
     def _stop_unit(self, app: dict, rlog: ReleaseLog) -> None:
-        if self.host.exists(unit_path(app["id"])):
-            rlog.line(f"stopping {unit_name(app['id'])} (not needed for a static site)")
-            self.host.run(["systemctl", "disable", "--now", unit_name(app["id"])], timeout=120)
+        for unit, _ in app_instances(app):
+            if self.host.exists(f"/etc/systemd/system/{unit}"):
+                rlog.line(f"stopping {unit} (not needed for a static site)")
+                self.host.run(["systemctl", "disable", "--now", unit], timeout=120)
 
-    def _install_unit(self, app: dict, app_type: ServiceType, paths: AppPaths, env: dict, rlog: ReleaseLog) -> None:
+    def _restart_instances(self, app: dict, rlog: ReleaseLog | None = None) -> None:
+        for unit, _ in app_instances(app):
+            if rlog is None:
+                self.host.run(["systemctl", "restart", unit], timeout=120)
+            else:
+                self._system(rlog, ["systemctl", "restart", unit])
+
+    def _remove_extra_units(self, app_id: str, keep: set[str], rlog: ReleaseLog | None) -> list[str]:
+        """Units of instances that are not configured anymore (scaled down)."""
+        removed = []
+        for path in self.host.glob(f"/etc/systemd/system/mas-app-{app_id}.*.service"):
+            unit = PurePosixPath(path).name
+            if unit in keep:
+                continue
+            self.host.run(["systemctl", "disable", "--now", unit], timeout=120)
+            self.host.backup(path)
+            self.host.remove(path)
+            removed.append(unit)
+            if rlog:
+                rlog.line(f"removed {unit} (scaled down)")
+        return removed
+
+    def _install_unit(self, app: dict, app_type: ServiceType, paths: AppPaths, env: dict, rlog: ReleaseLog,
+                      workdir: str | None = None) -> None:
         self.host.makedirs(ENV_DIR, mode=0o700)
         self.host.write_text(env_file(app["id"]), systemd_env_file(env), mode=0o600)
-        content = templates.unit(
-            app["id"], app["repo"], app_user(app["id"]), paths.current, env_file(app["id"]),
-            app["port"], self._tool_path(), self._exec_start(app, app_type, paths.current),
-        )
-        path = unit_path(app["id"])
-        if self.host.read_text(path) != content:
-            rlog.line(f"writing {path}")
-            self.host.backup(path)
-            self.host.write_text(path, content)
+        instances = app_instances(app)
+        changed = bool(self._remove_extra_units(app["id"], {u for u, _ in instances}, rlog))
+        for unit, port in instances:
+            one = {**app, "port": port}
+            content = templates.unit(
+                app["id"], app["repo"], app_user(app["id"]), paths.current, env_file(app["id"]),
+                port, self._tool_path(), self._exec_start(one, app_type, paths.current),
+            )
+            path = f"/etc/systemd/system/{unit}"
+            if self.host.read_text(path) != content:
+                rlog.line(f"writing {path}")
+                self.host.backup(path)
+                self.host.write_text(path, content)
+                changed = True
+        if changed:
             self._system(rlog, ["systemctl", "daemon-reload"])
-            self._system(rlog, ["systemctl", "enable", unit_name(app["id"])])
-        rlog.step(f"Restarting {unit_name(app['id'])}")
-        self._system(rlog, ["systemctl", "restart", unit_name(app["id"])])
+            self._system(rlog, ["systemctl", "enable", *(u for u, _ in instances)])
+        # One instance at a time: nginx sends the traffic to the others meanwhile.
+        for i, (unit, port) in enumerate(instances):
+            rlog.step(f"Restarting {unit}" + (f" ({i + 1}/{len(instances)})" if len(instances) > 1 else ""))
+            self._system(rlog, ["systemctl", "restart", unit])
+            if len(instances) > 1:  # stop the rollout at the first instance that does not come back
+                self._health(app, app_type, workdir or paths.current, rlog, port=port)
 
     def _fpm_socket(self) -> str:
         sockets = sorted(self.host.glob("/run/php/php*-fpm.sock"))
@@ -472,7 +537,9 @@ class Deployer:
             return templates.placeholder_body(self.config.pages_dir, page)
         root = paths.current + (f"/{app['root_dir'].strip('/')}" if app.get("root_dir") else "")
         if app_type in PROXY_TYPES:
-            return templates.proxy_body(app["port"], self.config.pages_dir)
+            balanced = len(self._upstream_servers(app)) > 1
+            return templates.proxy_body(app["port"], self.config.pages_dir,
+                                        templates.upstream_name(app["id"]) if balanced else None)
         if app_type == ServiceType.PHP:
             return templates.php_body(root, self._fpm_socket())
         return templates.static_body(root)
@@ -515,8 +582,15 @@ class Deployer:
             self._nginx_apply(rlog, UPGRADE_MAP_PATH, templates.UPGRADE_MAP, None)
         self._ensure_pages()
         body = self._vhost_body(app, app_type, paths, page)
-        content = templates.vhost(app["id"], app["domain"], body, self._has_cert(app["domain"]))
+        servers = self._upstream_servers(app)
+        upstream = templates.upstream_block(app["id"], servers) \
+            if app_type in PROXY_TYPES and page is None and len(servers) > 1 else ""
+        content = templates.vhost(app["id"], app["domain"], body, self._has_cert(app["domain"]), upstream)
         self._nginx_apply(rlog, available, content, enabled)
+
+    @staticmethod
+    def _upstream_servers(app: dict) -> list[str]:
+        return [f"127.0.0.1:{p}" for _, p in app_instances(app)] + app_backends(app)
 
     def _prepare_domain(self, app: dict, app_type: ServiceType, paths: AppPaths, first: bool,
                         rlog: ReleaseLog) -> None:
@@ -691,7 +765,7 @@ class Deployer:
         self.host.symlink_atomic(rel, paths.current)
         try:
             if app_type in PROXY_TYPES:
-                self._install_unit(app, app_type, paths, env_vars, rlog)
+                self._install_unit(app, app_type, paths, env_vars, rlog, workdir=rel)
             if app["domain"]:
                 rlog.step("nginx")
                 self._install_vhost(app, app_type, paths, rlog)
@@ -702,7 +776,7 @@ class Deployer:
                 rlog.step(f"Rolling back to {PurePosixPath(previous).name}")
                 self.host.symlink_atomic(previous, paths.current)
                 if app_type in PROXY_TYPES:
-                    self.host.run(["systemctl", "restart", unit_name(app["id"])], timeout=120)
+                    self._restart_instances(app)
             raise
 
         if export:
@@ -729,7 +803,7 @@ class Deployer:
         self.host.symlink_atomic(target, paths.current)
         try:
             if app_type in PROXY_TYPES:
-                self._system(rlog, ["systemctl", "restart", unit_name(app["id"])])
+                self._restart_instances(app, rlog)
             if export and app["domain"]:
                 self._install_vhost(app, app_type, paths, rlog)
             self._health(app, app_type, f"{target}/out" if export else target, rlog)
@@ -737,7 +811,7 @@ class Deployer:
             if previous:
                 self.host.symlink_atomic(previous, paths.current)
                 if app_type in PROXY_TYPES:
-                    self.host.run(["systemctl", "restart", unit_name(app["id"])], timeout=120)
+                    self._restart_instances(app)
             raise
         self._mark_live(app, release["id"], target)
 
@@ -825,6 +899,7 @@ class Deployer:
                 self.host.remove(unit)
                 self.host.run(["systemctl", "daemon-reload"])
                 done.append(f"removed {unit}")
+            done += [f"removed {u}" for u in self._remove_extra_units(app_id, set(), None)]
             available, enabled = vhost_paths(app_id)
             if self.host.exists(available) or self.host.exists(enabled):
                 self.host.backup(available)

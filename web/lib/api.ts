@@ -162,6 +162,9 @@ export interface App {
   start_command: string | null;
   auto_deploy: boolean;
   has_env: boolean;
+  instances: number;
+  instance_ports: number[];
+  backends: string[];
   current_release: number | null;
   current: Release | null;
   last_release: Release | null;

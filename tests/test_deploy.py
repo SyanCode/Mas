@@ -19,7 +19,7 @@ from mas import auth, templates
 from mas.api import create_app
 from mas.config import Config, load_config, save_section
 from mas.db import Database
-from mas.deploy import DeployError, Deployer, app_paths, validate_app
+from mas.deploy import DeployError, Deployer, app_paths, used_ports, validate_app, validate_backends
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env, systemd_env_file
 from mas.github import app_jwt, git_auth_env, repo_from_remote, verify_signature
 from mas.health import check_certificates, check_dns, check_nginx, load_lineages
@@ -181,6 +181,45 @@ def deploy_once(env, sha):
     env["set_sha"](sha)
     rid = env["db"].create_release("web", "manual", "test")
     return rid, env["deployer"].run(rid)
+
+
+def test_load_balanced_instances_and_backends(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    checked = []
+    deployer.health_check = lambda url, h, t: (checked.append(url) or True, "HTTP 200")
+    db.update_app("web", extra_ports=json.dumps([7101, 7102]), backends=json.dumps(["10.0.0.12:3000"]))
+    rid, ok = deploy_once(env, SHA1)
+    assert ok, deployer.log_path("web", rid).read_text()
+
+    for unit, port in (("mas-app-web.service", 7100), ("mas-app-web.2.service", 7101),
+                       ("mas-app-web.3.service", 7102)):
+        assert f"-p {port}" in host.read_text(f"/etc/systemd/system/{unit}")
+    restarts = [a[-1] for a in host.executed if a[:2] == ["systemctl", "restart"]]
+    assert restarts[-3:] == ["mas-app-web.service", "mas-app-web.2.service", "mas-app-web.3.service"]
+    assert {"http://127.0.0.1:7100/", "http://127.0.0.1:7101/", "http://127.0.0.1:7102/"} <= set(checked)
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert vhost.index("upstream mas_app_web {") < vhost.index("server {")
+    for server in ("127.0.0.1:7100", "127.0.0.1:7101", "127.0.0.1:7102", "10.0.0.12:3000"):
+        assert f"server {server} max_fails=2 fail_timeout=10s;" in vhost
+    assert "proxy_pass http://mas_app_web;" in vhost and "proxy_next_upstream error timeout" in vhost
+    assert 7101 in used_ports(host, db) and 7102 in used_ports(host, db)
+
+    # scale back down: extra units go away, the vhost proxies straight to the app again
+    db.update_app("web", extra_ports="[]", backends="[]")
+    rid, ok = deploy_once(env, SHA2)
+    assert ok, deployer.log_path("web", rid).read_text()
+    assert not host.exists("/etc/systemd/system/mas-app-web.2.service")
+    assert not host.exists("/etc/systemd/system/mas-app-web.3.service")
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert "upstream" not in vhost and "proxy_pass http://127.0.0.1:7100;" in vhost
+
+
+def test_backends_are_validated():
+    assert validate_backends([" 10.0.0.2:3000", "node-b.lan:8080", "[fd00::2]:80", "", "10.0.0.2:3000"]) == [
+        "10.0.0.2:3000", "node-b.lan:8080", "[fd00::2]:80"]
+    for bad in ("10.0.0.2", "10.0.0.2:0", "10.0.0.2:70000", "a b:80", "x;y:80", "http://x:80"):
+        with pytest.raises(DeployError):
+            validate_backends([bad])
 
 
 def test_managed_deploy_end_to_end(env):
@@ -377,6 +416,23 @@ def test_push_deploys_matching_apps(api):
     raw, sig = signed({**push, "ref": "refs/tags/v1"})
     client.post("/api/github/webhook", content=raw, headers={"X-GitHub-Event": "push", "X-Hub-Signature-256": sig})
     assert len(queued) == 1
+
+
+def test_scaling_api(api):
+    client, db, queued, h = api
+    db.create_app("web", name="web", repo="acme/web", branch="main", type="nextjs", port=7100)
+    db.create_app("site", name="s", repo="acme/site", branch="main", type="static")
+    r = client.put("/api/apps/web/scaling", json={"instances": 3, "backends": ["10.0.0.12:3000"]}, headers=h)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["instances"] == 3 and len(set(data["instance_ports"])) == 3 and data["instance_ports"][0] == 7100
+    assert data["backends"] == ["10.0.0.12:3000"] and queued[-1][:2] == ("web", "manual")
+    ports = data["instance_ports"]
+    r = client.put("/api/apps/web/scaling", json={"instances": 2, "backends": []}, headers=h)
+    assert r.json()["instance_ports"] == ports[:2]  # scaling down keeps the existing ports
+    assert client.put("/api/apps/web/scaling", json={"instances": 1, "backends": ["nope"]}, headers=h).status_code == 400
+    assert client.put("/api/apps/web/scaling", json={"instances": 99}, headers=h).status_code == 422
+    assert client.put("/api/apps/site/scaling", json={"instances": 2}, headers=h).status_code == 400
 
 
 def test_create_app_and_env_api(api):
