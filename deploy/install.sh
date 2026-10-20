@@ -39,6 +39,9 @@ while [ $# -gt 0 ]; do
 done
 
 # -- checks -------------------------------------------------------------------
+if [ -n "$EMAIL" ] && ! [[ "$EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+    die "invalid email: $EMAIL"
+fi
 [ "$(id -u)" -eq 0 ] || die "run as root: sudo $0"
 [ -f /etc/debian_version ] || die "Mas supports Debian (and derivatives) only"
 [ -f "$REPO/pyproject.toml" ] && [ -d "$REPO/mas" ] || die "run this script from the Mas source tree"

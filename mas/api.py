@@ -36,6 +36,8 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
@@ -66,6 +68,7 @@ class PasswordBody(BaseModel):
 
 class PasswordOnly(BaseModel):
     password: str = Field(max_length=1024)
+    code: str | None = Field(default=None, max_length=16)  # required when 2FA is already on
 
 
 class CodeBody(BaseModel):
@@ -114,6 +117,9 @@ def create_app(
     ip_limiter = auth.RateLimiter(max_hits=10, window_seconds=15 * 60)
     user_limiter = auth.RateLimiter(max_hits=5, window_seconds=15 * 60)
     session_ttl = config.session_hours * 3600
+    # "__Host-" cookies are only accepted over HTTPS, for this exact host, path "/":
+    # a sibling sub-domain cannot plant or overwrite the session.
+    cookie_name = f"__Host-{COOKIE}" if config.cookie_secure else COOKIE
 
     async def scan_loop() -> None:
         while True:
@@ -177,7 +183,7 @@ def create_app(
         return peer
 
     def current_session(request: Request) -> SessionInfo:
-        token = request.cookies.get(COOKIE)
+        token = request.cookies.get(cookie_name)
         if not token:
             raise HTTPException(401, "not authenticated")
         token_hash = auth.hash_token(token)
@@ -208,7 +214,7 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"ok": True, "version": __version__}
+        return {"ok": True}  # unauthenticated: no version disclosure
 
     @app.post("/api/login")
     def login(body: LoginBody, request: Request, response: Response) -> dict:
@@ -225,7 +231,7 @@ def create_app(
             raise HTTPException(401, exc.code) from None
         user_limiter.reset(username)
         new = auth.create_session(db, user["id"], session_ttl, ip)
-        response.set_cookie(COOKIE, new.token, max_age=session_ttl, httponly=True,
+        response.set_cookie(cookie_name, new.token, max_age=session_ttl, httponly=True,
                             secure=config.cookie_secure, samesite="strict", path="/")
         db.audit(username, "login", True, detail=f"from {ip}")
         return {"username": username, "csrf": new.csrf, "totp_enabled": bool(user["totp_secret"]),
@@ -234,7 +240,8 @@ def create_app(
     @app.post("/api/logout")
     def logout(response: Response, s: SessionInfo = Depends(current_session)) -> dict:
         db.delete_session(s.token_hash)
-        response.delete_cookie(COOKIE, path="/")
+        response.delete_cookie(cookie_name, path="/", secure=config.cookie_secure, httponly=True,
+                               samesite="strict")
         return {"ok": True}
 
     @app.get("/api/session")
@@ -314,8 +321,13 @@ def create_app(
     # -- account -----------------------------------------------------------
 
     def require_password(s: SessionInfo, password: str):
+        # Same budget as the login form: a stolen session cannot brute-force the password.
+        key = f"session-password:{s.user_id}"
+        if user_limiter.blocked(key):
+            raise HTTPException(429, "too many attempts, retry in 15 minutes")
         user = db.get_user_by_id(s.user_id)
         if not auth.verify_password(user["password_hash"], password):
+            user_limiter.hit(key)
             raise HTTPException(403, "wrong password")
         return user
 
@@ -332,6 +344,9 @@ def create_app(
     @app.post("/api/account/totp/setup")
     def totp_setup(body: PasswordOnly, s: SessionInfo = Depends(current_session)) -> dict:
         user = require_password(s, body.password)
+        # Replacing the authenticator needs the current one: password + session are not enough.
+        if user["totp_secret"] and not auth.verify_totp(db, user, body.code or ""):
+            raise HTTPException(403, "enter the current code of your authenticator app")
         secret = auth.new_totp_secret()
         db.update_user(user["id"], totp_pending=secret)
         uri = auth.provisioning_uri(secret, s.username)

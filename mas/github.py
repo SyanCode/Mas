@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -150,17 +151,18 @@ class GitHubApp:
         return [b["name"] for b in self._as_installation(installation_id, f"/repos/{repo}/branches?per_page=100")]
 
     def commit(self, installation_id: int, repo: str, ref: str) -> dict:
-        data = self._as_installation(installation_id, f"/repos/{repo}/commits/{ref}")
+        data = self._as_installation(installation_id, f"/repos/{repo}/commits/{quote(ref, safe='')}")
         msg = (data.get("commit", {}).get("message") or "").splitlines()
         return {"sha": data["sha"], "message": msg[0] if msg else "",
                 "author": data.get("commit", {}).get("author", {}).get("name")}
 
     def detect_type(self, installation_id: int, repo: str, ref: str) -> ServiceType:
-        listing = self._as_installation(installation_id, f"/repos/{repo}/contents?ref={ref}")
+        ref_q = quote(ref, safe="")
+        listing = self._as_installation(installation_id, f"/repos/{repo}/contents?ref={ref_q}")
         names = {item["name"] for item in listing if isinstance(item, dict)}
         deps: dict = {}
         if "package.json" in names:
-            item = self._as_installation(installation_id, f"/repos/{repo}/contents/package.json?ref={ref}")
+            item = self._as_installation(installation_id, f"/repos/{repo}/contents/package.json?ref={ref_q}")
             try:
                 pkg = json.loads(base64.b64decode(item.get("content", "")))
                 deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}

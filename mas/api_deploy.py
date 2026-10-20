@@ -22,7 +22,8 @@ from pydantic import BaseModel, Field
 from mas.config import Config, save_section
 from mas.db import Database
 from mas.deploy import (
-    PROXY_TYPES, DeployError, Deployer, allocate_port, suggest_start_command, validate_app,
+    BRANCH_RE, PROXY_TYPES, REPO_RE, DeployError, Deployer, allocate_port, suggest_start_command, validate_app,
+    validate_commands,
 )
 from mas.dns import server_ips
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env
@@ -209,23 +210,43 @@ def register(
         gh = require_github()
         return await asyncio.to_thread(gh_call, gh.repos)
 
+    def check_repo(repo: str, ref: str | None = None) -> None:
+        # Both end up in GitHub API paths: no "../", "?" or "&" smuggling.
+        if not REPO_RE.fullmatch(repo) or ".." in repo:
+            raise HTTPException(400, "invalid repository")
+        if ref is not None and not BRANCH_RE.fullmatch(ref):
+            raise HTTPException(400, "invalid branch")
+
     @app.get("/api/github/branches")
     async def github_branches(repo: str, installation_id: int, _=Depends(current_session)) -> list[str]:
+        check_repo(repo)
         gh = require_github()
         return await asyncio.to_thread(gh_call, gh.branches, installation_id, repo)
 
     @app.get("/api/github/detect")
     async def github_detect(repo: str, installation_id: int, ref: str, _=Depends(current_session)) -> dict:
+        check_repo(repo, ref)
         gh = require_github()
         detected = await asyncio.to_thread(gh_call, gh.detect_type, installation_id, repo, ref)
         files = {"manage.py"} if detected == ServiceType.PYTHON else set()
         return {"type": detected.value, "start_command": suggest_start_command(detected, files)}
+
+    seen_deliveries: dict[str, float] = {}
 
     @app.post("/api/github/webhook")
     async def github_webhook(request: Request) -> dict:
         body = await request.body()
         if not verify_signature(config.github_webhook_secret, body, request.headers.get("x-hub-signature-256")):
             raise HTTPException(401, "invalid signature")
+        # A captured (validly signed) delivery must not be replayable.
+        delivery = request.headers.get("x-github-delivery", "")
+        if delivery:
+            if delivery in seen_deliveries:
+                raise HTTPException(409, "delivery already processed")
+            seen_deliveries[delivery] = time.time()
+            if len(seen_deliveries) > 2000:
+                for key in sorted(seen_deliveries, key=seen_deliveries.get)[:1000]:
+                    seen_deliveries.pop(key, None)
         event = request.headers.get("x-github-event", "")
         try:
             payload = json.loads(body)
@@ -264,6 +285,7 @@ def register(
         domain = (body.domain or "").strip().lower() or None
         try:
             validate_app(body.id, body.repo, body.branch, domain, body.type.value)
+            validate_commands(body.build_command, body.start_command, body.root_dir.strip("/"))
             env = parse_env(body.env)
         except (DeployError, EnvError) as exc:
             raise HTTPException(400, str(exc)) from None
@@ -336,6 +358,7 @@ def register(
         merged = current | fields
         try:
             validate_app(app_id, merged["repo"], merged["branch"] or "", merged["domain"], merged["type"])
+            validate_commands(merged["build_command"], merged["start_command"], merged["root_dir"])
         except DeployError as exc:
             raise HTTPException(400, str(exc)) from None
         if current["mode"] == "adopted" and "domain" in fields:
