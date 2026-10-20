@@ -140,9 +140,15 @@ if [ "$WITH_NGINX" -eq 1 ] && [ -n "$DOMAIN" ]; then
             read -r -p "Email for Let's Encrypt expiry notices (empty = none): " EMAIL
         fi
         if [ -n "$EMAIL" ]; then CONTACT=(-m "$EMAIL"); else CONTACT=(--register-unsafely-without-email); fi
+        # certbot.timer may be renewing other certificates right now: wait for it.
+        for _ in $(seq 1 60); do
+            pgrep -x certbot >/dev/null || break
+            [ "$_" -eq 1 ] && log "Another certbot is running (renewal?), waiting for it to finish"
+            sleep 5
+        done
         certbot certonly --nginx --non-interactive --agree-tos "${CONTACT[@]}" \
             --cert-name "$DOMAIN" -d "$DOMAIN" \
-            || die "certbot failed; check DNS for $DOMAIN, then re-run this script"
+            || die "certbot failed (see its message above). Mas is installed; fix the cause, then re-run this script"
     fi
 
     log "Installing nginx vhost $NGINX_CONF"
