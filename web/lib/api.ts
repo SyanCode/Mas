@@ -69,6 +69,71 @@ export interface ActionResult {
   output: string;
 }
 
+export interface Check {
+  level: "error" | "warning" | "info";
+  category: string;
+  title: string;
+  detail: string;
+  fix: string | null;
+}
+
+export type ReleaseStatus = "queued" | "building" | "live" | "failed" | "superseded";
+
+export interface Release {
+  id: number;
+  app_id: string;
+  sha: string | null;
+  message: string | null;
+  author: string | null;
+  trigger: string;
+  actor: string | null;
+  status: ReleaseStatus;
+  path: string | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface App {
+  id: string;
+  name: string;
+  repo: string;
+  branch: string;
+  installation_id: number | null;
+  domain: string | null;
+  type: ServiceType;
+  port: number | null;
+  mode: "managed" | "adopted";
+  service_id: string | null;
+  path: string | null;
+  root_dir: string;
+  build_command: string | null;
+  start_command: string | null;
+  auto_deploy: boolean;
+  has_env: boolean;
+  current_release: number | null;
+  current: Release | null;
+  last_release: Release | null;
+  releases?: Release[];
+}
+
+export interface GitHubStatus {
+  configured: boolean;
+  app_id: number | null;
+  slug: string | null;
+  install_url?: string;
+  webhook_url: string;
+  installations: { id: number; account: string }[];
+  error: string | null;
+}
+
+export interface Repo {
+  full_name: string;
+  default_branch: string;
+  private: boolean;
+  installation_id: number;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
     super(detail);

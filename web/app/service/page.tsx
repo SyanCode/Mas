@@ -151,6 +151,15 @@ function ServiceDetail() {
     }
   }
 
+  async function adopt() {
+    try {
+      const created = await api<{ id: string }>("/apps/adopt", { method: "POST", body: { service_id: id } });
+      window.location.href = `/apps/view/?id=${encodeURIComponent(created.id)}`;
+    } catch (e) {
+      setResult({ ok: false, action: "connect to GitHub", command: [], output: (e as ApiError).detail });
+    }
+  }
+
   if (!id) return <ErrorText>Missing service id.</ErrorText>;
   if (error) return <ErrorText>{error}</ErrorText>;
   if (!svc) return <p className="text-sm text-zinc-500">Loading…</p>;
@@ -179,6 +188,9 @@ function ServiceDetail() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {gh && svc.path && ["systemd", "pm2", "php-fpm", "nginx-static"].includes(svc.manager) && (
+            <Button onClick={adopt} title="Deploy this service on every push, in place">Connect to GitHub</Button>
+          )}
           {svc.actions.length === 0 && <span className="text-sm text-zinc-500">No action available for this manager.</span>}
           {svc.actions.map((a) => (
             <Button

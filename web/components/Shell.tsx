@@ -45,6 +45,8 @@ function ThemeToggle() {
 
 const NAV = [
   { href: "/", label: "Services" },
+  { href: "/apps/", label: "Apps" },
+  { href: "/health/", label: "Health" },
   { href: "/history/", label: "History" },
   { href: "/settings/", label: "Settings" },
 ];

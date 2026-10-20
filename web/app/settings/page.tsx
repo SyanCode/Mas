@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Shell, useSession } from "@/components/Shell";
 import { Badge, Button, Card, ErrorText, Input } from "@/components/ui";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, type GitHubStatus } from "@/lib/api";
 
 function PasswordForm() {
   const [current, setCurrent] = useState("");
@@ -162,11 +162,94 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
   );
 }
 
+function GitHubCard() {
+  const [status, setStatus] = useState<GitHubStatus | null>(null);
+  const [org, setOrg] = useState("");
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const load = () => api<GitHubStatus>("/github/status").then(setStatus).catch((e: ApiError) => setError(e.detail));
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    if (code && state) {
+      // Back from GitHub after creating the App (manifest flow).
+      window.history.replaceState(null, "", "/settings/");
+      api<{ slug: string }>("/github/manifest/complete", { method: "POST", body: { code, state } })
+        .then((r) => setMsg(`GitHub App “${r.slug}” created. Last step: install it on your repositories.`))
+        .catch((e: ApiError) => setError(e.detail))
+        .finally(load);
+    } else {
+      load();
+    }
+  }, []);
+
+  async function create() {
+    setError("");
+    try {
+      const r = await api<{ action: string; manifest: string }>("/github/manifest", { method: "POST", body: { org: org || null } });
+      const form = document.createElement("form");
+      form.method = "post";
+      form.action = r.action;
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "manifest";
+      input.value = r.manifest;
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+    } catch (e) {
+      setError((e as ApiError).detail);
+    }
+  }
+
+  return (
+    <Card title="GitHub" actions={status?.configured ? <Badge tone="emerald">connected</Badge> : <Badge>not connected</Badge>}>
+      <div className="max-w-xl space-y-3 text-sm">
+        {msg && <p className="text-emerald-700 dark:text-emerald-400">{msg}</p>}
+        <ErrorText>{error}</ErrorText>
+        {status && !status.configured && (
+          <>
+            <p className="text-zinc-600 dark:text-zinc-400">
+              Mas deploys from GitHub through a private GitHub App (read-only access to the repositories you choose, push
+              webhooks). One click creates it on your account; GitHub sends its keys back to Mas.
+            </p>
+            <label className="block space-y-1">
+              <span className="text-zinc-500">Organization (optional, empty = your personal account)</span>
+              <Input value={org} onChange={(e) => setOrg(e.target.value.trim())} placeholder="my-org" className="max-w-xs" />
+            </label>
+            <Button variant="primary" onClick={create}>Create GitHub App</Button>
+          </>
+        )}
+        {status?.configured && (
+          <>
+            <p>
+              App <code>{status.slug}</code> (id {status.app_id}).{" "}
+              {status.installations.length
+                ? <>Installed on {status.installations.map((i) => i.account).join(", ")}.</>
+                : <span className="text-amber-700 dark:text-amber-400">Not installed on any account yet.</span>}
+            </p>
+            {status.install_url && (
+              <a href={status.install_url} target="_blank" rel="noreferrer" className="inline-block rounded-md border border-zinc-300 px-3 py-1.5 font-medium hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">
+                Install / choose repositories ↗
+              </a>
+            )}
+            <p className="text-xs text-zinc-500">Webhook URL: <code>{status.webhook_url}</code></p>
+            {status.error && <ErrorText>{status.error}</ErrorText>}
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function Settings() {
   const session = useSession();
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Settings</h1>
+      <GitHubCard />
       <TwoFactor enabled={!!session?.totp_enabled} />
       <PasswordForm />
       <p className="text-xs text-zinc-500">Mas {session?.version} · signed in as {session?.username}</p>

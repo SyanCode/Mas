@@ -69,6 +69,25 @@ export function Input(props: React.ComponentProps<"input">) {
   );
 }
 
+export function ReleaseBadge({ status }: { status: string }) {
+  const tone = ({ live: "emerald", failed: "red", building: "amber", queued: "amber" } as const)[status as "live"] ?? "zinc";
+  return <Badge tone={tone}>{status}</Badge>;
+}
+
+export function CopyCode({ text }: { text: string }) {
+  return (
+    <div className="group relative">
+      <pre className="mono overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-zinc-100 p-2 pr-14 text-xs dark:bg-zinc-950">{text}</pre>
+      <button
+        onClick={() => navigator.clipboard?.writeText(text)}
+        className="absolute right-1.5 top-1.5 rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+      >
+        copy
+      </button>
+    </div>
+  );
+}
+
 export function ErrorText({ children }: { children: ReactNode }) {
   if (!children) return null;
   return <p className="text-sm text-red-600 dark:text-red-400">{children}</p>;
