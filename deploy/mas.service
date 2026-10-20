@@ -1,0 +1,30 @@
+# Mas agent + dashboard. Installed by deploy/install.sh.
+#
+# Runs as root because it must read /proc of every user, `ss -p` and the
+# Docker socket, and restart services. The sandbox below limits what it can
+# write to the directories Mas manages (see README, "Security model").
+[Unit]
+Description=Mas server dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/mas/venv/bin/mas serve
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+
+NoNewPrivileges=yes
+ProtectSystem=full
+PrivateTmp=yes
+ReadWritePaths=-/var/lib/mas -/srv/mas -/etc/nginx -/etc/mas -/etc/systemd/system -/etc/letsencrypt
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
