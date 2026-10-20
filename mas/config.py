@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import logging
+import re
 import tomllib
 from dataclasses import dataclass, field
 
@@ -53,6 +55,24 @@ class Config:
     src_dir: str = "/opt/mas/src"
     venv_dir: str = "/opt/mas/venv"
     web_dir: str | None = None  # default: <src_dir>/web/out
+    secret_key_path: str = "/etc/mas/secret.key"
+    # [github] (phase 3)
+    github_app_id: int | None = None
+    github_app_slug: str | None = None
+    github_private_key_path: str = "/etc/mas/github-app.pem"
+    github_webhook_secret: str | None = None
+    # [deploy]
+    apps_dir: str = "/srv/mas/apps"
+    keep_releases: int = 5
+    letsencrypt_email: str | None = None
+    port_min: int = 7100
+    port_max: int = 7999
+    healthcheck_timeout: int = 60
+    public_ip: str | None = None  # [health] override for DNS checks
+
+    @property
+    def github_configured(self) -> bool:
+        return bool(self.github_app_id and self.github_webhook_secret)
 
     def unit_excluded(self, unit: str) -> bool:
         base = unit[: -len(".service")] if unit.endswith(".service") else unit
@@ -91,7 +111,49 @@ def load_config(host: Host, path: str = CONFIG_PATH) -> Config:
         if isinstance(server.get(key), typ):
             setattr(cfg, key, server[key])
     paths = data.get("paths", {})
-    for key, attr in (("db", "db_path"), ("src", "src_dir"), ("venv", "venv_dir"), ("web", "web_dir")):
+    for key, attr in (("db", "db_path"), ("src", "src_dir"), ("venv", "venv_dir"), ("web", "web_dir"),
+                      ("secret_key", "secret_key_path")):
         if isinstance(paths.get(key), str):
             setattr(cfg, attr, paths[key])
+
+    gh = data.get("github", {})
+    if isinstance(gh.get("app_id"), int):
+        cfg.github_app_id = gh["app_id"]
+    for key, attr in (("app_slug", "github_app_slug"), ("private_key_path", "github_private_key_path"),
+                      ("webhook_secret", "github_webhook_secret")):
+        if isinstance(gh.get(key), str):
+            setattr(cfg, attr, gh[key])
+
+    deploy = data.get("deploy", {})
+    for key, typ in (("apps_dir", str), ("keep_releases", int), ("letsencrypt_email", str),
+                     ("port_min", int), ("port_max", int), ("healthcheck_timeout", int)):
+        if isinstance(deploy.get(key), typ):
+            setattr(cfg, key, deploy[key])
+    if isinstance(data.get("health", {}).get("public_ip"), str):
+        cfg.public_ip = data["health"]["public_ip"]
     return cfg
+
+
+def _toml_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    return json.dumps(str(value))  # a JSON string is a valid TOML basic string
+
+
+def save_section(host: Host, section: str, values: dict, path: str = CONFIG_PATH) -> None:
+    """Replace one ``[section]`` of config.toml, keeping the rest (backup first)."""
+    text = host.read_text(path) or ""
+    out, skipping = [], False
+    for line in text.splitlines():
+        header = re.match(r"^\s*\[([^\]]+)\]\s*$", line)
+        if header:
+            skipping = header.group(1).strip() == section
+        if not skipping:
+            out.append(line)
+    while out and not out[-1].strip():
+        out.pop()
+    out += ["", f"[{section}]"] + [f"{k} = {_toml_value(v)}" for k, v in values.items() if v is not None]
+    host.backup(path)
+    host.write_text(path, "\n".join(out).lstrip("\n") + "\n", mode=0o600)
