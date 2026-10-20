@@ -6,10 +6,11 @@ Docker container or two, and it tells you what is running, where, for which doma
 which user and from which git repository. Nothing gets reinstalled or broken.
 
 You then manage those services from the `mas` CLI or from a small web dashboard protected
-by a password and two-factor authentication. Deploying new projects from GitHub,
-Vercel-style, is next on the roadmap.
+by a password and two-factor authentication, keep an eye on certificates and nginx, and
+deploy projects from GitHub on every push, Vercel-style, on the same machine.
 
-> Status: **phase 2**: detection, CLI, dashboard with 2FA, start/stop/restart/reload, logs.
+> Status: **phase 3**: detection, CLI, dashboard with 2FA, actions and logs, health checks,
+> GitHub deployments with releases, rollback and adoption of existing services.
 
 ## Why another one?
 
@@ -103,6 +104,93 @@ $ sudo mas user passwd [name]
 - Settings: enable / replace / disable 2FA with a QR code, change password.
 - Light and dark theme (follows the system by default).
 
+## Health checks
+
+`mas doctor` (CLI) and the **Health** page check, read-only:
+
+| Check | Why it matters |
+|-------|----------------|
+| Broken certbot lineage (`live/*/cert.pem` not a symlink), renewal config without files | certbot skips or fails on it at every run |
+| Expired / expiring certificates | renewal is failing somewhere |
+| Certificates used by no enabled vhost | leftovers that make `certbot renew` fail |
+| `standalone` renewals with `systemctl stop nginx` hooks | every renewal takes all sites down, and may leave nginx stopped |
+| Missing webroot, inactive `certbot.timer` | renewals cannot succeed |
+| nginx running outside systemd | `systemctl reload` does nothing, restarts fail with "address already in use" |
+| vhost pointing to a missing certificate, `nginx -t` failing | the next reload breaks every site |
+| Domains not resolving, or resolving to another server | site moved elsewhere: its vhost/certificate here are dead weight |
+
+Each problem comes with an explanation and, when safe, the command that fixes it. Mas never
+applies these fixes by itself.
+
+## Deploying from GitHub
+
+### 1. Connect GitHub (once)
+
+In **Settings → GitHub**, click **Create GitHub App** (optionally for an organization). GitHub
+shows the App to create; confirm, and GitHub sends its credentials back to Mas through the
+[manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest):
+App ID, private key (stored in `/etc/mas/github-app.pem`, `0600`) and webhook secret (stored in
+`/etc/mas/config.toml`, `0600`). Then click **Install** and choose the repositories Mas may read.
+
+The App is private and asks for the minimum: **Contents: read**, **Metadata: read**,
+**Pull requests: read**, and the **push** and **pull_request** webhook events.
+
+<details>
+<summary>Creating the App by hand instead</summary>
+
+1. github.com → Settings → Developer settings → GitHub Apps → **New GitHub App**.
+2. Homepage URL: `https://<your dashboard>`; Webhook URL: `https://<your dashboard>/api/github/webhook`;
+   Webhook secret: a long random string.
+3. Permissions: Contents read-only, Metadata read-only, Pull requests read-only. Events: Push, Pull request.
+4. "Only on this account", create, then **Generate a private key** (downloads a `.pem`).
+5. On the server: `sudo mas github setup` (asks for the App ID, slug, `.pem` path and secret), then
+   `sudo systemctl restart mas`, and install the App on your repositories.
+</details>
+
+### 2. Create an app
+
+**Apps → New app**: pick a repository and a branch. Mas detects the type (Next.js, Node, Python,
+static, PHP) from the repository; set an optional domain and environment variables (stored
+encrypted with a key in `/etc/mas/secret.key`). Create: the first deployment starts and its log
+streams live in the dashboard.
+
+Every push to the branch then deploys automatically:
+
+1. `git clone` of the pushed commit into `/srv/mas/apps/<app>/releases/<sha>/` (the installation
+   token is passed to git through the environment, never on the command line or in logs)
+2. build as the dedicated user `mas-<app>` (`npm ci && npm run build`, a Python venv +
+   `pip install`, `composer install`, or your own build command)
+3. atomic switch of the `current` symlink
+4. `mas-app-<app>.service` (generated systemd unit, non-root user, `NoNewPrivileges`,
+   `ProtectSystem`, `ProtectHome`, app listening on `127.0.0.1:<port>`) restarted
+5. nginx vhost generated from a template (backup, `nginx -t`, reload; refused if another vhost
+   already serves the domain)
+6. `certbot certonly --nginx` if the domain has no certificate yet, then HTTPS vhost
+7. HTTP health check; **if it fails, the previous release is put back automatically**
+
+The last 5 releases are kept; **Rollback** puts any of them back in one click (`mas rollback <app>`).
+
+### Adopting an existing service
+
+A detected service whose folder is a GitHub checkout (for example a PM2 or systemd app) shows
+**Connect to GitHub** on its page. Mas then deploys it **in place**, without reinstalling anything:
+`git fetch` + `git reset --hard` in its folder (as the folder owner, refused if there are local
+uncommitted changes), build, restart through its current manager, health check, and
+`git reset` back to the previous commit if it fails.
+
+### CLI
+
+```console
+$ sudo mas apps                    # apps, live release, last deploy
+$ sudo mas deploy <app>            # deploy now, logs printed live
+$ sudo mas releases <app>
+$ sudo mas rollback <app> [release]
+$ sudo mas github status
+```
+
+Pull-request preview deployments are not implemented yet; the data model (an `environment`
+per app) is ready for them.
+
 ## How detection works
 
 ```
@@ -160,6 +248,11 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   device signs out every other session.
 - **CSRF**: every mutating request needs the per-session `X-CSRF-Token` header, and a foreign
   `Origin` is rejected.
+- **Deployments**: the GitHub webhook is rejected unless its `X-Hub-Signature-256` HMAC is valid,
+  before the payload is even parsed. Apps run as their own non-root user, listen on loopback, and
+  get their secrets from a `0600` environment file; secrets are encrypted at rest in the database.
+  Build commands you configure run as that unprivileged user. Generated files are backed up
+  before being replaced and nginx is only reloaded after a successful `nginx -t`.
 - **Actions**: strict allow-list `(manager, action) → argv`, built from identifiers found by
   the scan (re-validated with regexes), executed without a shell. Stop and restart ask for
   confirmation. Every action, with its command and output, is written to the audit log.
@@ -201,11 +294,11 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Phase 1: detection.** Collectors, correlation, type detection, `mas scan [--json]`.
 - [x] **Phase 2: dashboard and management.** API, 2FA, background scan, logs, allow-listed
       actions, labels, audit log, `install.sh`, `mas.service`, `mas self-update`.
-- [ ] **Phase 3: deploy from GitHub.** GitHub App, signed webhooks, atomic releases in
-      `/srv/mas/apps/<app>/releases/<sha>`, generated systemd unit and nginx vhost, certbot,
-      healthcheck with automatic rollback, the last 5 releases kept, build logs over SSE, and
-      adoption of already-detected services that have a GitHub remote.
-- [ ] Later: preview deployments per pull request, recovery codes for 2FA.
+- [x] **Phase 2.5: health checks.** Certificates, certbot renewal, nginx, DNS (`mas doctor`).
+- [x] **Phase 3: deploy from GitHub.** GitHub App (manifest flow), signed webhooks, atomic
+      releases, generated systemd unit and nginx vhost, certbot, health check with automatic
+      rollback, 5 releases kept, live build logs (SSE), adoption of detected services.
+- [ ] Later: preview deployments per pull request, recovery codes for 2FA, notifications.
 
 ## License
 
