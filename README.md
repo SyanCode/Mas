@@ -273,7 +273,11 @@ redeploys the site.
 
 1. Add `mas.cms.json` at the root of the repository. Each page is one JSON file your site reads at
    build time (`import home from "./content/home.json"`, `fetch`, a static-site generator data
-   file…):
+   file…). The **CMS** card of the app can write it for you: it lists the JSON content files of
+   the repository (tooling files such as `package.json` or `tsconfig.json` are ignored), guesses a
+   field for each value (text, long text, markdown, image path, color, date, email, link, number,
+   yes/no, lists of objects), shows what it left out (nested objects, lists of plain values), and
+   commits the file once you have reviewed it. By hand, it looks like this:
 
    ```json
    {

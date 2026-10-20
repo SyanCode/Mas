@@ -26,6 +26,14 @@ class UserIds(BaseModel):
     user_ids: list[int] = Field(max_length=500)
 
 
+class Paths(BaseModel):
+    files: list[str] = Field(max_length=50)
+
+
+class SchemaBody(BaseModel):
+    schema_: dict = Field(alias="schema")
+
+
 class SaveBody(BaseModel):
     values: dict
     sha: str | None = Field(default=None, max_length=64)  # blob sha the editor started from
@@ -127,6 +135,26 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         names = [db.get_user_by_id(u)["username"] for u in body.user_ids]
         db.audit(s.username, "editor-access", True, service_id=app_id, detail=", ".join(names) or "none")
         return {"ok": True}
+
+    @app.get("/api/apps/{app_id}/cms/candidates")
+    async def schema_candidates(app_id: str, _=Depends(current_session)) -> dict:
+        if db.get_app(app_id) is None:
+            raise HTTPException(404, f"unknown app {app_id}")
+        return await asyncio.to_thread(call, manager.candidates, app_id)
+
+    @app.post("/api/apps/{app_id}/cms/generate")
+    async def schema_generate(app_id: str, body: Paths, _=Depends(current_session)) -> dict:
+        if db.get_app(app_id) is None:
+            raise HTTPException(404, f"unknown app {app_id}")
+        return await asyncio.to_thread(call, manager.generate, app_id, body.files)
+
+    @app.put("/api/apps/{app_id}/cms/schema")
+    async def schema_write(app_id: str, body: SchemaBody, s=Depends(current_session)) -> dict:
+        if db.get_app(app_id) is None:
+            raise HTTPException(404, f"unknown app {app_id}")
+        result = await asyncio.to_thread(call, manager.write_schema, app_id, body.schema_, s.username)
+        db.audit(s.username, "cms-schema", True, service_id=app_id, detail=result["commit"][:7])
+        return result
 
     # -- editing (editors and administrators) ------------------------------
 

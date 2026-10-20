@@ -298,6 +298,8 @@ class _Validator:
                     raise CmsError(f"{label} #{i} is invalid")
                 clean = {k: v for k, v in item.items() if k not in declared}
                 for sub in field["fields"]:
+                    if sub["key"] not in item and not sub["required"]:
+                        continue  # absent stays absent: the site may test for the key
                     clean[sub["key"]] = self.check(sub, item.get(sub["key"]), f"{label} #{i} › {sub['label']}")
                 items.append(clean)
             merged[key] = items
@@ -315,6 +317,138 @@ def apply_values(page: dict, incoming: dict, existing: dict,
 
 def dump_json(data: dict) -> bytes:
     return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode()
+
+
+# -- schema generation -----------------------------------------------------------
+
+NOT_CONTENT = {"package.json", "package-lock.json", "composer.json", "jsconfig.json", "components.json",
+               "vercel.json", "netlify.json", "renovate.json", "turbo.json", "lerna.json", "nx.json",
+               "manifest.json", "site.webmanifest", "deno.json", "bun.lock", SCHEMA_FILE}
+NOT_CONTENT_DIRS = {"node_modules", ".git", ".github", ".vscode", ".idea", ".next", "dist", "build", "out",
+                    "vendor", "coverage", ".turbo", ".vercel", "__tests__", "test", "tests"}
+CONTENT_HINTS = ("content", "data", "locales", "i18n", "cms", "copy", "texts")
+IMAGE_EXT_RE = re.compile(r"\.(png|jpe?g|webp|gif|avif)$", re.I)
+MARKDOWN_RE = re.compile(r"(\*\*[^*]+\*\*|^#{1,6} |\[[^\]]+\]\([^)]+\)|^[-*] )", re.M)
+MAX_CANDIDATE_BYTES = 200_000
+
+
+def content_candidates(files: list[dict]) -> list[dict]:
+    """JSON files that may hold site content, most likely first."""
+    out = []
+    for f in files:
+        p = PurePosixPath(f["path"])
+        name = p.name.lower()
+        if p.suffix.lower() != ".json" or name in NOT_CONTENT or name.startswith(("tsconfig", ".eslintrc", ".")):
+            continue
+        if set(part.lower() for part in p.parts[:-1]) & NOT_CONTENT_DIRS or f.get("size", 0) > MAX_CANDIDATE_BYTES:
+            continue
+        hinted = any(h in part.lower() for part in p.parts[:-1] for h in CONTENT_HINTS)
+        out.append({"path": f["path"], "size": f.get("size", 0), "suggested": hinted})
+    out.sort(key=lambda c: (not c["suggested"], c["path"]))
+    return out[:100]
+
+
+def humanize(key: str) -> str:
+    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key).replace("_", " ").replace("-", " ").split()
+    return " ".join(words).capitalize() or key
+
+
+def _cap(length: int, floor: int, ceiling: int) -> int:
+    return max(floor, min(ceiling, length * 2))
+
+
+def _infer_scalar(key: str, value: Any, image_dirs: Callable[[str], str]) -> dict | None:
+    base = {"key": key, "label": humanize(key)}
+    if isinstance(value, bool):
+        return {**base, "type": "boolean"}
+    if isinstance(value, int):
+        return {**base, "type": "number", "integer": True}
+    if isinstance(value, float):
+        return {**base, "type": "number"}
+    if value is None:
+        return {**base, "type": "text", "max": 200}
+    if not isinstance(value, str):
+        return None
+    if value.startswith("/") and IMAGE_EXT_RE.search(value) and " " not in value:
+        url = str(PurePosixPath(value).parent).rstrip("/") or "/"
+        return {**base, "type": "image", "url": url, "dir": image_dirs(url)}
+    if COLOR_RE.fullmatch(value):
+        return {**base, "type": "color"}
+    if DATE_RE.fullmatch(value):
+        return {**base, "type": "date"}
+    if EMAIL_RE.fullmatch(value):
+        return {**base, "type": "email"}
+    if re.match(r"^(https?://|mailto:|tel:)", value) and LINK_RE.fullmatch(value):
+        return {**base, "type": "url"}
+    if MARKDOWN_RE.search(value):
+        return {**base, "type": "markdown", "max": _cap(len(value), 2000, 20000)}
+    if "\n" in value or len(value) > 120:
+        return {**base, "type": "textarea", "max": _cap(len(value), 500, 5000)}
+    return {**base, "type": "text", "max": _cap(len(value), 80, 200)}
+
+
+def infer_page(path: str, data: Any, image_dirs: Callable[[str], str]) -> tuple[dict | None, list[str]]:
+    """Schema page guessed from a content file; returns (page or None, notes about skipped keys)."""
+    if not isinstance(data, dict) or not data:
+        return None, [f"{path}: not a JSON object, skipped"]
+    fields, notes = [], []
+    for key, value in data.items():
+        if not KEY_RE.fullmatch(str(key)):
+            notes.append(f"{path} › {key}: unusual key name, left out")
+            continue
+        if isinstance(value, list):
+            items = [v for v in value if isinstance(v, dict)]
+            if not value or len(items) != len(value):
+                notes.append(f"{path} › {key}: list of plain values, left out (lists must contain objects)")
+                continue
+            subs: dict[str, dict] = {}
+            for item in items:
+                for k, v in item.items():
+                    if k in subs or not KEY_RE.fullmatch(str(k)):
+                        continue
+                    f = _infer_scalar(k, v, image_dirs)
+                    if f is None:
+                        notes.append(f"{path} › {key} › {k}: nested data, left out")
+                    else:
+                        subs[k] = f
+            for k, f in subs.items():  # longest value decides the size of text fields
+                lengths = [len(it[k]) for it in items if isinstance(it.get(k), str)]
+                if f["type"] in DEFAULT_MAX and lengths:
+                    floor, ceiling = {"text": (80, 200), "textarea": (500, 5000), "markdown": (2000, 20000)}[f["type"]]
+                    f["max"] = _cap(max(lengths), floor, ceiling)
+            if subs:
+                fields.append({"key": key, "label": humanize(key), "type": "list", "item_label": humanize(key).rstrip("s") or "Item",
+                               "max_items": max(10, min(MAX_ITEMS, len(items) * 2)), "fields": list(subs.values())})
+            continue
+        field = _infer_scalar(key, value, image_dirs)
+        if field is None:
+            notes.append(f"{path} › {key}: nested object, left out")
+        else:
+            fields.append(field)
+    if not fields:
+        return None, notes + [f"{path}: nothing editable found"]
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "-", PurePosixPath(path).stem).strip("-") or "page"
+    return {"id": stem, "label": humanize(stem), "file": path, "fields": fields[:MAX_FIELDS]}, notes
+
+
+def infer_schema(contents: dict[str, Any], image_dirs: Callable[[str], str]) -> tuple[dict, list[str]]:
+    pages, notes, ids = [], [], set()
+    for path, data in contents.items():
+        page, page_notes = infer_page(path, data, image_dirs)
+        notes += page_notes
+        if page is None:
+            continue
+        base, n = page["id"], 2
+        while page["id"] in ids:  # content/fr/home.json and content/en/home.json
+            page["id"] = f"{base}-{n}"
+            n += 1
+        ids.add(page["id"])
+        pages.append(page)
+    if not pages:
+        raise CmsError("no editable content found in the selected files")
+    schema = {"pages": pages}
+    parse_schema(json.dumps(schema))  # what we generate must be accepted
+    return schema, notes
 
 
 # -- manager -------------------------------------------------------------------
@@ -494,3 +628,58 @@ class CmsManager:
             if not app["auto_deploy"]:  # otherwise the push webhook deploys it
                 release_id = self.deployer.enqueue(app_id, "cms", username, commit)
             return {"commit": commit, "unchanged": False, "release_id": release_id}
+
+    # -- schema generation (administrators) ------------------------------------
+
+    def candidates(self, app_id: str) -> dict:
+        gh, app = self._target(app_id)
+        try:
+            head = gh.head(app["installation_id"], app["repo"], app["branch"])
+            files = gh.tree(app["installation_id"], app["repo"], head)
+        except GitHubError as exc:
+            raise CmsError(str(exc)) from None
+        return {"files": content_candidates(files), "has_schema": any(f["path"] == SCHEMA_FILE for f in files)}
+
+    def _image_dirs(self, app: dict) -> Callable[[str], str]:
+        # Static and PHP sites serve their (sub-)folder as is; JS frameworks serve public/.
+        root = (app.get("root_dir") or "").strip("/") if app["type"] in ("static", "php") else "public"
+
+        def resolve(url: str) -> str:
+            return "/".join(p for p in (root, url.strip("/")) if p) or "uploads"
+        return resolve
+
+    def generate(self, app_id: str, paths: list[str]) -> dict:
+        gh, app = self._target(app_id)
+        if not paths:
+            raise CmsError("select at least one file")
+        try:
+            head = gh.head(app["installation_id"], app["repo"], app["branch"])
+            contents = {}
+            for path in paths[:MAX_PAGES]:
+                safe_repo_path(path, path)
+                raw, _ = gh.read_file(app["installation_id"], app["repo"], path, head)
+                if raw is None:
+                    raise CmsError(f"{path} does not exist")
+                try:
+                    contents[path] = json.loads(raw)
+                except ValueError:
+                    raise CmsError(f"{path} is not valid JSON") from None
+        except GitHubError as exc:
+            raise CmsError(str(exc)) from None
+        schema, notes = infer_schema(contents, self._image_dirs(app))
+        return {"schema": schema, "notes": notes}
+
+    def write_schema(self, app_id: str, schema: dict, username: str) -> dict:
+        gh, app = self._target(app_id)
+        content = dump_json(schema)
+        parse_schema(content)  # refuse an invalid file
+        lock = self._locks.setdefault(app_id, threading.Lock())
+        with lock:
+            try:
+                head = gh.head(app["installation_id"], app["repo"], app["branch"])
+                commit = gh.commit_files(app["installation_id"], app["repo"], app["branch"], {SCHEMA_FILE: content},
+                                         f"cms: {SCHEMA_FILE}\n\nWritten by {username} with Mas.", head)
+            except GitHubError as exc:
+                raise self._github_error(exc) from None
+            self._schemas.pop(app_id, None)
+        return {"commit": commit}  # the site does not read the schema: nothing to redeploy

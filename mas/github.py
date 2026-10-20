@@ -130,6 +130,11 @@ class GitHubApp:
         ref = self._as_installation(installation_id, f"/repos/{repo}/git/ref/heads/{quote(branch, safe='')}")
         return ref["object"]["sha"]
 
+    def tree(self, installation_id: int, repo: str, ref: str) -> list[dict]:
+        """Every file of the repository at ``ref``: [{path, size}]."""
+        data = self._as_installation(installation_id, f"/repos/{repo}/git/trees/{quote(ref, safe='')}?recursive=1")
+        return [{"path": t["path"], "size": t.get("size", 0)} for t in data.get("tree", []) if t.get("type") == "blob"]
+
     def read_file(self, installation_id: int, repo: str, path: str, ref: str) -> tuple[bytes | None, str | None]:
         """(content, blob sha) of a file, (None, None) when it does not exist."""
         try:

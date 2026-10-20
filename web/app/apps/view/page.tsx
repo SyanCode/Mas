@@ -161,8 +161,91 @@ const CMS_EXAMPLE = `{
   }]
 }`;
 
+interface Candidate { path: string; size: number; suggested: boolean }
+
+function SchemaGenerator({ appId, replacing, onDone }: { appId: string; replacing: boolean; onDone: () => void }) {
+  const [files, setFiles] = useState<Candidate[] | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [draft, setDraft] = useState("");
+  const [notes, setNotes] = useState<string[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const base = `/apps/${encodeURIComponent(appId)}/cms`;
+
+  useEffect(() => {
+    api<{ files: Candidate[] }>(`${base}/candidates`).then((r) => {
+      setFiles(r.files);
+      setPicked(r.files.filter((f) => f.suggested).map((f) => f.path));
+    }).catch((e: ApiError) => setError(e.detail));
+  }, [base]);
+
+  async function run(label: string, fn: () => Promise<void>) {
+    setBusy(label);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : (e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const generate = () => run("generate", async () => {
+    const r = await api<{ schema: unknown; notes: string[] }>(`${base}/generate`, { method: "POST", body: { files: picked } });
+    setDraft(JSON.stringify(r.schema, null, 2));
+    setNotes(r.notes);
+  });
+  const commit = () => run("commit", async () => {
+    let schema: unknown;
+    try {
+      schema = JSON.parse(draft);
+    } catch {
+      throw new Error("the schema is not valid JSON");
+    }
+    await api(`${base}/schema`, { method: "PUT", body: { schema } });
+    onDone();
+  });
+
+  if (!files) return error ? <ErrorText>{error}</ErrorText> : <Spinner />;
+  return (
+    <div className="space-y-3 rounded-xl border border-zinc-200/80 p-3 dark:border-white/[0.06]">
+      {!draft ? (
+        <>
+          <div className="text-xs font-medium text-zinc-500">Content files to make editable</div>
+          {files.length === 0 && <p className="text-xs text-zinc-500">No JSON content file found. Move the texts of your site into JSON files (for example <code>content/home.json</code>), push, then come back.</p>}
+          <div className="max-h-56 space-y-1 overflow-auto">
+            {files.map((f) => (
+              <label key={f.path} className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={picked.includes(f.path)}
+                  onChange={(e) => setPicked(e.target.checked ? [...picked, f.path] : picked.filter((p) => p !== f.path))} />
+                <code className="truncate">{f.path}</code>
+              </label>
+            ))}
+          </div>
+          <Button variant="primary" disabled={!picked.length || !!busy} onClick={generate}>{busy === "generate" ? <Spinner /> : null}Generate</Button>
+        </>
+      ) : (
+        <>
+          <div className="text-xs text-zinc-500">Review the fields (labels, <code>max</code>, <code>required</code>…), then commit.{replacing && " This replaces the current file."}</div>
+          {notes.length > 0 && (
+            <ul className="space-y-0.5 text-xs text-amber-500">{notes.map((n) => <li key={n}>• {n}</li>)}</ul>
+          )}
+          <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={14} spellCheck={false} />
+          <div className="flex gap-2">
+            <Button variant="primary" disabled={!!busy} onClick={commit}>{busy === "commit" ? <Spinner /> : null}Commit mas.cms.json</Button>
+            <Button variant="ghost" onClick={() => setDraft("")}>Back</Button>
+          </div>
+        </>
+      )}
+      <ErrorText>{error}</ErrorText>
+    </div>
+  );
+}
+
 function CmsCard({ appId }: { appId: string }) {
   const [info, setInfo] = useState<CmsInfo | null>(null);
+  const [generating, setGenerating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const load = useCallback(() => {
@@ -199,13 +282,21 @@ function CmsCard({ appId }: { appId: string }) {
               {info.can_write === false && (
                 <p className="text-xs text-amber-500">The GitHub App can only read this repository. On GitHub: Settings → Developer settings → GitHub Apps → your Mas app → Permissions → Contents: <b>Read and write</b>, then accept the new permissions on the installation.</p>
               )}
-              <Link href={`/cms/edit/?app=${encodeURIComponent(appId)}`} className="inline-flex font-medium text-indigo-500 hover:underline">Open the editor →</Link>
+              <div className="flex flex-wrap items-center gap-3">
+                <Link href={`/cms/edit/?app=${encodeURIComponent(appId)}`} className="inline-flex font-medium text-indigo-500 hover:underline">Open the editor →</Link>
+                {!generating && <button className="text-xs text-zinc-500 hover:underline" onClick={() => setGenerating(true)}>Regenerate {info.schema_file}</button>}
+              </div>
+              {generating && <SchemaGenerator appId={appId} replacing onDone={() => { setGenerating(false); load(); }} />}
             </>
           ) : (
-            <div className="space-y-2">
-              <p className="text-zinc-500">Add <code>{info.schema_file}</code> at the root of the repository to let your client edit the content. Your site reads the JSON files at build time.</p>
+            <div className="space-y-3">
+              <p className="text-zinc-500">Let your client edit the content: Mas reads the JSON content files of the repository and writes <code>{info.schema_file}</code> for you. Your site reads those JSON files at build time.</p>
               {info.error && <p className="text-xs text-zinc-500">{info.error}</p>}
-              <pre className="mono overflow-auto rounded-lg bg-black/40 p-3 text-[11px] leading-relaxed text-zinc-300">{CMS_EXAMPLE}</pre>
+              <SchemaGenerator appId={appId} replacing={false} onDone={load} />
+              <details className="text-xs text-zinc-500">
+                <summary className="cursor-pointer">Or write it by hand</summary>
+                <pre className="mono mt-2 overflow-auto rounded-lg bg-black/40 p-3 text-[11px] leading-relaxed text-zinc-300">{CMS_EXAMPLE}</pre>
+              </details>
             </div>
           )}
           <div className="space-y-1.5 border-t border-zinc-200/80 pt-3 dark:border-white/[0.06]">

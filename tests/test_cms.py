@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from mas import auth
 from mas.api import create_app
-from mas.cms import CmsError, apply_values, detect_image, parse_schema
+from mas.cms import CmsError, apply_values, content_candidates, detect_image, infer_schema, parse_schema
 from mas.config import Config
 from mas.db import Database
 from mas.github import GitHubError
@@ -48,6 +48,9 @@ class FakeGitHub:
 
     def head(self, installation_id, repo, branch):
         return self.sha
+
+    def tree(self, installation_id, repo, ref):
+        return [{"path": p, "size": len(d)} for p, d in self.files.items()]
 
     def read_file(self, installation_id, repo, path, ref):
         data = self.files.get(path)
@@ -102,6 +105,48 @@ def test_values_are_checked_and_undeclared_keys_kept():
                    {"services": [{"price": 1}]}, {"services": [{"name": "a", "price": "1"}]}):
         with pytest.raises(CmsError):
             apply_values(page, values, existing, no_upload)
+
+
+def test_candidates_skip_tooling_files():
+    files = [{"path": p, "size": 10} for p in ("package.json", "tsconfig.app.json", "node_modules/x/data.json",
+                                               "src/content/home.json", "config.json", ".github/a.json",
+                                               "public/site.webmanifest", "mas.cms.json")]
+    assert [(c["path"], c["suggested"]) for c in content_candidates(files)] == [
+        ("src/content/home.json", True), ("config.json", False)]
+
+
+def test_infer_schema_from_content():
+    content = {
+        "heroTitle": "Bienvenue chez nous",
+        "intro": "Un paragraphe\nsur deux lignes",
+        "body": "Du **gras** et un [lien](https://example.com)",
+        "hero": "/images/hero.jpg",
+        "accent": "#ff8800",
+        "contact_email": "hello@example.com",
+        "website": "https://example.com",
+        "opening": "2026-01-15",
+        "show_banner": True,
+        "seats": 12,
+        "services": [{"name": "Coupe", "price": 20.5, "photo": "/images/coupe.webp"}, {"name": "Couleur sur cheveux longs"}],
+        "tags": ["a", "b"],
+        "seo": {"title": "x"},
+    }
+    schema, notes = infer_schema({"src/content/home.json": content}, lambda url: "public" + url)
+    page = schema["pages"][0]
+    assert page["id"] == "home" and page["file"] == "src/content/home.json"
+    types = {f["key"]: f["type"] for f in page["fields"]}
+    assert types == {"heroTitle": "text", "intro": "textarea", "body": "markdown", "hero": "image", "accent": "color",
+                     "contact_email": "email", "website": "url", "opening": "date", "show_banner": "boolean",
+                     "seats": "number", "services": "list"}
+    hero = next(f for f in page["fields"] if f["key"] == "hero")
+    assert hero["url"] == "/images" and hero["dir"] == "public/images"
+    assert next(f for f in page["fields"] if f["key"] == "heroTitle")["label"] == "Hero title"
+    services = next(f for f in page["fields"] if f["key"] == "services")
+    assert [f["key"] for f in services["fields"]] == ["name", "price", "photo"]
+    assert any("tags" in n for n in notes) and any("seo" in n for n in notes)
+    # the generated schema accepts the existing content as it is
+    merged, files, _ = apply_values(parse_schema(json.dumps(schema))["pages"][0], content, content, no_upload)
+    assert merged == content and not files
 
 
 def test_image_detection():
@@ -200,6 +245,19 @@ def test_admin_sees_schema_problems_and_permissions(env):
     gh.files["mas.cms.json"] = b"{not json"
     gh.sha = "c9"
     assert "not valid JSON" in client.get("/api/apps/site/cms").json()["error"]
+    # generate a schema from the content file and commit it
+    gh.write = True
+    found = client.get("/api/apps/site/cms/candidates").json()
+    assert found["has_schema"] and [f["path"] for f in found["files"]] == ["content/home.json"]
+    gen = client.post("/api/apps/site/cms/generate", json={"files": ["content/home.json"]},
+                      headers={"x-csrf-token": csrf}).json()
+    assert [f["key"] for f in gen["schema"]["pages"][0]["fields"]] == ["title", "keep"]
+    r = client.put("/api/apps/site/cms/schema", json={"schema": gen["schema"]}, headers={"x-csrf-token": csrf})
+    assert r.status_code == 200, r.text
+    assert json.loads(gh.files["mas.cms.json"]) == gen["schema"]
+    assert client.get("/api/apps/site/cms").json()["ok"]
+    bad = {"pages": [{"id": "x", "file": ".github/x.json", "fields": [{"key": "a"}]}]}
+    assert client.put("/api/apps/site/cms/schema", json={"schema": bad}, headers={"x-csrf-token": csrf}).status_code == 400
     # editors only: an administrator cannot be deleted from the dashboard
     admin_id = db.get_user("admin")["id"]
     assert client.delete(f"/api/users/{admin_id}", headers={"x-csrf-token": csrf}).status_code == 404
