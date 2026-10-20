@@ -153,8 +153,11 @@ shows the App to create; confirm, and GitHub sends its credentials back to Mas t
 App ID, private key (stored in `/etc/mas/github-app.pem`, `0600`) and webhook secret (stored in
 `/etc/mas/config.toml`, `0600`). Then click **Install** and choose the repositories Mas may read.
 
-The App is private and asks for the minimum: **Contents: read**, **Metadata: read**,
-**Pull requests: read**, and the **push** and **pull_request** webhook events.
+The App is private and asks for: **Contents: read and write** (write is only used by the CMS, to
+commit content edits), **Metadata: read**, **Pull requests: read**, and the **push** and
+**pull_request** webhook events. An App created before the CMS has Contents read-only: change it
+to *Read and write* in the App settings on GitHub, then accept the new permissions on the
+installation.
 
 <details>
 <summary>Creating the App by hand instead</summary>
@@ -162,7 +165,7 @@ The App is private and asks for the minimum: **Contents: read**, **Metadata: rea
 1. github.com → Settings → Developer settings → GitHub Apps → **New GitHub App**.
 2. Homepage URL: `https://<your dashboard>`; Webhook URL: `https://<your dashboard>/api/github/webhook`;
    Webhook secret: a long random string.
-3. Permissions: Contents read-only, Metadata read-only, Pull requests read-only. Events: Push, Pull request.
+3. Permissions: Contents read and write, Metadata read-only, Pull requests read-only. Events: Push, Pull request.
 4. "Only on this account", create, then **Generate a private key** (downloads a `.pem`).
 5. On the server: `sudo mas github setup` (asks for the App ID, slug, `.pem` path and secret), then
    `sudo systemctl restart mas`, and install the App on your repositories.
@@ -261,6 +264,56 @@ the memory actually used by each container.
 Restore a backup: `docker cp <file> supabase-db:/tmp/r.dump && docker exec supabase-db pg_restore
 -U postgres -d postgres --clean /tmp/r.dump`.
 
+### CMS for your clients
+
+Host client sites with Mas and let each client edit their own content, without giving them access
+to the server or the code. The CMS is git-based: the repository declares what can be edited, the
+client fills a form in the dashboard, and Mas commits the change to the deployed branch, which
+redeploys the site.
+
+1. Add `mas.cms.json` at the root of the repository. Each page is one JSON file your site reads at
+   build time (`import home from "./content/home.json"`, `fetch`, a static-site generator data
+   file…):
+
+   ```json
+   {
+     "pages": [{
+       "id": "home", "label": "Home page", "file": "content/home.json",
+       "fields": [
+         { "key": "title", "type": "text", "label": "Title", "max": 80, "required": true },
+         { "key": "intro", "type": "markdown", "max": 2000 },
+         { "key": "hero", "type": "image", "dir": "public/uploads", "url": "/uploads", "max_kb": 2048 },
+         { "key": "phone", "type": "text", "max": 20 },
+         { "key": "services", "type": "list", "item_label": "Service", "max_items": 8,
+           "fields": [
+             { "key": "name", "type": "text", "required": true },
+             { "key": "price", "type": "number", "min": 0 }
+           ] }
+       ]
+     }]
+   }
+   ```
+
+   Field types: `text`, `textarea`, `markdown`, `number` (`min`, `max`, `integer`), `boolean`,
+   `select` (`options`), `url`, `email`, `date`, `color`, `image` (`dir` in the repository, `url`
+   as the site serves it, `max_kb`) and `list` (of the other types, `min_items`, `max_items`).
+   Every field takes `label`, `help`, `required` and `placeholder`.
+2. **Settings → People → New editor** creates a client account (a password is generated and
+   shown once) and **Sites** chooses which apps it may edit; the app page has the same switch in
+   its **CMS** card, which also checks the schema.
+3. The client signs in to the same dashboard and only sees **My sites** and **Account** (password,
+   2FA). Every other API route answers `403` for an editor.
+
+What keeps the site safe: the schema is always read from the repository (never from the browser);
+only the declared fields of the declared JSON files are written, and keys the schema does not know
+are kept untouched; values are checked server-side (length, type, allowed choices, links limited
+to `https://`, `/`, `mailto:` and `tel:`, no control characters); `.git/`, `.github/` and
+`mas.cms.json` itself cannot be targeted; images are checked by their content (PNG, JPEG, GIF,
+WebP, AVIF; no SVG) and get a fresh file name. Each save is a single commit (`cms(home): …
+Edited by <editor>`) on top of the version the editor opened: if someone pushed meanwhile, the
+editor is asked to reload instead of overwriting. Undo a change with `git revert` or roll back
+the deployment in Mas.
+
 ### While a site deploys
 
 On a first deployment the domain answers immediately with a **“Deploying…” page** (nginx placeholder
@@ -338,8 +391,9 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
 - **Network**: the API listens on `127.0.0.1:7070` only (`mas serve` refuses anything else).
   The public entry point is the nginx vhost: HTTPS only, HSTS, `X-Frame-Options: DENY`, CSP,
   `client_max_body_size 2m`.
-- **Authentication**: a single admin account created on the server (`mas user create`), never
-  from the web. Passwords are hashed with argon2id. **TOTP 2FA** (RFC 6238, 30 s, ±1 step), and
+- **Authentication**: administrator accounts are created on the server (`mas user create`), never
+  from the web. CMS editor accounts are created by an administrator in the dashboard and can only
+  reach the CMS routes of the sites they were given. Passwords are hashed with argon2id. **TOTP 2FA** (RFC 6238, 30 s, ±1 step), and
   each code is accepted only once (replay protection). Five failed logins per account or ten per
   IP in 15 minutes trigger a temporary block (HTTP 429). Logins are written to the audit log.
 - **Sessions**: random 256-bit token in a `HttpOnly`, `Secure`, `SameSite=Strict` cookie; only

@@ -344,7 +344,7 @@ def user_list(ctx: typer.Context) -> None:
     env: Env = ctx.obj
     for u in env.db.list_users():
         state = "[green]2FA on[/]" if u["totp_secret"] else "[yellow]2FA off[/]"
-        console.print(f"{u['username']}  {state}  created {u['created_at'][:10]}")
+        console.print(f"{u['username']}  {u['role']}  {state}  created {u['created_at'][:10]}")
 
 
 @user_app.command("passwd")

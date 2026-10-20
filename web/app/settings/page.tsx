@@ -2,8 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { Shell, useSession } from "@/components/Shell";
-import { Badge, Button, Card, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner } from "@/components/ui";
-import { api, ApiError, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
+import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner } from "@/components/ui";
+import { api, ApiError, timeAgo, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
 
 function PasswordForm() {
   const [current, setCurrent] = useState("");
@@ -386,13 +386,154 @@ function DomainsCard() {
   );
 }
 
+function PeopleCard() {
+  const [users, setUsers] = useState<CmsUser[]>([]);
+  const [apps, setApps] = useState<App[]>([]);
+  const [username, setUsername] = useState("");
+  const [secret, setSecret] = useState<{ username: string; password: string } | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [removing, setRemoving] = useState<CmsUser | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const load = () => {
+    api<CmsUser[]>("/users").then(setUsers).catch((e: ApiError) => setError(e.detail));
+    api<App[]>("/apps").then(setApps).catch(() => {});
+  };
+  useEffect(load, []);
+
+  async function run(label: string, fn: () => Promise<void>) {
+    setBusy(label);
+    setError("");
+    try {
+      await fn();
+      load();
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const create = (e: FormEvent) => {
+    e.preventDefault();
+    run("create", async () => {
+      const r = await api<CmsUser & { password: string }>("/users", { method: "POST", body: { username } });
+      setSecret({ username: r.username, password: r.password });
+      setUsername("");
+      setEditing(r.id);
+      setPicked([]);
+    });
+  };
+  const reset = (u: CmsUser) => run(`reset-${u.id}`, async () => {
+    const r = await api<{ password: string }>(`/users/${u.id}/password`, { method: "POST" });
+    setSecret({ username: u.username, password: r.password });
+  });
+  const saveApps = (u: CmsUser) => run(`apps-${u.id}`, async () => {
+    await api(`/users/${u.id}/apps`, { method: "PUT", body: { apps: picked } });
+    setEditing(null);
+  });
+
+  const editors = users.filter((u) => u.role === "editor");
+  const admins = users.filter((u) => u.role === "admin");
+  const appName = (id: string) => apps.find((a) => a.id === id)?.name ?? id;
+  const linked = apps.filter((a) => a.installation_id);
+
+  return (
+    <Card title="People" actions={<Badge tone="violet">{editors.length} editor(s)</Badge>}>
+      <div className="space-y-5">
+        <p className="text-sm text-zinc-500">
+          Editors are client accounts: they only see the CMS of the sites you give them and can change the content the
+          site declares in <code>mas.cms.json</code>, nothing else.
+        </p>
+        <ErrorText>{error}</ErrorText>
+        {secret && (
+          <div className="space-y-2 rounded-xl border border-emerald-400/30 bg-emerald-400/5 p-4 text-sm">
+            <div>Password for <b>{secret.username}</b>, shown once. Send it with the dashboard address; they can change it in Account.</div>
+            <CopyCode text={secret.password} />
+            <button className="text-xs text-zinc-500 hover:underline" onClick={() => setSecret(null)}>Done</button>
+          </div>
+        )}
+        <ul className="divide-y divide-zinc-200/80 dark:divide-white/[0.06]">
+          {editors.map((u) => (
+            <li key={u.id} className="space-y-3 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{u.username}</span>
+                <Badge tone={u.totp_enabled ? "emerald" : "zinc"}>{u.totp_enabled ? "2FA" : "no 2FA"}</Badge>
+                <span className="text-xs text-zinc-500">since {timeAgo(u.created_at)}</span>
+                <div className="ml-auto flex flex-wrap gap-1">
+                  <Button onClick={() => { setEditing(editing === u.id ? null : u.id); setPicked(u.apps); }}>Sites</Button>
+                  <Button variant="ghost" disabled={!!busy} onClick={() => reset(u)}>{busy === `reset-${u.id}` ? <Spinner /> : null}Reset password</Button>
+                  {u.totp_enabled && (
+                    <Button variant="ghost" disabled={!!busy} onClick={() => run(`totp-${u.id}`, async () => { await api(`/users/${u.id}/totp/reset`, { method: "POST" }); })}>Reset 2FA</Button>
+                  )}
+                  <Button variant="ghost" onClick={() => setRemoving(u)}>Delete</Button>
+                </div>
+              </div>
+              {editing === u.id ? (
+                <div className="space-y-2 rounded-xl border border-zinc-200/80 p-3 dark:border-white/[0.06]">
+                  {linked.map((a) => (
+                    <label key={a.id} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={picked.includes(a.id)}
+                        onChange={(e) => setPicked(e.target.checked ? [...picked, a.id] : picked.filter((p) => p !== a.id))} />
+                      {a.name} <span className="text-xs text-zinc-500">{a.domain ?? a.repo}</span>
+                    </label>
+                  ))}
+                  {linked.length === 0 && <p className="text-sm text-zinc-500">No app linked to GitHub yet.</p>}
+                  <Button variant="primary" disabled={!!busy} onClick={() => saveApps(u)}>{busy === `apps-${u.id}` ? <Spinner /> : null}Save access</Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {u.apps.map((a) => <Badge key={a} tone="sky">{appName(a)}</Badge>)}
+                  {u.apps.length === 0 && <span className="text-xs text-zinc-500">No site yet.</span>}
+                </div>
+              )}
+            </li>
+          ))}
+          {editors.length === 0 && <li className="py-3 text-sm text-zinc-500">No editor yet.</li>}
+        </ul>
+        <form onSubmit={create} className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[14rem] flex-1">
+            <Label title="New editor" hint="Lowercase login name, for example the client company.">
+              <Input value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="acme" />
+            </Label>
+          </div>
+          <Button variant="primary" className="mb-6" disabled={!username || busy === "create"}>{busy === "create" ? <Spinner /> : null}Create</Button>
+        </form>
+        <p className="text-xs text-zinc-500">Administrators ({admins.map((a) => a.username).join(", ")}) are managed with <code>mas user</code> on the server.</p>
+      </div>
+      <ConfirmDialog
+        open={!!removing}
+        title={`Delete ${removing?.username}?`}
+        message="The account and its access are removed. The content it published stays in the repositories."
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => { const u = removing!; setRemoving(null); run(`delete-${u.id}`, async () => { await api(`/users/${u.id}`, { method: "DELETE" }); }); }}
+        onCancel={() => setRemoving(null)}
+      />
+    </Card>
+  );
+}
+
 function Settings() {
   const session = useSession();
+  if (session?.role === "editor") {
+    return (
+      <div className="space-y-4">
+        <PageHeader eyebrow="Account" title="Your account" subtitle="Password and two-factor authentication." />
+        <TwoFactor enabled={!!session?.totp_enabled} />
+        <PasswordForm />
+        <p className="text-xs text-zinc-500">Signed in as {session?.username}</p>
+      </div>
+    );
+  }
   return (
     <div className="space-y-4">
-      <PageHeader eyebrow="Configuration" title="Settings" subtitle="Domains, GitHub and account security." />
+      <PageHeader eyebrow="Configuration" title="Settings" subtitle="Domains, GitHub, people and account security." />
       <DomainsCard />
       <GitHubCard />
+      <PeopleCard />
       <TwoFactor enabled={!!session?.totp_enabled} />
       <PasswordForm />
       <p className="text-xs text-zinc-500">Mas {session?.version} · signed in as {session?.username}</p>

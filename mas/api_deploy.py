@@ -178,7 +178,7 @@ def register(
             "hook_attributes": {"url": f"{base}/api/github/webhook", "active": True},
             "redirect_url": f"{base}/settings/",
             "public": False,
-            "default_permissions": {"contents": "read", "metadata": "read", "pull_requests": "read"},
+            "default_permissions": {"contents": "write", "metadata": "read", "pull_requests": "read"},
             "default_events": ["push", "pull_request"],
         }
         owner = f"organizations/{body.org}/" if body.org else ""

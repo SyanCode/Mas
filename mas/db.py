@@ -100,6 +100,12 @@ CREATE TABLE IF NOT EXISTS supabase (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS app_access (       -- CMS: which editor may edit which app
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, app_id)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -109,7 +115,9 @@ CREATE TABLE IF NOT EXISTS settings (
 
 MIGRATIONS = [
     ("supabase", "components TEXT"),  # JSON list of enabled optional components
+    ("users", "role TEXT NOT NULL DEFAULT 'admin'"),  # admin | editor (CMS only)
 ]
+ROLES = ("admin", "editor")
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
@@ -160,11 +168,13 @@ class Database:
         with self.tx() as c:
             return c.execute("SELECT * FROM users ORDER BY id").fetchall()
 
-    def create_user(self, username: str, password_hash: str) -> int:
+    def create_user(self, username: str, password_hash: str, role: str = "admin") -> int:
+        if role not in ROLES:
+            raise ValueError(f"invalid role {role}")
         with self.tx() as c:
             cur = c.execute(
-                "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-                (username, password_hash, _now()),
+                "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+                (username, password_hash, role, _now()),
             )
             return int(cur.lastrowid)
 
@@ -203,7 +213,7 @@ class Database:
     def get_session(self, token_hash: str) -> sqlite3.Row | None:
         with self.tx() as c:
             return c.execute(
-                "SELECT s.*, u.username, u.totp_secret IS NOT NULL AS totp_enabled "
+                "SELECT s.*, u.username, u.role, u.totp_secret IS NOT NULL AS totp_enabled "
                 "FROM sessions s JOIN users u ON u.id = s.user_id WHERE token_hash = ?",
                 (token_hash,),
             ).fetchone()
@@ -220,6 +230,38 @@ class Database:
     def delete_user_sessions(self, user_id: int, keep: str | None = None) -> None:
         with self.tx() as c:
             c.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash IS NOT ?", (user_id, keep))
+
+    # -- CMS access ------------------------------------------------------
+
+    def user_apps(self, user_id: int) -> list[str]:
+        with self.tx() as c:
+            return [r[0] for r in c.execute("SELECT app_id FROM app_access WHERE user_id = ? ORDER BY app_id",
+                                            (user_id,))]
+
+    def app_editors(self, app_id: str) -> list[int]:
+        with self.tx() as c:
+            return [r[0] for r in c.execute("SELECT user_id FROM app_access WHERE app_id = ?", (app_id,))]
+
+    def set_user_apps(self, user_id: int, app_ids: list[str]) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM app_access WHERE user_id = ?", (user_id,))
+            c.executemany("INSERT INTO app_access VALUES (?, ?, ?)", [(user_id, a, _now()) for a in set(app_ids)])
+
+    def set_app_editors(self, app_id: str, user_ids: list[int]) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM app_access WHERE app_id = ?", (app_id,))
+            c.executemany("INSERT INTO app_access VALUES (?, ?, ?)", [(u, app_id, _now()) for u in set(user_ids)])
+
+    def can_edit(self, user_id: int, role: str, app_id: str) -> bool:
+        if role == "admin":
+            return True
+        with self.tx() as c:
+            return c.execute("SELECT 1 FROM app_access WHERE user_id = ? AND app_id = ?",
+                             (user_id, app_id)).fetchone() is not None
+
+    def delete_user_by_id(self, user_id: int) -> bool:
+        with self.tx() as c:
+            return c.execute("DELETE FROM users WHERE id = ?", (user_id,)).rowcount > 0
 
     # -- service metadata ------------------------------------------------
 

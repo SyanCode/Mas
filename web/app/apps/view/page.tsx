@@ -141,6 +141,89 @@ function SupabaseCard({ app, onLinked }: { app: App; onLinked: (releaseId: numbe
   );
 }
 
+interface CmsInfo {
+  schema_file: string;
+  ok: boolean;
+  error: string | null;
+  can_write: boolean | null;
+  pages: { id: string; label: string; file: string; fields: number }[];
+  editors: { id: number; username: string; allowed: boolean }[];
+}
+
+const CMS_EXAMPLE = `{
+  "pages": [{
+    "id": "home", "label": "Home page", "file": "content/home.json",
+    "fields": [
+      { "key": "title", "type": "text", "max": 80, "required": true },
+      { "key": "intro", "type": "textarea", "max": 500 },
+      { "key": "hero", "type": "image", "dir": "public/uploads", "url": "/uploads" }
+    ]
+  }]
+}`;
+
+function CmsCard({ appId }: { appId: string }) {
+  const [info, setInfo] = useState<CmsInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api<CmsInfo>(`/apps/${encodeURIComponent(appId)}/cms`).then(setInfo).catch((e: ApiError) => setError(e.detail));
+  }, [appId]);
+  useEffect(load, [load]);
+
+  async function toggle(id: number, allowed: boolean) {
+    if (!info) return;
+    const ids = info.editors.filter((e) => (e.id === id ? allowed : e.allowed)).map((e) => e.id);
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/apps/${encodeURIComponent(appId)}/cms/editors`, { method: "PUT", body: { user_ids: ids } });
+      load();
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="CMS" actions={info?.ok ? <Badge tone="emerald">{info.pages.length} page(s)</Badge> : <Badge>off</Badge>}>
+      {!info ? <ErrorText>{error}</ErrorText> : (
+        <div className="space-y-4 text-sm">
+          {info.ok ? (
+            <>
+              <ul className="space-y-1">
+                {info.pages.map((p) => (
+                  <li key={p.id} className="flex justify-between gap-2"><span>{p.label}</span><code className="truncate text-xs text-zinc-500">{p.file}</code></li>
+                ))}
+              </ul>
+              {info.can_write === false && (
+                <p className="text-xs text-amber-500">The GitHub App can only read this repository. On GitHub: Settings → Developer settings → GitHub Apps → your Mas app → Permissions → Contents: <b>Read and write</b>, then accept the new permissions on the installation.</p>
+              )}
+              <Link href={`/cms/edit/?app=${encodeURIComponent(appId)}`} className="inline-flex font-medium text-indigo-500 hover:underline">Open the editor →</Link>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-zinc-500">Add <code>{info.schema_file}</code> at the root of the repository to let your client edit the content. Your site reads the JSON files at build time.</p>
+              {info.error && <p className="text-xs text-zinc-500">{info.error}</p>}
+              <pre className="mono overflow-auto rounded-lg bg-black/40 p-3 text-[11px] leading-relaxed text-zinc-300">{CMS_EXAMPLE}</pre>
+            </div>
+          )}
+          <div className="space-y-1.5 border-t border-zinc-200/80 pt-3 dark:border-white/[0.06]">
+            <div className="text-xs font-medium text-zinc-500">Editors with access</div>
+            {info.editors.map((e) => (
+              <label key={e.id} className="flex items-center gap-2">
+                <input type="checkbox" checked={e.allowed} disabled={busy} onChange={(ev) => toggle(e.id, ev.target.checked)} /> {e.username}
+              </label>
+            ))}
+            {info.editors.length === 0 && <p className="text-xs text-zinc-500">Create client accounts in <Link href="/settings/" className="text-indigo-500 hover:underline">Settings → People</Link>.</p>}
+          </div>
+          <ErrorText>{error}</ErrorText>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void }) {
   const [branch, setBranch] = useState(app.branch);
   const [buildCommand, setBuildCommand] = useState(app.build_command ?? "");
@@ -373,6 +456,7 @@ function AppView() {
           {app.mode === "managed" && <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           <SettingsCard app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />
           {app.mode === "managed" && <SupabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
+          {app.installation_id && <CmsCard appId={app.id} />}
           {app.mode === "managed" && <EnvCard appId={app.id} />}
         </div>
       </div>

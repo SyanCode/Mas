@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { CommandPalette } from "@/components/CommandPalette";
 import { Kbd } from "@/components/ui";
@@ -42,6 +42,13 @@ const NAV = [
   { href: "/history/", label: "Activity", match: (p: string) => p.startsWith("/history") },
   { href: "/settings/", label: "Settings", match: (p: string) => p.startsWith("/settings") },
 ];
+
+// CMS editors (client accounts) only see their sites and their own account.
+const EDITOR_NAV = [
+  { href: "/cms/", label: "My sites", match: (p: string) => p.startsWith("/cms") },
+  { href: "/settings/", label: "Account", match: (p: string) => p.startsWith("/settings") },
+];
+const EDITOR_PATHS = ["/cms", "/settings"];
 
 function UserMenu({ session }: { session: Session }) {
   const [open, setOpen] = useState(false);
@@ -89,7 +96,7 @@ function UserMenu({ session }: { session: Session }) {
             ))}
           </div>
           <div className="my-1 h-px bg-zinc-200 dark:bg-white/[0.06]" />
-          <Link href="/settings/" className="block rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]">Settings</Link>
+          <Link href="/settings/" className="block rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]">{session.role === "editor" ? "Account" : "Settings"}</Link>
           <button onClick={logout} className="block w-full rounded-md px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-zinc-100 dark:text-rose-400 dark:hover:bg-white/[0.06]">Log out</button>
         </div>
       )}
@@ -106,6 +113,9 @@ export function Shell({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [palette, setPalette] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const editor = session?.role === "editor";
+  const nav = editor ? EDITOR_NAV : NAV;
 
   useEffect(() => {
     api<Session>("/session").then((s) => {
@@ -115,7 +125,12 @@ export function Shell({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (editor && !EDITOR_PATHS.some((p) => pathname.startsWith(p))) router.replace("/cms/");
+  }, [editor, pathname, router]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (editor) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPalette((p) => !p);
@@ -123,9 +138,9 @@ export function Shell({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [editor]);
 
-  if (!session) {
+  if (!session || (editor && !EDITOR_PATHS.some((p) => pathname.startsWith(p)))) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Backdrop />
@@ -140,12 +155,12 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="min-h-screen">
         <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/60 backdrop-blur-xl dark:border-white/[0.06] dark:bg-[#050608]/60">
           <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6">
-            <Link href="/" className="flex items-center gap-2.5">
+            <Link href={editor ? "/cms/" : "/"} className="flex items-center gap-2.5">
               <Logo />
               <span className="text-[15px] font-semibold tracking-tight">mas</span>
             </Link>
             <nav className="-mb-px hidden h-14 items-stretch gap-1 md:flex">
-              {NAV.map((item) => {
+              {nav.map((item) => {
                 const active = item.match(pathname);
                 return (
                   <Link
@@ -165,18 +180,18 @@ export function Shell({ children }: { children: ReactNode }) {
                   Enable 2FA
                 </Link>
               )}
-              <button
+              {!editor && <button
                 onClick={() => setPalette(true)}
                 className="glass hidden h-8 items-center gap-6 rounded-lg px-3 text-xs text-zinc-500 transition hover:text-zinc-800 sm:flex dark:hover:text-zinc-200"
               >
                 Search…
                 <Kbd>⌘K</Kbd>
-              </button>
+              </button>}
               <UserMenu session={session} />
             </div>
           </div>
           <nav className="flex gap-1 overflow-x-auto px-4 pb-2 md:hidden">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <Link key={item.href} href={item.href} className={`rounded-md px-2.5 py-1 text-xs ${item.match(pathname) ? "bg-zinc-200 dark:bg-white/10" : "text-zinc-500"}`}>
                 {item.label}
               </Link>
@@ -185,7 +200,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </header>
         <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">{children}</main>
       </div>
-      <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      {!editor && <CommandPalette open={palette} onClose={() => setPalette(false)} />}
     </SessionContext.Provider>
   );
 }

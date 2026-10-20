@@ -120,8 +120,47 @@ class GitHubApp:
         self._tokens[installation_id] = (data["token"], time.time() + 3000)
         return data["token"]
 
-    def _as_installation(self, installation_id: int, path: str) -> Any:
-        return _request(self.opener, "GET", path, f"token {self.token(installation_id)}")
+    def _as_installation(self, installation_id: int, path: str, method: str = "GET", body: dict | None = None) -> Any:
+        return _request(self.opener, method, path, f"token {self.token(installation_id)}", body)
+
+    def permissions(self, installation_id: int) -> dict[str, str]:
+        return self._as_app("GET", f"/app/installations/{installation_id}").get("permissions") or {}
+
+    def head(self, installation_id: int, repo: str, branch: str) -> str:
+        ref = self._as_installation(installation_id, f"/repos/{repo}/git/ref/heads/{quote(branch, safe='')}")
+        return ref["object"]["sha"]
+
+    def read_file(self, installation_id: int, repo: str, path: str, ref: str) -> tuple[bytes | None, str | None]:
+        """(content, blob sha) of a file, (None, None) when it does not exist."""
+        try:
+            item = self._as_installation(installation_id, f"/repos/{repo}/contents/{quote(path)}?ref={quote(ref, safe='')}")
+        except GitHubError as exc:
+            if "HTTP 404" in str(exc):
+                return None, None
+            raise
+        if not isinstance(item, dict) or item.get("type") != "file":
+            return None, None
+        if item.get("content") or not item.get("size"):
+            return base64.b64decode(item.get("content") or ""), item["sha"]
+        blob = self._as_installation(installation_id, f"/repos/{repo}/git/blobs/{item['sha']}")  # > 1 MB
+        return base64.b64decode(blob.get("content") or ""), item["sha"]
+
+    def commit_files(self, installation_id: int, repo: str, branch: str, files: dict[str, bytes],
+                     message: str, parent: str) -> str:
+        """One commit with every file on top of ``parent``; refused if the branch moved meanwhile."""
+        base_tree = self._as_installation(installation_id, f"/repos/{repo}/git/commits/{parent}")["tree"]["sha"]
+        tree = []
+        for path, content in files.items():
+            blob = self._as_installation(installation_id, f"/repos/{repo}/git/blobs", "POST",
+                                         {"content": base64.b64encode(content).decode(), "encoding": "base64"})
+            tree.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+        new_tree = self._as_installation(installation_id, f"/repos/{repo}/git/trees", "POST",
+                                         {"base_tree": base_tree, "tree": tree})
+        commit = self._as_installation(installation_id, f"/repos/{repo}/git/commits", "POST",
+                                       {"message": message, "tree": new_tree["sha"], "parents": [parent]})
+        self._as_installation(installation_id, f"/repos/{repo}/git/refs/heads/{quote(branch, safe='')}", "PATCH",
+                              {"sha": commit["sha"], "force": False})
+        return commit["sha"]
 
     def app_info(self) -> dict:
         return self._as_app("GET", "/app")

@@ -16,10 +16,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_deploy, api_dns, api_supabase, auth
+from mas import __version__, api_cms, api_deploy, api_dns, api_supabase, auth
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.deploy import Deployer
 from mas.github import GitHubApp
+from mas.cms import CmsManager
 from mas.supabase import SupabaseManager
 from mas.config import Config, load_config
 from mas.db import Database
@@ -88,6 +89,7 @@ class SessionInfo:
     username: str
     csrf: str
     totp_enabled: bool
+    role: str = "admin"
 
 
 def default_web_dir(config: Config) -> Path | None:
@@ -150,6 +152,7 @@ def create_app(
     deployer = Deployer(host, config, db, github_client, find_service=scanner.get,
                         on_change=lambda: scanner.refresh())
     supabase = SupabaseManager(host, config, db, deployer)
+    cms = CmsManager(db, github_client, deployer, Path(db.path).parent)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -164,6 +167,7 @@ def create_app(
     app = FastAPI(title="Mas", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.scanner, app.state.db, app.state.host = scanner, db, host
+    app.state.cms = cms
 
     # -- middleware --------------------------------------------------------
 
@@ -188,7 +192,8 @@ def create_app(
             return request.headers["x-real-ip"]
         return peer
 
-    def current_session(request: Request) -> SessionInfo:
+    def any_session(request: Request) -> SessionInfo:
+        """Any signed-in user, CMS editors included."""
         token = request.cookies.get(cookie_name)
         if not token:
             raise HTTPException(401, "not authenticated")
@@ -200,11 +205,19 @@ def create_app(
                 db.delete_session(token_hash)
             raise HTTPException(401, "session expired")
         db.touch_session(token_hash, min(now + session_ttl, row["created_at"] + 7 * 86400))
-        session = SessionInfo(token_hash, row["user_id"], row["username"], row["csrf"], bool(row["totp_enabled"]))
+        session = SessionInfo(token_hash, row["user_id"], row["username"], row["csrf"], bool(row["totp_enabled"]),
+                              row["role"])
         if request.method not in SAFE_METHODS:
             sent = request.headers.get("x-csrf-token", "")
             if not hmac.compare_digest(sent, session.csrf):
                 raise HTTPException(403, "invalid CSRF token")
+        return session
+
+    def current_session(request: Request) -> SessionInfo:
+        """Administrators only: every route that touches the server uses this one."""
+        session = any_session(request)
+        if session.role != "admin":
+            raise HTTPException(403, "administrators only")
         return session
 
     def find_service(service_id: str) -> Service:
@@ -214,7 +227,8 @@ def create_app(
         return svc
 
     def session_payload(s: SessionInfo) -> dict:
-        return {"username": s.username, "csrf": s.csrf, "totp_enabled": s.totp_enabled, "version": __version__}
+        return {"username": s.username, "csrf": s.csrf, "totp_enabled": s.totp_enabled, "role": s.role,
+                "version": __version__}
 
     # -- auth --------------------------------------------------------------
 
@@ -241,17 +255,17 @@ def create_app(
                             secure=config.cookie_secure, samesite="strict", path="/")
         db.audit(username, "login", True, detail=f"from {ip}")
         return {"username": username, "csrf": new.csrf, "totp_enabled": bool(user["totp_secret"]),
-                "version": __version__}
+                "role": user["role"], "version": __version__}
 
     @app.post("/api/logout")
-    def logout(response: Response, s: SessionInfo = Depends(current_session)) -> dict:
+    def logout(response: Response, s: SessionInfo = Depends(any_session)) -> dict:
         db.delete_session(s.token_hash)
         response.delete_cookie(cookie_name, path="/", secure=config.cookie_secure, httponly=True,
                                samesite="strict")
         return {"ok": True}
 
     @app.get("/api/session")
-    def session(s: SessionInfo = Depends(current_session)) -> dict:
+    def session(s: SessionInfo = Depends(any_session)) -> dict:
         return session_payload(s)
 
     # -- services ----------------------------------------------------------
@@ -338,7 +352,7 @@ def create_app(
         return user
 
     @app.post("/api/account/password")
-    def change_password(body: PasswordBody, s: SessionInfo = Depends(current_session)) -> dict:
+    def change_password(body: PasswordBody, s: SessionInfo = Depends(any_session)) -> dict:
         user = require_password(s, body.current)
         if problem := auth.check_password_strength(body.new):
             raise HTTPException(400, problem)
@@ -348,7 +362,7 @@ def create_app(
         return {"ok": True}
 
     @app.post("/api/account/totp/setup")
-    def totp_setup(body: PasswordOnly, s: SessionInfo = Depends(current_session)) -> dict:
+    def totp_setup(body: PasswordOnly, s: SessionInfo = Depends(any_session)) -> dict:
         user = require_password(s, body.password)
         # Replacing the authenticator needs the current one: password + session are not enough.
         if user["totp_secret"] and not auth.verify_totp(db, user, body.code or ""):
@@ -359,7 +373,7 @@ def create_app(
         return {"secret": secret, "uri": uri, "qr_svg": auth.qr_svg(uri)}
 
     @app.post("/api/account/totp/enable")
-    def totp_enable(body: CodeBody, s: SessionInfo = Depends(current_session)) -> dict:
+    def totp_enable(body: CodeBody, s: SessionInfo = Depends(any_session)) -> dict:
         user = db.get_user_by_id(s.user_id)
         pending = user["totp_pending"]
         if not pending:
@@ -373,7 +387,7 @@ def create_app(
         return {"ok": True}
 
     @app.post("/api/account/totp/disable")
-    def totp_disable(body: DisableTotpBody, s: SessionInfo = Depends(current_session)) -> dict:
+    def totp_disable(body: DisableTotpBody, s: SessionInfo = Depends(any_session)) -> dict:
         user = require_password(s, body.password)
         if not user["totp_secret"] or not auth.verify_totp(db, user, body.code):
             raise HTTPException(403, "wrong code")
@@ -388,6 +402,7 @@ def create_app(
                      opener=ovh_opener)
     api_supabase.register(app, host=host, db=db, current_session=current_session, deployer=deployer,
                           manager=supabase)
+    api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms)
 
     # -- dashboard ---------------------------------------------------------
 

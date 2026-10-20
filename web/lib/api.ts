@@ -53,7 +53,58 @@ export interface Session {
   username: string;
   csrf: string;
   totp_enabled: boolean;
+  role: "admin" | "editor";
   version: string;
+}
+
+// -- CMS ------------------------------------------------------------------------
+
+export type CmsFieldType =
+  | "text" | "textarea" | "markdown" | "number" | "boolean" | "select" | "url" | "email" | "date" | "color" | "image" | "list";
+
+export interface CmsField {
+  key: string;
+  type: CmsFieldType;
+  label: string;
+  help: string;
+  required: boolean;
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  integer?: boolean;
+  options?: { value: string; label: string }[];
+  max_kb?: number;
+  fields?: CmsField[];
+  min_items?: number;
+  max_items?: number;
+  item_label?: string;
+}
+
+export interface CmsPage {
+  id: string;
+  label: string;
+  description: string;
+  file: string;
+  fields: CmsField[];
+  values: Record<string, unknown>;
+  sha: string | null;
+}
+
+export interface CmsSite {
+  id: string;
+  name: string;
+  domain: string | null;
+  url: string | null;
+  last_release: { id: number; status: ReleaseStatus; trigger: string; message: string | null; created_at: string; finished_at: string | null } | null;
+}
+
+export interface CmsUser {
+  id: number;
+  username: string;
+  role: "admin" | "editor";
+  totp_enabled: boolean;
+  created_at: string;
+  apps: string[];
 }
 
 export interface LogSource {
@@ -207,6 +258,16 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
     }
     throw new ApiError(res.status, detail);
   }
+  return data as T;
+}
+
+/** POST a file as the raw request body (CMS image uploads). */
+export async function uploadFile<T>(path: string, file: Blob): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json", "Content-Type": file.type || "application/octet-stream" };
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+  const res = await fetch(`/api${path}`, { method: "POST", headers, body: file, credentials: "same-origin", cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, typeof data.detail === "string" ? data.detail : `HTTP ${res.status}`);
   return data as T;
 }
 

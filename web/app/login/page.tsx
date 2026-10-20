@@ -28,8 +28,9 @@ export default function LoginPage() {
     setBusy(true);
     setError("");
     try {
-      await api("/login", { method: "POST", body: { username, password, otp: needOtp ? otp : undefined } });
-      window.location.href = safeNext();
+      const s = await api<{ role: string }>("/login", { method: "POST", body: { username, password, otp: needOtp ? otp : undefined } });
+      const next = safeNext();
+      window.location.href = s.role === "editor" && !/^\/(cms|settings)/.test(next) ? "/cms/" : next;
     } catch (err) {
       const detail = (err as ApiError).detail;
       if (detail === "otp_required") {
