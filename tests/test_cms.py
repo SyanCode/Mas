@@ -227,6 +227,63 @@ def test_editor_is_confined_to_its_sites(env):
     assert any(h["action"] == "cms-save" and h["ok"] for h in db.history(None, 50))
 
 
+def test_self_service_signup(env):
+    client, db, _ = env
+    body = {"username": "newclient", "password": "a long enough password"}
+    assert client.get("/api/signup").json() == {"open": False, "code_required": False, "invite": None}
+    assert client.post("/api/signup", json=body).status_code == 403  # closed by default
+
+    csrf = login(client)
+    r = client.put("/api/signup/settings", json={"open": True, "code": "welcome-2026"}, headers={"x-csrf-token": csrf})
+    assert r.status_code == 200
+    client.post("/api/logout", headers={"x-csrf-token": csrf})
+    client.cookies.clear()
+    assert client.get("/api/signup").json() == {"open": True, "code_required": True, "invite": None}
+    assert client.post("/api/signup", json={**body, "code": "nope"}).status_code == 403
+    assert client.post("/api/signup", json={**body, "code": "welcome-2026", "password": "short"}).status_code == 400
+    assert client.post("/api/signup", json={**body, "username": "admin", "code": "welcome-2026"}).status_code == 409
+    r = client.post("/api/signup", json={**body, "code": "welcome-2026"})
+    assert r.status_code == 200 and r.json()["role"] == "editor"
+    # signed in right away, as an editor with no site
+    assert client.get("/api/session").json()["username"] == "newclient"
+    assert client.get("/api/cms/sites").json() == []
+    assert client.get("/api/services").status_code == 403
+    assert client.get("/api/signup/settings").status_code == 403
+    assert db.get_user("newclient")["role"] == "editor"
+    # rate limit per address
+    for i in range(5):
+        client.post("/api/signup", json={**body, "username": f"spam{i}", "code": "welcome-2026"})
+    assert client.post("/api/signup", json={**body, "username": "spam9", "code": "welcome-2026"}).status_code == 429
+
+
+def test_one_time_invite_link(env):
+    client, db, _ = env
+    csrf = login(client)
+    r = client.post("/api/invites", json={"apps": ["site"], "note": "Acme"}, headers={"x-csrf-token": csrf})
+    assert r.status_code == 200, r.text
+    path, invite_id = r.json()["path"], r.json()["id"]
+    token = path.split("invite=")[1]
+    assert [i["id"] for i in client.get("/api/invites").json()] == [invite_id]
+    assert token not in json.dumps(client.get("/api/invites").json())  # only its hash is stored
+    revoked = client.post("/api/invites", json={}, headers={"x-csrf-token": csrf}).json()
+    assert client.delete(f"/api/invites/{revoked['id']}", headers={"x-csrf-token": csrf}).status_code == 200
+    client.post("/api/logout", headers={"x-csrf-token": csrf})
+    client.cookies.clear()
+
+    # sign-up stays closed, the link works anyway, once, and gives the site right away
+    assert client.get("/api/signup", params={"invite": token}).json()["invite"] is True
+    body = {"username": "acme", "password": "a long enough password", "invite": token}
+    assert client.post("/api/signup", json={**body, "invite": revoked["path"].split("invite=")[1]}).status_code == 403
+    assert client.post("/api/signup", json={**body, "password": "short"}).status_code == 400  # not consumed
+    r = client.post("/api/signup", json=body)
+    assert r.status_code == 200, r.text
+    assert [s["id"] for s in client.get("/api/cms/sites").json()] == ["site"]
+    client.cookies.clear()
+    assert client.get("/api/signup", params={"invite": token}).json()["invite"] is False
+    assert client.post("/api/signup", json={**body, "username": "again"}).status_code == 403
+    assert db.get_user("again") is None
+
+
 def test_admin_sees_schema_problems_and_permissions(env):
     client, db, gh = env
     csrf = login(client)

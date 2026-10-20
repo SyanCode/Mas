@@ -386,6 +386,142 @@ function DomainsCard() {
   );
 }
 
+function SignupSettings() {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [saved, setSaved] = useState<{ open: boolean; code: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api<{ open: boolean; code: string }>("/signup/settings").then((r) => {
+      setOpen(r.open);
+      setCode(r.code);
+      setSaved(r);
+    }).catch((e: ApiError) => setError(e.detail));
+  }, []);
+
+  async function save(next: { open: boolean; code: string }) {
+    setBusy(true);
+    setError("");
+    try {
+      setSaved(await api<{ open: boolean; code: string }>("/signup/settings", { method: "PUT", body: next }));
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!saved) return <ErrorText>{error}</ErrorText>;
+  const signupUrl = typeof window !== "undefined" ? `${window.location.origin}/signup/` : "/signup/";
+  return (
+    <div className="space-y-3 rounded-xl border border-zinc-200/80 p-4 dark:border-white/[0.06]">
+      <label className="flex items-center gap-2 text-sm font-medium">
+        <input type="checkbox" checked={open} disabled={busy} onChange={(e) => { setOpen(e.target.checked); save({ open: e.target.checked, code }); }} />
+        Open sign-up
+        <Badge tone={saved.open ? "emerald" : "zinc"}>{saved.open ? "open" : "closed"}</Badge>
+      </label>
+      <p className="text-xs text-zinc-500">
+        Clients create their own editor account at <code>{signupUrl}</code>. A new account sees nothing until you give it a site below.
+      </p>
+      {open && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[14rem] flex-1">
+            <Label title="Invitation code (optional)" hint="If set, only people you gave the code to can sign up.">
+              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. acme-2026" />
+            </Label>
+          </div>
+          <Button className="mb-6" disabled={busy || code === saved.code} onClick={() => save({ open, code })}>{busy ? <Spinner /> : null}Save code</Button>
+        </div>
+      )}
+      {open && <CopyCode text={signupUrl} />}
+      <ErrorText>{error}</ErrorText>
+    </div>
+  );
+}
+
+interface Invite { id: number; apps: string[]; note: string | null; created_by: string; created_at: string; expires_at: number }
+
+function InviteLinks({ apps }: { apps: App[] }) {
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [note, setNote] = useState("");
+  const [link, setLink] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = () => { api<Invite[]>("/invites").then(setInvites).catch((e: ApiError) => setError(e.detail)); };
+  useEffect(load, []);
+
+  async function run(fn: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+      load();
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const create = () => run(async () => {
+    const r = await api<{ path: string }>("/invites", { method: "POST", body: { apps: picked, note } });
+    setLink(`${window.location.origin}${r.path}`);
+    setCreating(false);
+    setPicked([]);
+    setNote("");
+  });
+  const appName = (id: string) => apps.find((a) => a.id === id)?.name ?? id;
+
+  return (
+    <div className="space-y-3 rounded-xl border border-zinc-200/80 p-4 dark:border-white/[0.06]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">Invitation links</span>
+        {!creating && <Button onClick={() => { setCreating(true); setLink(null); }}>New link</Button>}
+      </div>
+      <p className="text-xs text-zinc-500">A link works once, for 7 days, even when sign-up is closed. The person picks a username and a password and lands directly on the sites you chose.</p>
+      {creating && (
+        <div className="space-y-2">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="For whom? (e.g. Acme bakery)" maxLength={100} />
+          {apps.map((a) => (
+            <label key={a.id} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={picked.includes(a.id)}
+                onChange={(e) => setPicked(e.target.checked ? [...picked, a.id] : picked.filter((p) => p !== a.id))} />
+              {a.name} <span className="text-xs text-zinc-500">{a.domain ?? a.repo}</span>
+            </label>
+          ))}
+          <div className="flex gap-2">
+            <Button variant="primary" disabled={busy} onClick={create}>{busy ? <Spinner /> : null}Create the link</Button>
+            <Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {link && (
+        <div className="space-y-1.5 text-xs text-zinc-500">
+          <div>Send this link to the person. It is shown only now:</div>
+          <CopyCode text={link} />
+        </div>
+      )}
+      {invites.length > 0 && (
+        <ul className="space-y-1.5 text-sm">
+          {invites.map((i) => (
+            <li key={i.id} className="flex flex-wrap items-center gap-2">
+              <span>{i.note || `Link #${i.id}`}</span>
+              {i.apps.map((a) => <Badge key={a} tone="sky">{appName(a)}</Badge>)}
+              <span className="text-xs text-zinc-500">expires {new Date(i.expires_at * 1000).toLocaleDateString()}</span>
+              <button className="ml-auto text-xs text-rose-500 hover:underline" disabled={busy}
+                onClick={() => run(async () => { await api(`/invites/${i.id}`, { method: "DELETE" }); })}>Revoke</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ErrorText>{error}</ErrorText>
+    </div>
+  );
+}
+
 function PeopleCard() {
   const [users, setUsers] = useState<CmsUser[]>([]);
   const [apps, setApps] = useState<App[]>([]);
@@ -447,6 +583,8 @@ function PeopleCard() {
           Editors are client accounts: they only see the CMS of the sites you give them and can change the content the
           site declares in <code>mas.cms.json</code>, nothing else.
         </p>
+        <SignupSettings />
+        <InviteLinks apps={linked} />
         <ErrorText>{error}</ErrorText>
         {secret && (
           <div className="space-y-2 rounded-xl border border-emerald-400/30 bg-emerald-400/5 p-4 text-sm">

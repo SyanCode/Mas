@@ -106,6 +106,17 @@ CREATE TABLE IF NOT EXISTS app_access (       -- CMS: which editor may edit whic
     created_at TEXT NOT NULL,
     PRIMARY KEY (user_id, app_id)
 );
+CREATE TABLE IF NOT EXISTS invites (            -- one-time sign-up links for CMS editors
+    id INTEGER PRIMARY KEY,
+    token_hash TEXT UNIQUE NOT NULL,            -- SHA-256 of the token in the link
+    apps TEXT NOT NULL DEFAULT '[]',            -- JSON: sites the new account gets
+    note TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at REAL NOT NULL,
+    used_at TEXT,
+    used_by TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -262,6 +273,42 @@ class Database:
     def delete_user_by_id(self, user_id: int) -> bool:
         with self.tx() as c:
             return c.execute("DELETE FROM users WHERE id = ?", (user_id,)).rowcount > 0
+
+    # -- invites -----------------------------------------------------------
+
+    def create_invite(self, token_hash: str, apps: list[str], note: str | None, created_by: str,
+                      expires_at: float) -> int:
+        with self.tx() as c:
+            cur = c.execute("INSERT INTO invites (token_hash, apps, note, created_by, created_at, expires_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (token_hash, json.dumps(apps), note, created_by, _now(), expires_at))
+            return int(cur.lastrowid)
+
+    def pending_invites(self) -> list[dict]:
+        with self.tx() as c:
+            rows = c.execute("SELECT * FROM invites WHERE used_at IS NULL AND expires_at > ? ORDER BY id DESC",
+                             (time.time(),)).fetchall()
+        return [{**dict(r), "apps": json.loads(r["apps"])} for r in rows]
+
+    def valid_invite(self, token_hash: str) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM invites WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+                            (token_hash, time.time())).fetchone()
+        return {**dict(row), "apps": json.loads(row["apps"])} if row else None
+
+    def consume_invite(self, token_hash: str, username: str) -> dict | None:
+        """Mark the invite used, once: None if it was already used, revoked or expired."""
+        invite = self.valid_invite(token_hash)
+        if invite is None:
+            return None
+        with self.tx() as c:
+            done = c.execute("UPDATE invites SET used_at = ?, used_by = ? WHERE id = ? AND used_at IS NULL",
+                             (_now(), username, invite["id"])).rowcount
+        return invite if done else None
+
+    def delete_invite(self, invite_id: int) -> bool:
+        with self.tx() as c:
+            return c.execute("DELETE FROM invites WHERE id = ? AND used_at IS NULL", (invite_id,)).rowcount > 0
 
     # -- service metadata ------------------------------------------------
 

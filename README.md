@@ -308,8 +308,16 @@ redeploys the site.
    `select` (`options`), `url`, `email`, `date`, `color`, `image` (`dir` in the repository, `url`
    as the site serves it, `max_kb`) and `list` (of the other types, `min_items`, `max_items`).
    Every field takes `label`, `help`, `required` and `placeholder`.
-2. **Settings → People → New editor** creates a client account (a password is generated and
-   shown once) and **Sites** chooses which apps it may edit; the app page has the same switch in
+2. Give your client an account, in **Settings → People**, one of three ways:
+   - **Invitation link** (simplest): pick the sites, send the link. It works once, for 7 days,
+     even when sign-up is closed; the client chooses a username and a password and lands on
+     their site. Only a hash of the link is stored, and pending links can be revoked.
+   - **Open sign-up**: anyone can create an account at `/signup/`, optionally only with an
+     invitation code you set. A new account sees nothing until you give it a site. Sign-ups are
+     limited to 5 per hour per address and written to the audit log.
+   - **New editor**: you choose the username, Mas generates a password shown once.
+
+   **Sites** on each editor chooses which apps it may edit; the app page has the same switch in
    its **CMS** card, which also checks the schema.
 3. The client signs in to the same dashboard and only sees **My sites** and **Account** (password,
    2FA). Every other API route answers `403` for an editor.

@@ -57,6 +57,18 @@ class LoginBody(BaseModel):
     otp: str | None = Field(default=None, max_length=16)
 
 
+class SignupBody(BaseModel):
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=1024)
+    code: str | None = Field(default=None, max_length=200)
+    invite: str | None = Field(default=None, max_length=100)  # token of a one-time link
+
+
+class SignupSettings(BaseModel):
+    open: bool
+    code: str = Field(default="", max_length=200)
+
+
 class PatchService(BaseModel):
     type: ServiceType | None = None  # None (explicit) = back to auto-detection
     display_name: str | None = Field(default=None, max_length=100)
@@ -119,6 +131,7 @@ def create_app(
     scanner = Scanner(host, config, db)
     ip_limiter = auth.RateLimiter(max_hits=10, window_seconds=15 * 60)
     user_limiter = auth.RateLimiter(max_hits=5, window_seconds=15 * 60)
+    signup_limiter = auth.RateLimiter(max_hits=5, window_seconds=3600)
     session_ttl = config.session_hours * 3600
     # "__Host-" cookies are only accepted over HTTPS, for this exact host, path "/":
     # a sibling sub-domain cannot plant or overwrite the session.
@@ -256,6 +269,70 @@ def create_app(
         db.audit(username, "login", True, detail=f"from {ip}")
         return {"username": username, "csrf": new.csrf, "totp_enabled": bool(user["totp_secret"]),
                 "role": user["role"], "version": __version__}
+
+    # Self-service sign-up for CMS editors, when an administrator opened it. A new account
+    # is an editor with no site: it sees nothing until an administrator grants access.
+
+    def signup_state() -> tuple[bool, str]:
+        return db.get_setting("signup_open") == "1", db.get_setting("signup_code") or ""
+
+    @app.get("/api/signup")
+    def signup_info(invite: str | None = Query(None, max_length=100)) -> dict:
+        is_open, code = signup_state()
+        valid = bool(invite) and db.valid_invite(auth.hash_token(invite)) is not None
+        return {"open": is_open, "code_required": is_open and bool(code), "invite": valid if invite else None}
+
+    @app.post("/api/signup")
+    def signup(body: SignupBody, request: Request, response: Response) -> dict:
+        ip = client_ip(request)
+        is_open, code = signup_state()
+        invite_hash = auth.hash_token(body.invite) if body.invite else None
+        if invite_hash is None and not is_open:
+            raise HTTPException(403, "sign-up is closed")
+        if signup_limiter.blocked(ip):
+            raise HTTPException(429, "too many sign-ups from this address, retry later")
+        signup_limiter.hit(ip)
+        if invite_hash is not None:
+            if db.valid_invite(invite_hash) is None:
+                raise HTTPException(403, "this invitation link was already used or has expired")
+        elif code and not hmac.compare_digest((body.code or "").strip().encode(), code.encode()):
+            db.audit(body.username[:32] or "?", "signup", False, detail=f"wrong code from {ip}")
+            raise HTTPException(403, "wrong invitation code")
+        username = body.username.strip().lower()
+        if not auth.USERNAME_RE.fullmatch(username):
+            raise HTTPException(400, "username: 2-32 characters, lowercase letters, digits, . _ -")
+        if problem := auth.check_password_strength(body.password):
+            raise HTTPException(400, problem)
+        if db.get_user(username):
+            raise HTTPException(409, "this username is taken")
+        invite = None
+        if invite_hash is not None:  # consumed only once everything else is valid
+            invite = db.consume_invite(invite_hash, username)
+            if invite is None:
+                raise HTTPException(403, "this invitation link was already used or has expired")
+        user_id = db.create_user(username, auth.hash_password(body.password), role="editor")
+        if invite:
+            db.set_user_apps(user_id, [a for a in invite["apps"] if db.get_app(a)])
+        db.audit(username, "signup", True,
+                 detail=f"from {ip}" + (f", invited by {invite['created_by']}" if invite else ""))
+        new = auth.create_session(db, user_id, session_ttl, ip)
+        response.set_cookie(cookie_name, new.token, max_age=session_ttl, httponly=True,
+                            secure=config.cookie_secure, samesite="strict", path="/")
+        return {"username": username, "csrf": new.csrf, "totp_enabled": False, "role": "editor",
+                "version": __version__}
+
+    @app.get("/api/signup/settings")
+    def signup_settings(_: SessionInfo = Depends(current_session)) -> dict:
+        is_open, code = signup_state()
+        return {"open": is_open, "code": code}
+
+    @app.put("/api/signup/settings")
+    def set_signup_settings(body: SignupSettings, s: SessionInfo = Depends(current_session)) -> dict:
+        db.set_setting("signup_open", "1" if body.open else None)
+        db.set_setting("signup_code", body.code.strip() or None)
+        db.audit(s.username, "signup-settings", True,
+                 detail=("open" if body.open else "closed") + (" with a code" if body.code.strip() else ""))
+        return {"open": body.open, "code": body.code.strip()}
 
     @app.post("/api/logout")
     def logout(response: Response, s: SessionInfo = Depends(any_session)) -> dict:

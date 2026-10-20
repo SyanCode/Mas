@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useEffect, useState, type FormEvent } from "react";
 import { Backdrop, Logo } from "@/components/Shell";
 import { Button, ErrorText, Input, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
@@ -22,6 +23,14 @@ export default function LoginPage() {
   const [needOtp, setNeedOtp] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [signupOpen, setSignupOpen] = useState(false);
+
+  useEffect(() => {
+    api<{ open: boolean }>("/signup").then((r) => {
+      setSignupOpen(r.open);
+      if (r.open) setUsername((u) => (u === "admin" ? "" : u)); // clients sign in here too
+    }).catch(() => {});
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -83,6 +92,11 @@ export default function LoginPage() {
           <button type="button" className="w-full text-xs text-zinc-500 hover:underline" onClick={() => { setNeedOtp(false); setOtp(""); setError(""); }}>
             ← Back
           </button>
+        )}
+        {!needOtp && signupOpen && (
+          <p className="text-center text-xs text-zinc-500">
+            No account yet? <Link href="/signup/" className="font-medium text-indigo-500 hover:underline">Create one</Link>
+          </p>
         )}
       </form>
     </main>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import time
 from collections.abc import Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -24,6 +25,12 @@ class AppIds(BaseModel):
 
 class UserIds(BaseModel):
     user_ids: list[int] = Field(max_length=500)
+
+
+class InviteBody(BaseModel):
+    apps: list[str] = Field(default_factory=list, max_length=500)
+    note: str = Field(default="", max_length=100)  # who it is for, shown in the list
+    days: int = Field(default=7, ge=1, le=30)
 
 
 class Paths(BaseModel):
@@ -114,6 +121,31 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         db.set_user_apps(user_id, body.apps)
         db.audit(s.username, "editor-access", True, detail=f"{user['username']}: {', '.join(body.apps) or 'none'}")
         return user_payload(db.get_user_by_id(user_id))
+
+    @app.get("/api/invites")
+    def list_invites(_=Depends(current_session)) -> list[dict]:
+        return [{k: i[k] for k in ("id", "apps", "note", "created_by", "created_at", "expires_at")}
+                for i in db.pending_invites()]
+
+    @app.post("/api/invites")
+    def create_invite(body: InviteBody, s=Depends(current_session)) -> dict:
+        unknown = [a for a in body.apps if db.get_app(a) is None]
+        if unknown:
+            raise HTTPException(400, f"unknown apps: {', '.join(unknown)}")
+        token = secrets.token_urlsafe(24)
+        expires_at = time.time() + body.days * 86400
+        invite_id = db.create_invite(auth.hash_token(token), body.apps, body.note.strip() or None, s.username,
+                                     expires_at)
+        db.audit(s.username, "invite-create", True,
+                 detail=f"#{invite_id} {body.note.strip()} → {', '.join(body.apps) or 'no site'}".strip())
+        return {"id": invite_id, "path": f"/signup/?invite={token}", "expires_at": expires_at}
+
+    @app.delete("/api/invites/{invite_id}")
+    def revoke_invite(invite_id: int, s=Depends(current_session)) -> dict:
+        if not db.delete_invite(invite_id):
+            raise HTTPException(404, "unknown or already used invitation")
+        db.audit(s.username, "invite-revoke", True, detail=f"#{invite_id}")
+        return {"ok": True}
 
     @app.get("/api/apps/{app_id}/cms")
     async def app_cms(app_id: str, _=Depends(current_session)) -> dict:
