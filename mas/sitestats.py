@@ -33,7 +33,8 @@ BOT_RE = re.compile(r"bot|crawl|spider|slurp|curl|wget|python|go-http|java/|http
 FILE_RE = re.compile(r"\.(?:css|js|mjs|map|json|xml|txt|ico|png|jpe?g|gif|webp|avif|svg|woff2?|ttf|otf|eot|mp4|"
                      r"webm|mp3|pdf|zip|gz)$", re.I)
 PROBE_RE = re.compile(r"(?:^|/)\.|wp-|\.php|/cgi-bin/|/vendor/|/admin", re.I)  # scanners looking for holes
-REFRESH_SECONDS = 600
+REFRESH_SECONDS = 60
+CHUNK_BYTES = 50 * 1024 * 1024  # new lines read per refresh at most (the rest comes next time)
 MAX_BYTES = 200 * 1024 * 1024  # read at most this much log per refresh
 TOP_PAGES = 50
 
@@ -63,8 +64,8 @@ def _lines(host: Host, path: str, budget: list[int]):
     yield from data.decode("utf-8", "replace").splitlines()
 
 
-def count(lines) -> dict[str, dict]:
-    """{day: {requests, pageviews, visitors, pages}} from access log lines."""
+def tally(lines) -> dict[str, dict]:
+    """{day: {requests, pageviews, visitors (set of hashes), pages (Counter)}} from access log lines."""
     days: dict[str, dict] = defaultdict(lambda: {"requests": 0, "pageviews": 0, "visitors": set(),
                                                  "pages": Counter()})
     for line in lines:
@@ -82,8 +83,13 @@ def count(lines) -> dict[str, dict]:
         d["pageviews"] += 1
         d["visitors"].add(hashlib.blake2b(f"{day}|{ip}|{agent}".encode(), digest_size=8).digest())
         d["pages"][path] += 1
+    return days
+
+
+def count(lines) -> dict[str, dict]:
+    """{day: {requests, pageviews, visitors, pages}} from access log lines."""
     return {day: {"day": day, "requests": d["requests"], "pageviews": d["pageviews"], "visitors": len(d["visitors"]),
-                  "pages": dict(d["pages"].most_common(TOP_PAGES))} for day, d in days.items()}
+                  "pages": dict(d["pages"].most_common(TOP_PAGES))} for day, d in tally(lines).items()}
 
 
 class SiteStats:
@@ -91,19 +97,69 @@ class SiteStats:
         self.host, self.config, self.db = host, config, db
         self.find_service = find_service
         self._done: dict[str, float] = {}
+        self._read_to: dict[str, int] = {}  # where the last reading stopped, per file
 
     def refresh(self, app: dict, force: bool = False) -> None:
-        """Recount the days still in the logs (at most every 10 minutes per app)."""
+        """Count what the access log got since the last time (at most every minute per app).
+
+        The first time — or when the position is lost — every day still in the logs is recounted.
+        Then only the new bytes are read: the position (inode, offset) of the log is kept, and a
+        rotation (the log became .1) is followed. Today's and yesterday's visitors are kept as hashes
+        so that a visitor is counted once per day."""
         if not force and time.monotonic() - self._done.get(app["id"], -1e9) < REFRESH_SECONDS:
             return
         self._done[app["id"]] = time.monotonic()
         service = self.find_service(app["service_id"]) if app.get("service_id") else None
+        files = access_logs(self.host, self.config, app, service)
+        if not files or files[-1].endswith(".gz") or re.search(r"\.\d+$", files[-1]):
+            return  # no current log
+        base = files[-1]
+        key = f"sitestats:{app['id']}"
+        try:
+            position = json.loads(self.db.get_setting(key) or "null")
+        except ValueError:
+            position = None
+        now_id = self.host.file_id(base)
+        if now_id is None:
+            return
+        chunks: list[tuple[str, int]] = []  # (file, offset) to read
+        if position and position.get("file") == base:
+            if position["inode"] == now_id[0] and position["offset"] <= now_id[1]:
+                chunks = [(base, position["offset"])]
+            else:  # rotated: finish the old file (now .1), then the new one from the start
+                rotated = next((f for f in files[:-1] if not f.endswith(".gz")
+                                and (self.host.file_id(f) or (0,))[0] == position["inode"]), None)
+                chunks = ([(rotated, position["offset"])] if rotated else []) + [(base, 0)]
+                if rotated is None:
+                    position = None  # lost the thread: recount everything
+        if not position:
+            self._recount(app, files)
+        else:
+            self._add(app, chunks)
+        end = self.host.file_id(base) or now_id
+        self.db.set_setting(key, json.dumps({"file": base, "inode": end[0], "offset": self._read_to.get(base, end[1])}))
+
+    def _recount(self, app: dict, files: list[str]) -> None:
         budget = [MAX_BYTES]
-        lines = (line for path in access_logs(self.host, self.config, app, service)
-                 for line in _lines(self.host, path, budget))
-        days = count(lines)
+        days = tally(line for path in files for line in _lines(self.host, path, budget))
+        self._read_to = {}
         if days:
-            self.db.save_site_stats(app["id"], list(days.values()))
+            self.db.save_site_stats(app["id"], [
+                {"day": day, "requests": d["requests"], "pageviews": d["pageviews"], "visitors": len(d["visitors"]),
+                 "pages": dict(d["pages"].most_common(TOP_PAGES))} for day, d in days.items()])
+        recent = (date.today() - timedelta(days=1)).isoformat()
+        self.db.keep_site_visitors(app["id"], recent, {day: d["visitors"] for day, d in days.items() if day >= recent})
+
+    def _add(self, app: dict, chunks: list[tuple[str, int]]) -> None:
+        self._read_to = {}
+        for path, offset in chunks:
+            data = self.host.read_from(path, offset, CHUNK_BYTES)
+            cut = data.rfind(b"\n") + 1  # a line still being written stays for next time
+            self._read_to[path] = offset + cut
+            for day, d in tally(data[:cut].decode("utf-8", "replace").splitlines()).items():
+                self.db.add_site_counts(app["id"], day, d["requests"], d["pageviews"], d["visitors"], dict(d["pages"]),
+                                        TOP_PAGES)
+        self.db.keep_site_visitors(app["id"], (date.today() - timedelta(days=1)).isoformat())
 
     def refresh_all(self) -> None:
         for app in self.db.list_apps():

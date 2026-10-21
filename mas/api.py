@@ -38,6 +38,8 @@ log = logging.getLogger(__name__)
 
 COOKIE = "mas_session"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+IDLE_AFTER = 180   # seconds without a dashboard request: the dashboard is closed
+IDLE_SCAN = 300    # full scan interval meanwhile
 TRUSTED_PROXIES = {"127.0.0.1", "::1"}
 SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
@@ -144,12 +146,20 @@ def create_app(
     # a sibling sub-domain cannot plant or overwrite the session.
     cookie_name = f"__Host-{COOKIE}" if config.cookie_secure else COOKIE
 
+    # Nobody on the dashboard for a few minutes: the full scan slows down (it reads /proc, ss, docker,
+    # systemd and nginx). Coming back wakes it up at once.
+    activity = {"at": time.monotonic(), "wake": asyncio.Event()}
+
     async def scan_loop() -> None:
+        last_scan = -1e9
         while True:
-            try:
-                await asyncio.to_thread(scanner.refresh)
-            except Exception:
-                log.exception("background scan failed")
+            idle = time.monotonic() - activity["at"] > IDLE_AFTER
+            if time.monotonic() - last_scan >= (max(config.scan_interval, IDLE_SCAN) if idle else config.scan_interval):
+                try:
+                    await asyncio.to_thread(scanner.refresh)
+                except Exception:
+                    log.exception("background scan failed")
+                last_scan = time.monotonic()
             try:
                 await asyncio.to_thread(site_stats.refresh_all)
             except Exception:
@@ -162,7 +172,12 @@ def create_app(
                 await asyncio.to_thread(stack_backups.auto_backup)
             except Exception:
                 log.exception("service backups failed")
-            await asyncio.sleep(max(10, config.scan_interval))
+            activity["wake"].clear()
+            try:
+                await asyncio.wait_for(activity["wake"].wait(), timeout=max(10, config.scan_interval))
+                last_scan = -1e9  # someone is back after a quiet while: scan now
+            except asyncio.TimeoutError:
+                pass
 
     github_cache: dict = {}
 
@@ -218,6 +233,10 @@ def create_app(
             origin = request.headers.get("origin")
             if origin and urlparse(origin).netloc != request.headers.get("host"):
                 return JSONResponse({"detail": "cross-origin request refused"}, status_code=403)
+        if request.url.path.startswith("/api/") and request.cookies:
+            if time.monotonic() - activity["at"] > IDLE_AFTER:
+                activity["wake"].set()
+            activity["at"] = time.monotonic()
         response = await call_next(request)
         for key, value in SECURITY_HEADERS.items():
             response.headers.setdefault(key, value)

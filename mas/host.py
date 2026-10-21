@@ -95,6 +95,22 @@ class Host:
         except OSError:
             return None
 
+    def file_id(self, path: str) -> tuple[int, int] | None:
+        """(inode, size): a log that was rotated has another inode."""
+        try:
+            st = os.stat(self.real(path))
+        except OSError:
+            return None
+        return st.st_ino, st.st_size
+
+    def read_from(self, path: str, offset: int, max_bytes: int) -> bytes:
+        try:
+            with open(self.real(path), "rb") as fh:
+                fh.seek(offset)
+                return fh.read(max_bytes)
+        except OSError:
+            return b""
+
     def read_tail(self, path: str, max_bytes: int) -> bytes:
         """The last ``max_bytes`` of a file (a log), from its first complete line."""
         try:

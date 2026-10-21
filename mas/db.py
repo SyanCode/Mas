@@ -142,6 +142,12 @@ CREATE TABLE IF NOT EXISTS site_stats (      -- daily totals read from nginx acc
     updated_at TEXT NOT NULL,
     PRIMARY KEY (app_id, day)
 );
+CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday (hashes): counted once per day
+    app_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    hash BLOB NOT NULL,
+    PRIMARY KEY (app_id, day, hash)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -457,6 +463,35 @@ class Database:
                           (app_id, d["day"], d["requests"], d["pageviews"], d["visitors"], json.dumps(d["pages"]),
                            _now()))
 
+    def add_site_counts(self, app_id: str, day: str, requests: int, pageviews: int, hashes: set[bytes],
+                        pages: dict[str, int], keep_pages: int) -> None:
+        """Add the lines read since the last time to the totals of ``day`` (visitors counted once)."""
+        with self.tx() as c:
+            before = c.total_changes
+            c.executemany("INSERT OR IGNORE INTO site_visitors (app_id, day, hash) VALUES (?, ?, ?)",
+                          [(app_id, day, h) for h in hashes])
+            new_visitors = c.total_changes - before
+            row = c.execute("SELECT requests, pageviews, visitors, pages FROM site_stats WHERE app_id = ? AND day = ?",
+                            (app_id, day)).fetchone()
+            merged = dict(json.loads(row["pages"] or "{}")) if row else {}
+            for path, n in pages.items():
+                merged[path] = merged.get(path, 0) + n
+            top = dict(sorted(merged.items(), key=lambda kv: -kv[1])[:keep_pages])
+            c.execute("INSERT INTO site_stats (app_id, day, requests, pageviews, visitors, pages, updated_at) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(app_id, day) DO UPDATE SET "
+                      "requests = requests + excluded.requests, pageviews = pageviews + excluded.pageviews, "
+                      "visitors = visitors + excluded.visitors, pages = excluded.pages, updated_at = excluded.updated_at",
+                      (app_id, day, requests, pageviews, new_visitors, json.dumps(top), _now()))
+
+    def keep_site_visitors(self, app_id: str, since: str, hashes_by_day: dict[str, set[bytes]] | None = None) -> None:
+        """Forget the visitors of days before ``since``; optionally replace those of recent days."""
+        with self.tx() as c:
+            c.execute("DELETE FROM site_visitors WHERE app_id = ? AND day < ?", (app_id, since))
+            for day, hashes in (hashes_by_day or {}).items():
+                c.execute("DELETE FROM site_visitors WHERE app_id = ? AND day = ?", (app_id, day))
+                c.executemany("INSERT OR IGNORE INTO site_visitors (app_id, day, hash) VALUES (?, ?, ?)",
+                              [(app_id, day, h) for h in hashes])
+
     def site_stats(self, app_id: str, since: str) -> list[dict]:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM site_stats WHERE app_id = ? AND day >= ? ORDER BY day",
@@ -513,6 +548,7 @@ class Database:
         with self.tx() as c:
             c.execute("DELETE FROM apps WHERE id = ?", (app_id,))
             c.execute("DELETE FROM site_stats WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM site_visitors WHERE app_id = ?", (app_id,))
 
     def create_release(self, app_id: str, trigger: str, actor: str | None, sha: str | None = None,
                        status: str = "queued") -> int:

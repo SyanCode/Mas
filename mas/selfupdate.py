@@ -101,6 +101,24 @@ def refresh_dashboard_vhost(src: Path, log=print) -> None:
     log(f"dashboard vhost updated (previous: {backup})")
 
 
+UNIT_PATH = Path("/etc/systemd/system/mas.service")
+
+
+def refresh_unit(src: Path, log=print) -> None:
+    """Install the mas.service of the new version (resource settings…) when it changed."""
+    template = src / "deploy" / "mas.service"
+    if not UNIT_PATH.is_file() or not template.is_file():
+        return
+    rendered = template.read_text(encoding="utf-8")
+    if rendered == UNIT_PATH.read_text(encoding="utf-8"):
+        return
+    backup = UNIT_PATH.with_name(f"{UNIT_PATH.name}.mas-bak-{time.strftime('%Y%m%d%H%M%S')}")
+    shutil.copy2(UNIT_PATH, backup)
+    UNIT_PATH.write_text(rendered, encoding="utf-8")
+    _run(["systemctl", "daemon-reload"], log=log)
+    log(f"mas.service updated (previous: {backup})")
+
+
 CHECK_TTL = 6 * 3600
 CHECK_TIMEOUT = 2
 
@@ -211,5 +229,6 @@ def self_update(config: Config, tarball: Path | None = None, restart: bool = Tru
     _run([str(pip), "install", "--quiet", "--upgrade", str(src)], log=log)
     build_web(src, log=log)
     refresh_dashboard_vhost(src, log=log)
+    refresh_unit(src, log=log)
     if restart:
         _run(["systemctl", "restart", "mas"], log=log)

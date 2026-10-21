@@ -146,3 +146,22 @@ def test_read_tail(tmp_path):
     (tmp_path / "log").write_bytes(b"first line\n" + b"x" * 50 + b"\nlast line\n")
     assert Host(tmp_path).read_tail("/log", 20) == b"last line\n"
     assert Host(tmp_path).read_tail("/log", 10_000).startswith(b"first line")
+
+
+def test_traffic_follows_the_log(pair):
+    app, db, host = pair["a_app"], pair["a_db"], pair["a_host"]
+    db.create_app("web", name="web", repo="acme/web", branch="main", type="nextjs", port=7100, mode="managed",
+                  domain="web.example.com")
+    cluster, now = app.state.cluster, time.time()
+    log = "/var/log/nginx/mas-app-web.upstream.log"
+    host.write_text(log, f"{now - 2:.3f} 127.0.0.1:7100 200 0.010\n")
+    first = cluster.traffic(now)["apps"][0]["backends"][0]
+    assert first["requests_minute"] == 1
+    assert cluster.traffic(now + 1) is cluster.traffic(now + 1)  # cached for a few seconds
+    reads = []
+    original = host.read_from
+    host.read_from = lambda p, o, n: reads.append(o) or original(p, o, n)
+    with open(host.real(log), "a") as fh:
+        fh.write(f"{now:.3f} 127.0.0.1:7100 200 0.010\n")
+    later = cluster.traffic(now + 10)["apps"][0]["backends"][0]
+    assert later["requests_minute"] == 2 and reads == [len(f"{now - 2:.3f} 127.0.0.1:7100 200 0.010\n")]

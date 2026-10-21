@@ -74,24 +74,42 @@ def _boot_time(host: Host) -> float | None:
     return None
 
 
-def process_stats(host: Host, pid: int, sample: float = 0.5) -> dict | None:
-    """Memory (RSS of the whole tree), CPU over ``sample`` seconds, start time, threads."""
+# Previous CPU reading per process tree: the next call measures against it instead of sleeping.
+_LAST_CPU: dict[int, tuple[float, int]] = {}
+
+
+def process_stats(host: Host, pid: int, sample: float = 0.25) -> dict | None:
+    """Memory (RSS of the whole tree), CPU since the previous call (or over ``sample`` seconds the
+    first time), start time, threads."""
     root = _stat(host, pid)
     if root is None:
         return None
     tree = process_tree(host, pid)
-    before = sum((_stat(host, p) or (0, 0, 0))[1] for p in tree)
-    time.sleep(sample)
-    after = sum((_stat(host, p) or (0, 0, 0))[1] for p in tree)
+    ticks = lambda: sum((_stat(host, p) or (0, 0, 0))[1] for p in tree)  # noqa: E731
+    previous = _LAST_CPU.get(pid)
+    if previous and 0 < time.monotonic() - previous[0] < 120:
+        since, before = previous
+    elif sample:
+        since, before = time.monotonic(), ticks()
+        time.sleep(sample)
+    else:
+        since = before = None
+    after, at = ticks(), time.monotonic()
+    _LAST_CPU[pid] = (at, after)
+    if len(_LAST_CPU) > 500:  # processes come and go
+        for old in sorted(_LAST_CPU, key=lambda k: _LAST_CPU[k][0])[:250]:
+            _LAST_CPU.pop(old, None)
     rss = threads = 0
     for p in tree:
         status = _status(host, p)
         rss += int((status.get("VmRSS") or "0 kB").split()[0])
         threads += int(status.get("Threads") or 0)
     boot = _boot_time(host)
+    cpu = None
+    if since is not None and at > since:
+        cpu = round(max(0, after - before) / CLK_TCK / (at - since) * 100, 1)
     return {"pids": tree, "processes": len(tree), "threads": threads, "memory_mb": round(rss / 1024, 1),
-            "cpu_percent": round(max(0, after - before) / CLK_TCK / sample * 100, 1) if sample else None,
-            "started_at": _iso(boot + root[2] / CLK_TCK) if boot else None}
+            "cpu_percent": cpu, "started_at": _iso(boot + root[2] / CLK_TCK) if boot else None}
 
 
 def _number(value: str | None) -> int | None:
@@ -196,7 +214,7 @@ def _app_for(svc: Service, db: Database, config: Config) -> dict | None:
     return app_for(svc, db.list_apps(), config.apps_dir)
 
 
-def service_runtime(host: Host, config: Config, db: Database, svc: Service, sample: float = 0.5) -> dict:
+def service_runtime(host: Host, config: Config, db: Database, svc: Service, sample: float = 0.25) -> dict:
     out: dict = {"process": None, "systemd": None, "docker": None, "ports": [], "links": [], "app": None}
     if svc.manager == Manager.DOCKER and svc.container_id:
         out["docker"] = docker_stats(host, svc.container_id)

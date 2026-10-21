@@ -53,3 +53,40 @@ def test_report_reads_rotated_logs_and_keeps_the_history(tmp_path):
     stats.refresh(app, force=True)
     assert stats.report(app, days=7, today=date(2026, 10, 21))["totals"]["pageviews"] == 4
     assert "1.1.1.1" not in str(db.site_stats("bb", "2026-01-01"))  # no IP kept
+
+
+def test_only_new_lines_are_read_and_rotation_is_followed(tmp_path):
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    db.create_app("bb", name="bb", repo="acme/bb", branch="main", type="static", domain="bb.example.com")
+    app, log = db.get_app("bb"), "/var/log/nginx/mas-app-bb.access.log"
+    today = date.today()
+    dd = f"{today.day:02d}"
+    mon = today.strftime("%b")
+
+    def ln(ip, path="/"):
+        return f'{ip} - - [{dd}/{mon}/{today.year}:10:00:00 +0200] "GET {path} HTTP/2.0" 200 5 "-" "{UA}"\n'
+
+    stats = SiteStats(host, Config(), db)
+    host.write_text(log, ln("1.1.1.1") + ln("2.2.2.2"))
+    stats.refresh(app, force=True)
+    real = host.real(log)
+    with open(real, "a") as fh:  # nginx keeps writing
+        fh.write(ln("1.1.1.1", "/a") + ln("3.3.3.3") + '9.9.9.9 - - [half a line')
+    reads = []
+    original = host.read_from
+    host.read_from = lambda p, o, n: reads.append((p, o)) or original(p, o, n)
+    stats.refresh(app, force=True)
+    assert reads and reads[0][1] > 0  # from where it stopped, not from the start
+    row = db.site_stats("bb", today.isoformat())[0]
+    assert row["pageviews"] == 4 and row["visitors"] == 3  # 1.1.1.1 counted once
+    # rotation: the log becomes .1 (with its unread end), a new one starts
+    with open(real, "a") as fh:
+        fh.write("]\n" + ln("4.4.4.4"))
+    real.rename(real.with_name(real.name + ".1"))
+    host.write_text(log, ln("5.5.5.5") + ln("2.2.2.2"))
+    stats.refresh(app, force=True)
+    row = db.site_stats("bb", today.isoformat())[0]
+    assert row["pageviews"] == 7 and row["visitors"] == 5  # 4.4.4.4 (end of .1), 5.5.5.5; 2.2.2.2 already came
+    stats.refresh(app, force=True)  # nothing new
+    assert db.site_stats("bb", today.isoformat())[0]["pageviews"] == 7

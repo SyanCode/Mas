@@ -14,6 +14,11 @@ ExecStart=/opt/mas/venv/bin/mas serve
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
+# Light on a busy server: fewer malloc arenas, and the apps get the CPU and the disk first.
+Environment=MALLOC_ARENA_MAX=2
+CPUWeight=50
+IOWeight=50
+Nice=5
 UMask=0077
 
 NoNewPrivileges=yes

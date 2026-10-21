@@ -24,6 +24,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -45,6 +46,7 @@ PRIVATE_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12",
 BUILD_TIMEOUT = 1800
 WINDOW_SHORT, WINDOW_LONG = 60, 900  # seconds: requests of the last minute / quarter of an hour
 UPSTREAM_TAIL = 8 * 1024 * 1024      # read the end of the upstream log only
+TRAFFIC_CACHE_S = 3                  # several open pages share one reading
 
 
 class ClusterError(Exception):
@@ -97,6 +99,8 @@ class Cluster:
         self.host, self.config, self.db, self.deployer = host, config, db, deployer
         self.opener = opener
         deployer.spread = self.spread
+        self._tails: dict[str, dict] = {}
+        self._traffic_cache: tuple[float, dict] | None = None
 
     # -- this server -------------------------------------------------------------
 
@@ -229,34 +233,23 @@ class Cluster:
         """Requests of the last minute and the last 15 minutes, per app and per backend, read from the
         upstream logs nginx writes for every proxied app (mas_upstream format)."""
         now = now or time.time()
+        if self._traffic_cache and now - self._traffic_cache[0] < TRAFFIC_CACHE_S:
+            return self._traffic_cache[1]
         peers = {s["address"]: s for s in self.db.list_cluster_servers() if s["address"]}
         apps = []
         for app in self.db.list_apps():
             if app["mode"] != "managed" or ServiceType(app["type"]) not in PROXY_TYPES or not app.get("domain"):
                 continue
             counts: dict[str, dict] = {}
-            data = self.host.read_tail(f"/var/log/nginx/mas-app-{app['id']}.upstream.log", UPSTREAM_TAIL)
-            for line in data.decode("utf-8", "replace").splitlines():
-                parts = line.split()
-                if len(parts) < 4 or len(parts) % 2:
+            for at, addr, status, took in self._follow(app["id"], now):
+                age = now - at
+                if age > WINDOW_LONG or age < -5:  # lines are not always in time order
                     continue
-                try:
-                    age = now - float(parts[0])
-                except ValueError:
-                    continue
-                if age > WINDOW_LONG or age < -5:
-                    continue
-                # "msec 10.0.0.2:7101, 127.0.0.1:7100 502, 200 0.31": a retry; the last backend answered
-                tried = (len(parts) - 2) // 2
-                addr, status = parts[tried].rstrip(","), parts[2 * tried].rstrip(",")
                 c = counts.setdefault(addr, {"minute": 0, "quarter": 0, "errors": 0, "time": 0.0})
                 c["quarter"] += 1
                 c["minute"] += age <= WINDOW_SHORT
                 c["errors"] += status.startswith("5") or status == "-"
-                try:
-                    c["time"] += float(parts[-1])
-                except ValueError:
-                    pass
+                c["time"] += took
             configured = self.deployer._upstream_servers(app)
             backends = []
             for addr in list(dict.fromkeys([*configured, *counts])):
@@ -271,7 +264,43 @@ class Cluster:
                                  "errors_15min": c["errors"],
                                  "avg_ms": round(c["time"] / c["quarter"] * 1000) if c["quarter"] else None})
             apps.append({"id": app["id"], "name": app["name"], "domain": app["domain"], "backends": backends})
-        return {"at": now, "window_s": [WINDOW_SHORT, WINDOW_LONG], "apps": apps}
+        result = {"at": now, "window_s": [WINDOW_SHORT, WINDOW_LONG], "apps": apps}
+        self._traffic_cache = (now, result)
+        return result
+
+    def _follow(self, app_id: str, now: float) -> deque:
+        """The requests of the last 15 minutes of an app, kept in memory: only the lines nginx added
+        since the previous call are read (the end of the log the first time, or after a rotation)."""
+        path = f"/var/log/nginx/mas-app-{app_id}.upstream.log"
+        state = self._tails.setdefault(app_id, {"inode": None, "offset": 0, "entries": deque()})
+        fid = self.host.file_id(path)
+        if fid is None:
+            state["entries"].clear()
+            return state["entries"]
+        if fid[0] != state["inode"] or fid[1] < state["offset"]:  # first time, rotated or truncated
+            data = self.host.read_tail(path, UPSTREAM_TAIL)
+            state.update(inode=fid[0], offset=fid[1])
+            state["entries"].clear()
+        else:
+            data = self.host.read_from(path, state["offset"], UPSTREAM_TAIL)
+            cut = data.rfind(b"\n") + 1
+            data = data[:cut]
+            state["offset"] += cut
+        entries = state["entries"]
+        for line in data.decode("utf-8", "replace").splitlines():
+            parts = line.split()
+            if len(parts) < 4 or len(parts) % 2:
+                continue
+            try:
+                at, took = float(parts[0]), float(parts[-1]) if parts[-1] != "-" else 0.0
+            except ValueError:
+                continue
+            # "msec 10.0.0.2:7101, 127.0.0.1:7100 502, 200 0.31": a retry; the last backend answered
+            tried = (len(parts) - 2) // 2
+            entries.append((at, parts[tried].rstrip(","), parts[2 * tried].rstrip(","), took))
+        while entries and now - entries[0][0] > WINDOW_LONG:
+            entries.popleft()
+        return entries
 
     # -- copies of an app (this server drives) ------------------------------------------
 
