@@ -529,16 +529,29 @@ def apps_list(ctx: typer.Context) -> None:
 
 
 @app.command()
-def deploy(ctx: typer.Context, app_id: Annotated[str, typer.Argument(help="App id (see `mas apps`).")]) -> None:
+def deploy(ctx: typer.Context,
+           app_id: Annotated[Optional[str], typer.Argument(help="App id (see `mas apps`).")] = None,
+           all_apps: Annotated[bool, typer.Option("--all", help="Every app deployed from GitHub, one after "
+                                                                "the other.")] = False) -> None:
     """Deploy the latest commit of an app's branch now (logs printed live)."""
     env: Env = ctx.obj
-    if env.db.get_app(app_id) is None:
-        fail(f"unknown app {app_id} (see `mas apps`)")
+    if all_apps == bool(app_id):
+        fail("give an app id, or --all")
     deployer = _deployer(env)
-    rid = env.db.create_release(app_id, "manual", actor())
-    ok = deployer.run(rid, echo=lambda line: console.print(line, markup=False, highlight=False))
-    if not ok:
-        fail(f"release #{rid} failed")
+    targets = deployer.redeploy_targets() if all_apps else [app_id]
+    if app_id and env.db.get_app(app_id) is None:
+        fail(f"unknown app {app_id} (see `mas apps`)")
+    failed = []
+    for target in targets:
+        if all_apps:
+            console.print(f"[bold]== {target}[/]")
+        rid = env.db.create_release(target, "manual", actor())
+        if not deployer.run(rid, echo=lambda line: console.print(line, markup=False, highlight=False)):
+            failed.append(f"{target} (#{rid})")
+    if all_apps:
+        console.print(f"{len(targets) - len(failed)}/{len(targets)} app(s) deployed")
+    if failed:
+        fail(f"failed: {', '.join(failed)}")
 
 
 @app.command()

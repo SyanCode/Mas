@@ -106,8 +106,8 @@ def test_services_and_detail(env):
     login(client)
     data = client.get("/api/services").json()
     by_id = {s["id"]: s for s in data["services"]}
-    assert by_id["api.example.com"]["actions"] == ["start", "stop", "restart", "reload"]
-    assert by_id["api.example.com"]["confirm_actions"] == ["restart", "stop"]
+    assert by_id["api.example.com"]["actions"] == ["start", "stop", "restart", "reload", "enable", "disable"]
+    assert by_id["api.example.com"]["confirm_actions"] == ["disable", "restart", "stop"]
     assert by_id["docs.example.com"]["actions"] == ["reload"]
     assert by_id["unknown-python3"]["actions"] == []
     assert client.get("/api/services/nope").status_code == 404

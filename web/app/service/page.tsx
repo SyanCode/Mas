@@ -4,16 +4,20 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
-import { Badge, Button, Card, ConfirmDialog, ErrorText, Input, StatusDot } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, StatusDot } from "@/components/ui";
 import {
   api, ApiError, daysUntil, githubUrl, SERVICE_TYPES, timeAgo,
-  type ActionResult, type LogSource, type Service,
+  type ActionResult, type LogSource, type Service, type ServiceRuntime,
 } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
 
 const ACTION_LABELS: Record<string, string> = {
   start: msg("Start"), stop: msg("Stop"), restart: msg("Restart"), reload: msg("Reload"),
+  enable: msg("Start at boot"), disable: msg("Do not start at boot"),
 };
+const BOOT_ACTIONS = ["enable", "disable"];  // shown in the live card, not with start / stop
+
+const mb = (n: number | null | undefined) => (n === null || n === undefined ? null : n >= 1024 ? `${(n / 1024).toFixed(2)} GB` : `${Math.round(n)} MB`);
 const STATUS_LABELS: Record<string, string> = {
   running: msg("running"), stopped: msg("stopped"), errored: msg("errored"), unknown: msg("unknown"),
 };
@@ -82,6 +86,106 @@ function Logs({ id }: { id: string }) {
   );
 }
 
+/** Memory, CPU, uptime, restarts and boot start, read every 10 s. */
+function Live({ svc, onRuntime, onBoot }: { svc: Service; onRuntime: (r: ServiceRuntime) => void; onBoot: (action: string) => void }) {
+  const t = useT();
+  const [rt, setRt] = useState<ServiceRuntime | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api<ServiceRuntime>(`/services/${encodeURIComponent(svc.id)}/runtime`)
+      .then((r) => { setRt(r); onRuntime(r); setError(""); })
+      .catch((e: ApiError) => setError(e.detail));
+  }, [svc.id, onRuntime]);
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 10_000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  const p = rt?.process, sd = rt?.systemd, dk = rt?.docker;
+  const memory = sd?.memory_mb ?? dk?.memory_mb ?? p?.memory_mb;
+  const cpu = dk?.cpu_percent ?? p?.cpu_percent;
+  const started = sd?.started_at ?? dk?.started_at ?? p?.started_at;
+  const restarts = sd?.restarts ?? dk?.restarts;
+  const boot = sd?.enabled;
+  return (
+    <Card title={t("Right now")} actions={<span className="text-xs text-zinc-500">{t("every 10 s")}</span>}>
+      <ErrorText>{error}</ErrorText>
+      {!rt && !error && <p className="text-sm text-zinc-500">{t("Loading…")}</p>}
+      {rt && (
+        <dl className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <Row label={t("Memory")}>{mb(memory) && <span>{mb(memory)}{sd?.memory_peak_mb ? <span className="text-zinc-500"> · {t("peak {v}", { v: mb(sd.memory_peak_mb) ?? "" })}</span> : null}{dk?.memory_limit_mb ? <span className="text-zinc-500"> / {mb(dk.memory_limit_mb)}</span> : null}</span>}</Row>
+          <Row label="CPU">{cpu !== null && cpu !== undefined && `${cpu} %`}{sd?.cpu_seconds ? <span className="text-zinc-500"> · {t("{n} s in total", { n: sd.cpu_seconds })}</span> : null}</Row>
+          <Row label={t("Started")}>{started && <span title={started}>{timeAgo(started)}</span>}</Row>
+          <Row label={t("Restarts")}>{restarts !== null && restarts !== undefined && String(restarts)}</Row>
+          <Row label={t("Processes")}>{p && t("{n} process(es), {threads} threads", { n: p.processes, threads: p.threads })}</Row>
+          <Row label={t("Image")}>{dk?.image && <code className="text-xs">{dk.image}</code>}</Row>
+          <Row label={t("Health")}>{dk?.health}</Row>
+          <Row label={t("Restart policy")}>{dk?.restart_policy}</Row>
+          <Row label={t("Description")}>{sd?.description}</Row>
+          <Row label={t("Unit file")}>{sd?.unit_file && <code className="text-xs">{sd.unit_file}</code>}</Row>
+          <Row label={t("At boot")}>
+            {boot && (
+              <span className="flex flex-wrap items-center gap-2">
+                <span>{boot === "enabled" ? t("starts at boot") : boot === "disabled" ? t("does not start at boot") : boot}</span>
+                {boot === "disabled" && svc.actions.includes("enable") && <Button className="!px-2 !py-1 text-xs" onClick={() => onBoot("enable")}>{t("Start at boot")}</Button>}
+                {boot === "enabled" && svc.actions.includes("disable") && <Button className="!px-2 !py-1 text-xs" onClick={() => onBoot("disable")}>{t("Do not start at boot")}</Button>}
+              </span>
+            )}
+          </Row>
+        </dl>
+      )}
+    </Card>
+  );
+}
+
+/** Where to open the service: its sites, public ports, an SSH tunnel, the Mas app, the commit on GitHub. */
+function Links({ svc, rt }: { svc: Service; rt: ServiceRuntime | null }) {
+  const t = useT();
+  const gh = githubUrl(svc.git_remote);
+  if (!rt) return null;
+  const tunnels = rt.links.filter((l) => l.kind === "tunnel");
+  const opens = rt.links.filter((l) => l.kind !== "tunnel");
+  if (!rt.links.length && !rt.app && !gh && !rt.ports.length) return null;
+  return (
+    <Card title={t("Links")}>
+      <div className="space-y-3 text-sm">
+        {opens.length > 0 && (
+          <ul className="space-y-1">
+            {opens.map((l) => (
+              <li key={l.url}><a href={l.url} target="_blank" rel="noreferrer" className="break-all text-sky-600 hover:underline dark:text-sky-400">{l.url} ↗</a></li>
+            ))}
+          </ul>
+        )}
+        {tunnels.map((l) => (
+          <div key={l.url} className="space-y-1">
+            <p className="text-zinc-500">{t("Port {port} only listens on the server. From your computer:", { port: l.port ?? "" })}</p>
+            <CopyCode text={l.command ?? ""} />
+            <p className="text-zinc-500">{t("then open {url}", { url: l.url })}</p>
+          </div>
+        ))}
+        {rt.app && <p><Link href={`/apps/view/?id=${encodeURIComponent(rt.app.id)}`} className="text-sky-600 hover:underline dark:text-sky-400">{t("Mas app: {name}", { name: rt.app.name })} →</Link></p>}
+        {gh && (
+          <p className="flex flex-wrap gap-3">
+            <a href={gh} target="_blank" rel="noreferrer" className="text-sky-600 hover:underline dark:text-sky-400">GitHub ↗</a>
+            {svc.last_commit && <a href={`${gh}/commit/${svc.last_commit.sha}`} target="_blank" rel="noreferrer" className="text-sky-600 hover:underline dark:text-sky-400">{t("Commit {sha}", { sha: svc.last_commit.sha.slice(0, 7) })} ↗</a>}
+          </p>
+        )}
+        {rt.ports.length > 0 && (
+          <div>
+            <p className="text-xs text-zinc-500">{t("Listening ports")}</p>
+            <ul className="mt-1 flex flex-wrap gap-1.5">
+              {rt.ports.map((p) => (
+                <li key={`${p.address}:${p.port}`}><Badge tone={p.public ? "amber" : undefined}>{p.port}{p.public ? ` · ${t("public")}` : ` · ${t("local")}`}</Badge></li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function EditMeta({ svc, onSaved }: { svc: Service; onSaved: (s: Service) => void }) {
   const t = useT();
   const [displayName, setDisplayName] = useState(svc.display_name ?? "");
@@ -142,6 +246,7 @@ function ServiceDetail() {
   const [pending, setPending] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
+  const [rt, setRt] = useState<ServiceRuntime | null>(null);
 
   const load = useCallback(() => {
     api<Service>(`/services/${encodeURIComponent(id)}`).then(setSvc).catch((e: ApiError) => setError(e.detail));
@@ -203,7 +308,7 @@ function ServiceDetail() {
             <Button onClick={adopt} title={t("Deploy this service on every push, in place")}>{t("Connect to GitHub")}</Button>
           )}
           {svc.actions.length === 0 && <span className="text-sm text-zinc-500">{t("No action available for this manager.")}</span>}
-          {svc.actions.map((a) => (
+          {svc.actions.filter((a) => !BOOT_ACTIONS.includes(a)).map((a) => (
             <Button
               key={a}
               variant={a === "stop" ? "danger" : "secondary"}
@@ -266,6 +371,8 @@ function ServiceDetail() {
           <Logs id={svc.id} />
         </div>
         <div className="space-y-4">
+          <Live svc={svc} onRuntime={setRt} onBoot={(a) => (svc.confirm_actions.includes(a) ? setConfirm(a) : run(a))} />
+          <Links svc={svc} rt={rt} />
           <EditMeta svc={svc} onSaved={setSvc} />
           <Card title={t("History")}>
             {(svc.history ?? []).length === 0 && <p className="text-sm text-zinc-500">{t("No action yet.")}</p>}
@@ -287,9 +394,9 @@ function ServiceDetail() {
       <ConfirmDialog
         open={confirm !== null}
         title={`${confirm ? label(confirm) : ""} ${svc.display_name || svc.name}?`}
-        message={confirm === "stop" ? t("The service will be unavailable until it is started again.") : t("The service will be briefly unavailable.")}
+        message={confirm === "stop" ? t("The service will be unavailable until it is started again.") : confirm === "disable" ? t("The service keeps running now, but will not start again after a reboot of the server.") : t("The service will be briefly unavailable.")}
         confirmLabel={confirm ? label(confirm) : ""}
-        danger={confirm === "stop"}
+        danger={confirm === "stop" || confirm === "disable"}
         onConfirm={() => confirm && run(confirm)}
         onCancel={() => setConfirm(null)}
       />

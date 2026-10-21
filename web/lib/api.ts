@@ -11,6 +11,24 @@ export interface Commit {
   date: string | null;
 }
 
+/** Live state of a service (GET /services/{id}/runtime). */
+export interface ServiceRuntime {
+  process: { processes: number; threads: number; memory_mb: number; cpu_percent: number | null; started_at: string | null } | null;
+  systemd: {
+    unit: string; description: string | null; enabled: string | null; state: string | null; restarts: number | null;
+    tasks: number | null; memory_mb: number | null; memory_peak_mb: number | null; cpu_seconds: number | null;
+    started_at: string | null; unit_file: string | null;
+  } | null;
+  docker: {
+    image: string | null; started_at: string | null; health: string | null; restarts: number | null;
+    restart_policy: string | null; compose_project: string | null; memory_mb: number | null;
+    memory_limit_mb: number | null; cpu_percent: number | null;
+  } | null;
+  ports: { port: number; address: string; public: boolean }[];
+  links: { kind: "web" | "port" | "tunnel"; url: string; port?: number; command?: string }[];
+  app: { id: string; name: string } | null;
+}
+
 export interface Service {
   id: string;
   name: string;

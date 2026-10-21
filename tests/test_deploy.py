@@ -568,3 +568,12 @@ def test_node_app_runs_its_start_script_without_npm(env):
     assert 'ExecStart=/bin/sh -c "exec node server.js"' in unit  # no npm process kept around the app
     assert '"PATH=/srv/mas/apps/web/current/node_modules/.bin:' in unit
     assert 'Environment="MALLOC_ARENA_MAX=2"' in unit
+
+
+def test_redeploy_targets_skip_services_and_busy_apps(env):
+    db, deployer = env["db"], env["deployer"]
+    db.create_app("blog", name="blog", repo="acme/blog", branch="main", type="static")
+    db.create_app("mc", name="mc", repo="", branch="", type="unknown", mode="stack")
+    assert deployer.redeploy_targets() == ["blog", "web"]
+    db.create_release("blog", "manual", "test")  # queued
+    assert deployer.redeploy_targets() == ["web"]

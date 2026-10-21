@@ -319,6 +319,13 @@ class Deployer:
         self._start_worker()
         return rid
 
+    def redeploy_targets(self) -> list[str]:
+        """Apps deployed from GitHub (managed or adopted) without a deployment already waiting or running.
+        Ready-made services are left out: redeploying them pulls new images and restarts them."""
+        busy = {"queued", "building"}
+        return [a["id"] for a in self.db.list_apps() if a["mode"] in ("managed", "adopted")
+                and not any(r["status"] in busy for r in self.db.list_releases(a["id"], 5))]
+
     def _start_worker(self) -> None:
         if self._thread is None or not self._thread.is_alive():
             self._thread = threading.Thread(target=self._worker, name="mas-deploy", daemon=True)

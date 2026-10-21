@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_cms, api_deploy, api_dns, api_stacks, api_supabase, auth
+from mas import __version__, api_cms, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.deploy import Deployer
@@ -386,6 +386,12 @@ def create_app(
         svc = find_service(service_id)
         sources = await asyncio.to_thread(get_logs, host, svc, lines)
         return {"sources": [s.as_dict() for s in sources]}
+
+    @app.get("/api/services/{service_id}/runtime")
+    async def service_runtime(service_id: str, _: SessionInfo = Depends(current_session)) -> dict:
+        """Memory, CPU, uptime, restarts, listening ports and links, read now."""
+        svc = find_service(service_id)
+        return await asyncio.to_thread(runtime.service_runtime, host, config, db, svc)
 
     @app.post("/api/services/{service_id}/actions/{action}")
     async def service_action(service_id: str, action: str, s: SessionInfo = Depends(current_session)) -> dict:

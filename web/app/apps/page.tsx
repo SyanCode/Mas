@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
-import { Badge, EmptyState, ErrorText, Monogram, PageHeader, ReleaseBadge, StatusDot } from "@/components/ui";
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorText, Monogram, Notice, PageHeader, ReleaseBadge, StatusDot } from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type GitHubStatus } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -66,6 +66,20 @@ function Apps() {
   const [apps, setApps] = useState<App[] | null>(null);
   const [github, setGithub] = useState<GitHubStatus | null>(null);
   const [error, setError] = useState("");
+  const [confirmAll, setConfirmAll] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  async function deployAll() {
+    setConfirmAll(false);
+    setError("");
+    try {
+      const r = await api<{ queued: { app_id: string }[] }>("/apps/deploy-all", { method: "POST" });
+      setNotice(r.queued.length ? t("{n} deployment(s) queued: they run one after the other.", { n: r.queued.length }) : t("Nothing to deploy: every app is already deploying."));
+      api<App[]>("/apps").then(setApps).catch(() => {});
+    } catch (e) {
+      setError((e as ApiError).detail);
+    }
+  }
 
   useEffect(() => {
     const load = () => api<App[]>("/apps").then(setApps).catch((e: ApiError) => setError(e.detail));
@@ -80,6 +94,10 @@ function Apps() {
       <span className="text-base leading-none">+</span> {t("New app")}
     </Link>
   ) : null;
+  const fromGithub = (apps ?? []).filter((a) => a.mode !== "stack").length;
+  const deployAllButton = fromGithub > 1 ? (
+    <Button onClick={() => setConfirmAll(true)} title={t("Deploy the latest commit of every app from GitHub")}>{t("Redeploy all")}</Button>
+  ) : null;
   const serviceButton = (
     <Link href="/apps/services/" className="glass inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-medium transition hover:bg-white/[0.08]">
       {t("Deploy a service")}
@@ -88,8 +106,17 @@ function Apps() {
 
   return (
     <>
-      <PageHeader eyebrow={t("Deployments")} title={t("Apps")} subtitle={t("Push to GitHub, Mas builds and ships it. Atomic releases, instant rollback.")} actions={<div className="flex gap-2">{serviceButton}{newButton}</div>} />
+      <PageHeader eyebrow={t("Deployments")} title={t("Apps")} subtitle={t("Push to GitHub, Mas builds and ships it. Atomic releases, instant rollback.")} actions={<div className="flex gap-2">{deployAllButton}{serviceButton}{newButton}</div>} />
       <ErrorText>{error}</ErrorText>
+      <Notice>{notice}</Notice>
+      <ConfirmDialog
+        open={confirmAll}
+        title={t("Redeploy all apps?")}
+        message={t("The latest commit of each of the {n} apps from GitHub is built and deployed, one after the other. Ready-made services are not touched.", { n: fromGithub })}
+        confirmLabel={t("Redeploy all")}
+        onConfirm={deployAll}
+        onCancel={() => setConfirmAll(false)}
+      />
       {github && !github.configured && (
         <EmptyState title={t("Connect GitHub to start deploying")} action={<Link href="/settings/" className="text-sm font-medium text-indigo-500 hover:underline">{t("Settings")} → GitHub →</Link>}>
           {t("One click creates a private GitHub App on your account; then pick a repository and Mas deploys every push.")}

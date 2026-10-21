@@ -457,6 +457,15 @@ def register(
         rid = deployer.enqueue(app_id, "manual", s.username)
         return app_payload(db.get_app(app_id), db) | {"release_id": rid}
 
+    @app.post("/api/apps/deploy-all")
+    def deploy_all(s=Depends(current_session)) -> dict:
+        """Queue a deployment of every app from GitHub; they run one after the other."""
+        queued = [{"app_id": a, "release_id": deployer.enqueue(a, "manual", s.username)}
+                  for a in deployer.redeploy_targets()]
+        db.audit(s.username, "deploy-all", True,
+                 detail=", ".join(q["app_id"] for q in queued) or "nothing to deploy")
+        return {"queued": queued}
+
     @app.post("/api/apps/{app_id}/deploy")
     def deploy_now(app_id: str, s=Depends(current_session)) -> dict:
         find_app(app_id)

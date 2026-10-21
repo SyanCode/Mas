@@ -15,11 +15,12 @@ from mas.collectors.processes import load_users
 from mas.host import Host
 from mas.models import Manager, Service
 
-ACTIONS = ("start", "stop", "restart", "reload")
-CONFIRM_ACTIONS = {"stop", "restart"}  # the UI and CLI ask before these
+ACTIONS = ("start", "stop", "restart", "reload", "enable", "disable")
+CONFIRM_ACTIONS = {"stop", "restart", "disable"}  # the UI and CLI ask before these
 
 ALLOWED: dict[Manager, tuple[str, ...]] = {
-    Manager.SYSTEMD: ("start", "stop", "restart", "reload"),
+    # enable / disable: started at boot or not (systemctl enable|disable, the service keeps running).
+    Manager.SYSTEMD: ("start", "stop", "restart", "reload", "enable", "disable"),
     Manager.PM2: ("start", "stop", "restart", "reload"),
     Manager.DOCKER: ("start", "stop", "restart"),
     Manager.PHP_FPM: ("reload", "restart"),
