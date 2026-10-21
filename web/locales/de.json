@@ -804,5 +804,10 @@
   "Silent for {n} s: after 2 minutes its copies move to another server.": "Seit {n} s still: nach 2 Minuten wandern seine Kopien auf einen anderen Server.",
   "If a server stays silent for 2 minutes, its copy is rebuilt on another available server.": "Bleibt ein Server 2 Minuten still, wird seine Kopie auf einem anderen verfügbaren Server neu gebaut.",
   "server down": "Server ausgefallen",
-  "cluster": "Cluster"
+  "cluster": "Cluster",
+  "It has the state of this server: if this one is lost, run on it: sudo mas agent promote": "Er hat den Zustand dieses Servers: fällt dieser aus, dort ausführen: sudo mas agent promote",
+  "can take over": "kann übernehmen",
+  "If this server is lost": "Wenn dieser Server ausfällt",
+  "This server sends its state (apps, servers, GitHub App, accounts) to every server of the cluster, encrypted. On one of them, run:": "Dieser Server schickt seinen Zustand (Apps, Server, GitHub-App, Konten) verschlüsselt an jeden Server des Clusters. Auf einem davon ausführen:",
+  "It becomes the primary: the copies it runs become the apps, the others are built there, and it drives the remaining servers. Then point the domains to it. If this server comes back, the others refuse its orders.": "Er wird zum Hauptserver: seine Kopien werden zu den Apps, die übrigen werden dort gebaut, und er steuert die restlichen Server. Dann die Domains auf ihn zeigen lassen. Kommt dieser Server zurück, lehnen die anderen seine Befehle ab."
 }

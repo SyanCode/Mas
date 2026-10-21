@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -66,6 +67,10 @@ def register(app: FastAPI, *, db: Database, current_session: Callable | None, cl
         found = cluster.check_token(auth[7:].strip() if auth.lower().startswith("bearer ") else None)
         if found is None:
             raise HTTPException(401, "invalid cluster token")
+        try:
+            cluster.accept_primary(request.headers.get("x-mas-primary"))
+        except ClusterError as exc:
+            raise HTTPException(409, str(exc)) from None
         return found
 
     if current_session is not None:  # an agent has no dashboard: only the calls of the primary server
@@ -125,6 +130,21 @@ def register(app: FastAPI, *, db: Database, current_session: Callable | None, cl
     @app.get("/api/cluster/self")
     def self_info(_=Depends(peer)) -> dict:
         return cluster.info()
+
+    @app.put("/api/cluster/state")
+    async def receive_state(request: Request, _=Depends(peer)) -> dict:
+        """What this server needs to become the primary if the current one is lost (kept encrypted)."""
+        body = await request.body()
+        if len(body) > 5 * 1024 * 1024:
+            raise HTTPException(413, "state too large")
+        try:
+            state = json.loads(body)
+        except ValueError:
+            raise HTTPException(400, "invalid state") from None
+        if not isinstance(state, dict) or not isinstance(state.get("apps"), list):
+            raise HTTPException(400, "invalid state")
+        await asyncio.to_thread(cluster.store_state, state)
+        return {"ok": True}
 
     @app.put("/api/cluster/copies/{app_id}")
     def put_copy(app_id: str, body: CopyBody, who=Depends(peer)) -> dict:

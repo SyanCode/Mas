@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -214,6 +215,12 @@ def create_app(
                       "WHERE status IN ('queued', 'building')")
             c.execute("UPDATE supabase SET status = 'failed', error = 'interrupted (Mas restarted)' "
                       "WHERE status = 'installing'")
+        promoted = db.get_setting("cluster_promoted_deploys")
+        if promoted:  # this server just became the primary: build its apps (nginx, certificates)
+            db.set_setting("cluster_promoted_deploys", None)
+            for app_id in json.loads(promoted):
+                if db.get_app(app_id):
+                    deployer.enqueue(app_id, "failover", "cluster")
         if background:
             try:  # an update may change how the Supabase site is rendered (Studio access)
                 await asyncio.to_thread(supabase.refresh_vhost)

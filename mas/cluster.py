@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -30,15 +31,23 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from cryptography.fernet import InvalidToken
+
 from mas import __version__
-from mas.config import Config
+from mas.config import Config, save_section
 from mas.db import Database
 from mas.deploy import PROXY_TYPES, DeployError, Deployer, ReleaseLog, allocate_port, app_instances
 from mas.envcrypt import decrypt_env, encrypt_env, load_fernet
 from mas.host import Host
 from mas.models import ServiceType
 
+log = logging.getLogger(__name__)
+
 TOKEN_PREFIX = "masc_"
+EPOCH_SETTING = "cluster_epoch"
+PRIMARY_SETTING = "cluster_primary"
+STATE_SETTING = "cluster_state"
+PROMOTED_SETTING = "cluster_promoted_deploys"
 ADDRESS_SETTING = "cluster_address"
 NAME_SETTING = "cluster_name"
 # Networks the copies may listen on: private ranges, CGNAT (Tailscale), IPv6 ULA.
@@ -114,6 +123,8 @@ class Cluster:
         deployer.spread = self.spread
         self._tails: dict[str, dict] = {}
         self.down_since: dict[int, float] = {}  # server id → monotonic time it stopped answering
+        self._pushed: dict[int, str] = {}  # server id → digest of the last state it received
+        self.state_sent: dict[int, float] = {}  # server id → when it last received the state
         self._traffic_cache: tuple[float, dict] | None = None
 
     # -- this server -------------------------------------------------------------
@@ -174,7 +185,8 @@ class Cluster:
 
     def _call(self, server: dict, method: str, path: str, body: dict | None = None, timeout: float = 15) -> Any:
         token = decrypt_env(self._fernet(), server["token"]).get("token", "")
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json",
+                   "X-Mas-Primary": f"{self.epoch()}:{self.name()}"}
         data = None
         if body is not None:
             headers["Content-Type"] = "application/json"
@@ -227,7 +239,8 @@ class Cluster:
             down = self.down_since.get(server["id"])
             out = {"id": server["id"], "name": server["name"], "url": server["url"], "address": server["address"],
                    "info": None, "error": None, "latency_ms": None,
-                   "down_for_s": round(time.monotonic() - down) if down is not None else None}
+                   "down_for_s": round(time.monotonic() - down) if down is not None else None,
+                   "state_sent_at": self.state_sent.get(server["id"])}
             started = time.monotonic()
             try:
                 out["info"] = self._call(server, "GET", "/api/cluster/self", timeout=6)
@@ -242,6 +255,155 @@ class Cluster:
         with ThreadPoolExecutor(max_workers=8) as pool:
             peers = list(pool.map(probe, servers))
         return {"self": self.info(), "servers": peers, "tokens": self.db.list_cluster_tokens()}
+
+    # -- taking over when the primary is gone (promotion) --------------------------------
+    # The primary sends every server its state: apps and their settings, the servers and their join tokens,
+    # its GitHub App and the dashboard accounts. A server keeps it encrypted with its own key, and
+    # `mas agent promote` makes it the primary from that state. The epoch (+1 at each promotion) travels
+    # with every call: a server refuses an older primary, so the former one cannot take back control.
+
+    def epoch(self) -> int:
+        try:
+            return int(self.db.get_setting(EPOCH_SETTING) or 1)
+        except ValueError:
+            return 1
+
+    def accept_primary(self, header: str | None) -> None:
+        """On a driven server: refuse calls from a primary older than the latest one seen."""
+        if not header or ":" not in header:
+            return
+        epoch_text, _, name = header.partition(":")
+        try:
+            epoch = int(epoch_text)
+        except ValueError:
+            return
+        seen = self.epoch()
+        if epoch < seen:
+            raise ClusterError(f"{name} is not the primary anymore (a newer primary took over): "
+                               "remove the servers from its Servers page or promote it again")
+        if epoch > seen:
+            self.db.set_setting(EPOCH_SETTING, str(epoch))
+        self.db.set_setting(PRIMARY_SETTING, name[:60])
+
+    def state(self) -> dict:
+        fernet = self._fernet()
+        servers = self.db.list_cluster_servers()
+        urls = {s["id"]: s["url"] for s in servers}
+        apps = []
+        for a in self.db.list_apps():
+            if a["mode"] != "managed" or a.get("replica_of"):
+                continue  # adopted folders and ready-made services live on this server only
+            apps.append({k: a.get(k) for k in ("id", "name", "repo", "branch", "type", "domain", "root_dir",
+                                               "build_command", "start_command", "auto_deploy")}
+                        | {"aliases": json.loads(a.get("aliases") or "[]"), "env": decrypt_env(fernet, a["env"]),
+                           "cluster": [urls[i] for i in json.loads(a.get("cluster") or "[]") if i in urls]})
+        github = None
+        pem = self.host.read_text(self.config.github_private_key_path) if self.config.github_app_id else None
+        if pem:
+            github = {"app_id": self.config.github_app_id, "app_slug": self.config.github_app_slug,
+                      "webhook_secret": self.config.github_webhook_secret, "private_key": pem}
+        return {"epoch": self.epoch(), "primary": {"name": self.name(), "address": self.address()},
+                "servers": [{"name": s["name"], "url": s["url"], "address": s["address"],
+                             "token": decrypt_env(fernet, s["token"]).get("token")} for s in servers],
+                "apps": apps, "github": github,
+                "users": [{"username": u["username"], "password_hash": u["password_hash"],
+                           "totp_secret": u["totp_secret"], "role": u["role"]} for u in self.db.list_users()],
+                "letsencrypt_email": self.config.letsencrypt_email}
+
+    def _push_state(self, servers: dict[int, dict]) -> None:
+        state = self.state()
+        digest = hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
+        for server in servers.values():
+            if self._pushed.get(server["id"]) == digest:
+                continue
+            try:
+                self._call(server, "PUT", "/api/cluster/state", state, timeout=20)
+                self._pushed[server["id"]] = digest
+                self.state_sent[server["id"]] = time.time()
+            except ClusterError as exc:
+                log.warning("cluster state not sent: %s", exc)
+
+    def store_state(self, state: dict) -> None:
+        """On a driven server: keep the state of the primary, encrypted, for a promotion."""
+        self.db.set_setting(STATE_SETTING, self._fernet().encrypt(json.dumps(state).encode()).decode())
+
+    def stored_state(self) -> dict | None:
+        raw = self.db.get_setting(STATE_SETTING)
+        if not raw:
+            return None
+        try:
+            return json.loads(self._fernet().decrypt(raw.encode()))
+        except (InvalidToken, ValueError):
+            return None
+
+    def promote(self, force: bool = False, probe: Callable[[str], bool] | None = None) -> dict:
+        """Make this server the primary, from the last state the former primary sent. Returns what was
+        done and what is left to the person (DNS, dashboard)."""
+        state = self.stored_state()
+        if state is None:
+            raise ClusterError("no state received from a primary yet: this server cannot take over")
+        old = state.get("primary") or {}
+        if not force and old.get("address") and (probe or _answers)(old["address"]):
+            raise ClusterError(f"{old.get('name')} ({old['address']}) still answers: promote with --force only if "
+                               "it is really out of service")
+        fernet = self._fernet()
+        notes: list[str] = []
+        # 1. accounts of the dashboard, GitHub App
+        for u in state.get("users") or []:
+            if not self.db.get_user(u["username"]):
+                uid = self.db.create_user(u["username"], u["password_hash"], u.get("role") or "admin")
+                if u.get("totp_secret"):
+                    self.db.update_user(uid, totp_secret=u["totp_secret"])
+        gh = state.get("github")
+        if gh:
+            self.host.write_text(self.config.github_private_key_path, gh["private_key"], mode=0o600)
+            save_section(self.host, "github", {"app_id": gh["app_id"], "app_slug": gh.get("app_slug"),
+                                               "private_key_path": self.config.github_private_key_path,
+                                               "webhook_secret": gh.get("webhook_secret")})
+        else:
+            notes.append("no GitHub App in the state: connect one in Settings → GitHub")
+        if state.get("letsencrypt_email"):
+            save_section(self.host, "deploy", {"letsencrypt_email": state["letsencrypt_email"]})
+        # 2. the other servers (not this one, not the former primary)
+        mine = self.address()
+        for s in state.get("servers") or []:
+            if s.get("address") in (mine, old.get("address")) or not s.get("token"):
+                continue
+            if not any(x["url"] == s["url"] for x in self.db.list_cluster_servers()):
+                self.db.add_cluster_server(s["name"], s["url"], encrypt_env(fernet, {"token": s["token"]}),
+                                           s.get("address"))
+        ids = {s["url"]: s["id"] for s in self.db.list_cluster_servers()}
+        # 3. the apps: a copy running here becomes the app itself; the others are created
+        deploy = []
+        for a in state.get("apps") or []:
+            fields = {"name": a["name"], "repo": a["repo"], "branch": a["branch"], "type": a["type"],
+                      "domain": a.get("domain"), "root_dir": a.get("root_dir") or "",
+                      "build_command": a.get("build_command"), "start_command": a.get("start_command"),
+                      "auto_deploy": int(a.get("auto_deploy") or 0), "installation_id": None,
+                      "env": encrypt_env(fernet, a["env"]) if a.get("env") else None,
+                      "aliases": json.dumps(a["aliases"]) if a.get("aliases") else None,
+                      "cluster": json.dumps(sorted(ids[u] for u in a.get("cluster") or [] if u in ids)) or None,
+                      "replica_of": None, "bind": None, "cluster_backends": None}
+            if fields["cluster"] == "[]":
+                fields["cluster"] = None
+            existing = self.db.get_app(a["id"])
+            if existing and not existing.get("replica_of"):
+                notes.append(f"{a['id']}: an app of this server has the same id, kept as it is")
+                continue
+            if existing:
+                self.db.update_app(a["id"], **fields)
+            else:
+                port = allocate_port(self.host, self.config, self.db) if ServiceType(a["type"]) in PROXY_TYPES \
+                    else None
+                self.db.create_app(a["id"], mode="managed", port=port, **fields)
+            deploy.append(a["id"])
+        self.db.set_setting(EPOCH_SETTING, str(int(state.get("epoch") or 1) + 1))
+        self.db.set_setting(PROMOTED_SETTING, json.dumps(deploy))  # deployed when mas restarts as the primary
+        save_section(self.host, "cluster", {"role": "primary", "address": mine})
+        domains = sorted({d for a in state.get("apps") or [] for d in [a.get("domain"), *(a.get("aliases") or [])]
+                          if d})
+        return {"former_primary": old.get("name"), "apps": deploy, "domains": domains, "notes": notes,
+                "epoch": self.epoch()}
 
     # -- keeping the copies up (auto-fill) ----------------------------------------------
 
@@ -269,6 +431,7 @@ class Cluster:
                     if self.down_since.pop(server["id"], None) is not None:
                         self.db.audit("cluster", "server-back", True, detail=server["name"])
                     healthy[server["id"]] = info
+        self._push_state({sid: next(s for s in servers if s["id"] == sid) for sid in healthy})
         notes = []
         apps = self.db.list_apps()
         # a server that came back may still run a copy that was moved elsewhere meanwhile: remove it
@@ -496,6 +659,17 @@ class Cluster:
             return self.deployer.remove_app(app_id, purge_files=True)
         except DeployError as exc:
             raise ClusterError(str(exc)) from None
+
+
+def _answers(address: str) -> bool:
+    """Does a Mas still listen on that address (its dashboard port on the private network)?"""
+    for port in (7070, 443, 80):
+        try:
+            with socket.create_connection((address, port), timeout=3):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 class _GivenSource:

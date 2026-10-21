@@ -19,7 +19,7 @@ interface ServerInfo {
   uptime_s: number;
   apps: { id: string; name: string; type: string; domain: string | null; replica_of: string | null; status: string | null }[];
 }
-interface Peer { id: number; name: string; url: string; address: string | null; info: ServerInfo | null; error: string | null; latency_ms: number | null; down_for_s?: number | null }
+interface Peer { id: number; name: string; url: string; address: string | null; info: ServerInfo | null; error: string | null; latency_ms: number | null; down_for_s?: number | null; state_sent_at?: number | null }
 interface Overview { self: ServerInfo; servers: Peer[]; tokens: { id: number; name: string; created_at: string; last_used: string | null }[] }
 
 interface Traffic {
@@ -296,6 +296,7 @@ function Cluster() {
                 <span className="flex items-center gap-2">
                   {p.error ? <Badge tone="red">{t("unreachable")}</Badge> : <Badge tone="emerald">{p.latency_ms} ms</Badge>}
                   {p.info?.role === "agent" && <Badge tone="violet">{t("agent")}</Badge>}
+                  {p.state_sent_at && <span title={t("It has the state of this server: if this one is lost, run on it: sudo mas agent promote")}><Badge tone="sky">{t("can take over")}</Badge></span>}
                   {p.address && <Badge>{p.address}</Badge>}
                   <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setLeaving(p)}>{t("Remove")}</Button>
                 </span>
@@ -314,6 +315,13 @@ function Cluster() {
             <AddServer onAdded={load} />
             <JoinTokens tokens={data.tokens} onChange={load} />
             <p className="text-xs text-zinc-500">{t("Load balancing applies to Node.js, Next.js and Python apps: open an app, then its Load balancing card.")} <Link href="/apps/" className="text-indigo-500 hover:underline">{t("Apps")} →</Link></p>
+            <Card title={t("If this server is lost")}>
+              <div className="space-y-2 text-sm text-zinc-500">
+                <p>{t("This server sends its state (apps, servers, GitHub App, accounts) to every server of the cluster, encrypted. On one of them, run:")}</p>
+                <CopyCode text="sudo mas agent promote" />
+                <p>{t("It becomes the primary: the copies it runs become the apps, the others are built there, and it drives the remaining servers. Then point the domains to it. If this server comes back, the others refuse its orders.")}</p>
+              </div>
+            </Card>
           </div>
         </div>
       )}

@@ -821,6 +821,36 @@ def agent_token(ctx: typer.Context) -> None:
     console.print(cluster.create_token("primary"))
 
 
+@agent_app.command("promote")
+def agent_promote(
+    ctx: typer.Context,
+    force: Annotated[bool, typer.Option("--force", help="Even if the former primary still answers.")] = False,
+    restart: Annotated[bool, typer.Option(help="Restart mas as the primary.")] = True,
+) -> None:
+    """The primary is out of service: make this server the primary, from the state it last sent."""
+    from mas.cluster import Cluster, ClusterError
+    from mas.deploy import Deployer
+
+    env: Env = ctx.obj
+    cluster = Cluster(env.host, env.config, env.db, Deployer(env.host, env.config, env.db, lambda: None))
+    try:
+        done = cluster.promote(force=force)
+    except ClusterError as exc:
+        fail(str(exc))
+    console.print(f"[green]✓[/] {cluster.name()} is the primary now (epoch {done['epoch']}, "
+                  f"replacing {done['former_primary'] or 'the former primary'})")
+    console.print(f"  apps rebuilt here at restart: {', '.join(done['apps']) or 'none'}")
+    for note in done["notes"]:
+        console.print(f"  [yellow]![/] {note}")
+    if done["domains"]:
+        console.print("\n[bold]Point these domains to this server[/] (DNS A/AAAA records), then the certificates follow:")
+        console.print("  " + ", ".join(done["domains"]))
+    console.print("\nDashboard: through nginx as before (sudo bash deploy/install.sh --domain <dashboard domain>), "
+                  "or right now: ssh -L 7070:127.0.0.1:7070 <you>@<this server>, then http://localhost:7070")
+    if restart:
+        env.host.run(["systemctl", "restart", "mas"], timeout=60)
+
+
 @agent_app.command("leave")
 def agent_leave(ctx: typer.Context, restart: Annotated[bool, typer.Option(help="Restart mas to apply.")] = True) -> None:
     """Back to a normal Mas with its dashboard (the copies it runs keep running until removed)."""

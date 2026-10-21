@@ -228,3 +228,46 @@ def test_a_silent_server_gets_its_copies_moved(tmp_path):
     notes = cluster.watch(now=2000)
     assert any("old copy removed from mas-b" in n for n in notes)
     assert peers["mas-b"].app.state.cluster.db.get_app("web") is None
+
+
+def test_a_server_takes_over_when_the_primary_is_gone(pair):
+    a, b, ah, bh = pair["a"], pair["b"], pair["ah"], pair["bh"]
+    a_app, b_app, a_db, b_db, a_host = pair["a_app"], pair["b_app"], pair["a_db"], pair["b_db"], pair["a_host"]
+    b.put("/api/cluster/self", json={"name": "b", "address": "10.0.0.2"}, headers=bh)
+    a.put("/api/cluster/self", json={"name": "a", "address": "10.0.0.1"}, headers=ah)
+    token = b.post("/api/cluster/tokens", json={"name": "a"}, headers=bh).json()["token"]
+    sid = a.post("/api/cluster/servers", json={"url": "https://mas-b.example.com", "token": token},
+                 headers=ah).json()["id"]
+    fernet = load_fernet(a_host, "/etc/mas/secret.key")
+    a_db.create_app("web", name="web", repo="acme/web", branch="main", installation_id=7, domain="web.example.com",
+                    type="nextjs", port=7100, mode="managed", aliases='["www.web.example.com"]',
+                    env=encrypt_env(fernet, {"API_KEY": "s3cr3t"}), cluster=json.dumps([sid]))
+    a_db.create_app("blog", name="blog", repo="acme/blog", branch="main", installation_id=7, domain="blog.example.com",
+                    type="static", mode="managed")
+    a_app.state.cluster.config.github_app_id = 42
+    a_host.write_text(a_app.state.cluster.config.github_private_key_path, "-----BEGIN PRIVATE KEY-----\nx\n")
+    # B runs a copy of web
+    b_db.create_app("web", name="web", repo="acme/web", branch="main", type="nextjs", port=7300, mode="managed",
+                    replica_of="a", bind="10.0.0.2")
+
+    a_app.state.cluster.watch()  # sends its state
+    state = b_app.state.cluster.stored_state()
+    assert state["primary"]["name"] == "a" and {x["id"] for x in state["apps"]} == {"web", "blog"}
+    assert "s3cr3t" not in (b_db.get_setting("cluster_state") or "")  # encrypted on B
+
+    with pytest.raises(ClusterError):  # A still answers: refused without --force
+        b_app.state.cluster.promote(probe=lambda address: True)
+    done = b_app.state.cluster.promote(probe=lambda address: False)
+    assert done["epoch"] == 2 and set(done["apps"]) == {"web", "blog"}
+    assert done["domains"] == ["blog.example.com", "web.example.com", "www.web.example.com"]
+    web = b_db.get_app("web")
+    assert web["replica_of"] is None and web["bind"] is None and web["domain"] == "web.example.com"
+    assert web["port"] == 7300 and b_db.get_app("blog")["type"] == "static"  # the copy became the app
+    assert b_db.get_user("admin") is not None
+    assert "app_id = 42" in (pair["b_app"].state.cluster.host.read_text("/etc/mas/config.toml") or "")
+    assert 'role = "primary"' in pair["b_app"].state.cluster.host.read_text("/etc/mas/config.toml")
+    assert set(json.loads(b_db.get_setting("cluster_promoted_deploys"))) == {"web", "blog"}
+
+    # the former primary comes back: B refuses its calls
+    r = b.get("/api/cluster/self", headers={"Authorization": f"Bearer {token}", "X-Mas-Primary": "1:a"})
+    assert r.status_code == 409 and "not the primary anymore" in r.json()["detail"]
