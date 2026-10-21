@@ -102,25 +102,38 @@ def bind_loopback(compose: str) -> str:
     return _PORT_RE.sub(r"\g<1>127.0.0.1:\g<2>", compose)
 
 
-# Optional parts of the stack: compose services, rough RAM (MB), enabled by default.
+# Optional parts of the stack: compose services, rough RAM (MB), enabled by default. Labels say
+# what the part lets an app do; the Supabase name follows for those who know it.
 COMPONENTS: dict[str, dict] = {
     "studio": {"services": {"studio", "meta"}, "ram": 250, "default": True,
-               "label": "Studio", "help": "admin dashboard (private, SSH tunnel)"},
+               "label": "Admin dashboard", "help": "browse tables, users and files in a web page (Studio, private)"},
     "realtime": {"services": {"realtime"}, "ram": 150, "default": True,
-                 "label": "Realtime", "help": "live subscriptions over websockets"},
+                 "label": "Live updates", "help": "pages update by themselves when data changes: chat, notifications "
+                                                  "(Realtime)"},
     "storage": {"services": {"storage"}, "ram": 80, "default": True,
-                "label": "Storage", "help": "file uploads and buckets"},
+                "label": "File uploads", "help": "photos and documents sent by your users (Storage)"},
     "images": {"services": {"imgproxy"}, "ram": 60, "default": False,
-               "label": "Image transformations", "help": "resize images on the fly (imgproxy)"},
+               "label": "Image resizing", "help": "thumbnails made on the fly from uploaded photos (imgproxy)"},
     "functions": {"services": {"functions"}, "ram": 150, "default": False,
-                  "label": "Edge Functions", "help": "Deno functions runtime"},
+                  "label": "Server functions", "help": "small pieces of server code run by Supabase (Edge Functions)"},
     "logs": {"services": {"analytics", "vector"}, "ram": 600, "default": False,
-             "label": "Logs & analytics", "help": "Logflare + Vector, the heaviest part"},
+             "label": "Logs and statistics", "help": "request history in the admin dashboard, the heaviest part "
+                                                     "(Logflare)"},
     "pooler": {"services": {"supavisor"}, "ram": 150, "default": False,
-               "label": "Connection pooler", "help": "Supavisor; without it Postgres is published directly on 127.0.0.1"},
+               "label": "Many connections", "help": "for apps opening lots of database connections, such as "
+                                                    "serverless functions (Supavisor)"},
 }
 CORE_RAM = 400  # db, kong, auth, rest
 DEFAULT_COMPONENTS = [name for name, c in COMPONENTS.items() if c["default"]]
+# Ready-made choices, so nobody has to know the parts of the stack.
+PRESETS: dict[str, dict] = {
+    "essential": {"label": "Essential", "components": [],
+                  "help": "a database, user accounts and the API: enough for most sites and apps"},
+    "recommended": {"label": "Recommended", "components": DEFAULT_COMPONENTS,
+                    "help": "adds file uploads, live updates and the admin dashboard"},
+    "complete": {"label": "Complete", "components": list(COMPONENTS),
+                 "help": "everything Supabase offers, including logs and server functions"},
+}
 
 # Low-memory tuning of the services that stay.
 NODE_HEAP = {"studio": 256, "storage": 192, "meta": 128}
@@ -251,6 +264,7 @@ class SupabaseManager:
         self.dir = f"{config.supabase_dir.rstrip('/')}/{INSTANCE_ID}"
         self.data_dir = Path(db.path).parent
         self._lock = threading.Lock()
+        self.on_installed: list[Callable[[ReleaseLog], None]] = []
 
     # -- state -----------------------------------------------------------
 
@@ -354,6 +368,12 @@ class SupabaseManager:
             with self._lock:
                 self._install(rlog)
             rlog.step("Supabase is running")
+            for hook in self.on_installed:  # apps waiting to be connected
+                try:
+                    hook(rlog)
+                except Exception as exc:  # noqa: BLE001 - the instance itself is fine
+                    log.exception("after-install hook failed")
+                    rlog.line(f"warning: {exc}")
             return True
         except (SupabaseError, DeployError) as exc:
             rlog.line(f"error: {exc}")
@@ -508,16 +528,40 @@ class SupabaseManager:
 
     # -- backups ---------------------------------------------------------------
 
-    def run_sql(self, sql: str) -> str:
-        """Run SQL as postgres in the database container (CMS tables)."""
+    def run_sql(self, sql: str, rows: bool = False) -> str:
+        """Run SQL as postgres in the database container; ``rows``: only the rows of the last result."""
         inst = self.get()
         if not inst or inst["status"] != "running":
             raise SupabaseError("Supabase is not running")
         res = self.host.run(["docker", "exec", DB_CONTAINER, "psql", "-U", "postgres", "-d", "postgres",
-                             "-v", "ON_ERROR_STOP=1", "-c", sql], timeout=60)
+                             "-v", "ON_ERROR_STOP=1", *(["-qAt"] if rows else []), "-c", sql], timeout=60)
         if res is None or not res.ok:
             raise SupabaseError(f"psql failed: {(res.stderr if res else 'docker missing').strip()[-500:]}")
         return res.stdout
+
+    def run_sql_file(self, sql: str, single_transaction: bool = True) -> str:
+        """Run a whole SQL script (migrations): copied into the container, one transaction."""
+        inst = self.get()
+        if not inst or inst["status"] != "running":
+            raise SupabaseError("Supabase is not running")
+        tmp_dir = self.data_dir / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        local = tmp_dir / f"sql-{secrets.token_hex(6)}.sql"
+        inside = f"/tmp/mas-{local.name}"
+        local.write_text(sql, encoding="utf-8")
+        try:
+            res = self.host.run(["docker", "cp", str(local), f"{DB_CONTAINER}:{inside}"], timeout=60)
+            if res is None or not res.ok:
+                raise SupabaseError(f"docker cp failed: {(res.stderr if res else 'docker missing').strip()[-300:]}")
+            argv = ["docker", "exec", DB_CONTAINER, "psql", "-U", "postgres", "-d", "postgres", "-v",
+                    "ON_ERROR_STOP=1", *(["--single-transaction"] if single_transaction else []), "-f", inside]
+            res = self.host.run(argv, timeout=600)
+            self.host.run(["docker", "exec", DB_CONTAINER, "rm", "-f", inside], timeout=30)
+            if res is None or not res.ok:
+                raise SupabaseError((res.stderr if res else "docker missing").strip()[-800:] or "psql failed")
+            return res.stdout
+        finally:
+            local.unlink(missing_ok=True)
 
     def backup(self) -> Path:
         inst = self.get()

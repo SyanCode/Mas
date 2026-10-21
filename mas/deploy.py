@@ -287,6 +287,8 @@ class Deployer:
     ) -> None:
         self.host, self.config, self.db = host, config, db
         self.resolver = resolver
+        # Run after the clone, before the build, with (app, release dir, log): database migrations.
+        self.before_build: list[Callable[[dict, str, "ReleaseLog"], None]] = []
         self.github = github
         self.find_service = find_service
         self.health_check = health_check
@@ -754,6 +756,8 @@ class Deployer:
         self._system(rlog, ["chmod", "755", self._r(rel)])
         self._system(rlog, ["chown", "-R", f"{user}:{user}", self._r(rel)])
 
+        for hook in self.before_build:
+            hook(app, rel, rlog)
         rlog.step("Building")
         self._build(app, app_type, rel, user, {**env_vars, "HOME": self._r(paths.home)}, rlog)
         export = self._static_export(app, app_type, rel)

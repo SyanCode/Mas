@@ -19,6 +19,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from mas.appdb import AppDbError
 from mas.config import Config, save_section
 from mas.db import Database
 from mas.deploy import (
@@ -60,6 +61,8 @@ class CreateApp(BaseModel):
     start_command: str | None = Field(default=None, max_length=1000)
     root_dir: str = Field(default="", max_length=200)
     auto_deploy: bool = True
+    supabase: bool = False  # connect it to the Supabase of this server before its first build
+    supabase_seed: bool = False
 
 
 class AdoptService(BaseModel):
@@ -115,6 +118,7 @@ def register(
     deployer: Deployer,
     github_client: Callable[[], GitHubApp | None],
     reset_github: Callable[[], None],
+    appdb=None,
 ) -> None:
     manifest_states: dict[str, tuple[int, float]] = {}
     health_cache: dict[str, object] = {}
@@ -311,6 +315,15 @@ def register(
                       start_command=(body.start_command or "").strip() or None,
                       env=token, auto_deploy=int(body.auto_deploy))
         db.audit(s.username, "app-create", True, detail=f"{body.id}: {body.repo}@{body.branch} → {domain}")
+        if body.supabase and appdb is not None:
+            inst = appdb.supabase.get()
+            try:
+                if inst and inst["status"] == "running":
+                    await asyncio.to_thread(appdb.connect, body.id, s.username, seed=body.supabase_seed, deploy=False)
+                elif inst and inst["status"] == "installing":
+                    appdb.queue([body.id], seed=body.supabase_seed)
+            except AppDbError as exc:  # the app is created anyway: connect it from its page
+                db.audit(s.username, "supabase-connect", False, service_id=body.id, detail=str(exc)[:300])
         rid = deployer.enqueue(body.id, "create", s.username)
         return app_payload(db.get_app(body.id), db) | {"release_id": rid}
 

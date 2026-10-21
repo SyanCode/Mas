@@ -22,19 +22,32 @@ interface Instance {
   estimated_ram_mb: number;
 }
 interface Component { id: string; label: string; help: string; ram_mb: number; default: boolean }
-interface Catalog { core_ram_mb: number; components: Component[] }
+interface Preset { id: string; label: string; help: string; components: string[]; ram_mb: number }
+interface Catalog { core_ram_mb: number; components: Component[]; presets: Preset[] }
 interface Stats { containers: { name: string; mb: number }[]; total_mb: number }
 
-// Component names and descriptions come from the API in English.
+// Component and preset names and descriptions come from the API in English.
 const COMPONENT_TEXTS = [
-  msg("Studio"), msg("admin dashboard (private, SSH tunnel)"),
-  msg("Realtime"), msg("live subscriptions over websockets"),
-  msg("Storage"), msg("file uploads and buckets"),
-  msg("Image transformations"), msg("resize images on the fly (imgproxy)"),
-  msg("Edge Functions"), msg("Deno functions runtime"),
-  msg("Logs & analytics"), msg("Logflare + Vector, the heaviest part"),
-  msg("Connection pooler"), msg("Supavisor; without it Postgres is published directly on 127.0.0.1"),
+  msg("Admin dashboard"), msg("browse tables, users and files in a web page (Studio, private)"),
+  msg("Live updates"), msg("pages update by themselves when data changes: chat, notifications (Realtime)"),
+  msg("File uploads"), msg("photos and documents sent by your users (Storage)"),
+  msg("Image resizing"), msg("thumbnails made on the fly from uploaded photos (imgproxy)"),
+  msg("Server functions"), msg("small pieces of server code run by Supabase (Edge Functions)"),
+  msg("Logs and statistics"), msg("request history in the admin dashboard, the heaviest part (Logflare)"),
+  msg("Many connections"), msg("for apps opening lots of database connections, such as serverless functions (Supavisor)"),
+  msg("Essential"), msg("a database, user accounts and the API: enough for most sites and apps"),
+  msg("Recommended"), msg("adds file uploads, live updates and the admin dashboard"),
+  msg("Complete"), msg("everything Supabase offers, including logs and server functions"),
 ];
+
+const sameSet = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
+
+/** The preset that fits the free memory best (Recommended when it fits). */
+function suggested(catalog: Catalog, freeMb: number | null): string[] {
+  const fits = catalog.presets.filter((p) => freeMb === null || p.ram_mb <= freeMb);
+  const pick = fits.find((p) => p.id === "recommended") ?? fits.find((p) => p.id === "essential") ?? catalog.presets[0];
+  return pick ? pick.components : [];
+}
 
 function ramOf(catalog: Catalog, value: string[]) {
   return catalog.core_ram_mb + catalog.components.filter((c) => value.includes(c.id)).reduce((n, c) => n + c.ram_mb, 0);
@@ -68,16 +81,46 @@ function InstallLog({ onEnd }: { onEnd: () => void }) {
   );
 }
 
+function PresetPicker({ catalog, value, onChange, freeMb }: { catalog: Catalog; value: string[]; onChange: (v: string[]) => void; freeMb: number | null }) {
+  const t = useT();
+  const preset = catalog.presets.find((p) => sameSet(p.components, value));
+  const [custom, setCustom] = useState(false);
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium">{t("What will your apps need?")}</div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {catalog.presets.map((p) => {
+          const active = preset?.id === p.id;
+          return (
+            <button key={p.id} type="button" onClick={() => onChange(p.components)}
+              className={`rounded-xl border p-3 text-left text-sm transition ${active ? "border-indigo-400 bg-indigo-500/10" : "border-zinc-200 hover:bg-zinc-100 dark:border-white/10 dark:hover:bg-white/5"}`}>
+              <span className="flex items-center justify-between gap-2">
+                <span className="font-medium">{t(p.label)}</span>
+                {freeMb !== null && p.ram_mb > freeMb && <Badge tone="amber">{t("tight")}</Badge>}
+              </span>
+              <span className="mt-1 block text-xs text-zinc-500">{t(p.help)}</span>
+              <span className="mono mt-2 block text-xs text-zinc-500">≈ {p.ram_mb} MB RAM</span>
+            </button>
+          );
+        })}
+      </div>
+      {preset && !custom
+        ? <button type="button" className="text-xs text-zinc-500 hover:underline" onClick={() => setCustom(true)}>{t("Customize")}</button>
+        : <ComponentPicker catalog={catalog} value={value} onChange={onChange} />}
+    </div>
+  );
+}
+
 function ComponentPicker({ catalog, value, onChange }: { catalog: Catalog; value: string[]; onChange: (v: string[]) => void }) {
   const t = useT();
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-sm">
-        <span className="font-medium">{t("Components")}</span>
+        <span className="font-medium">{t("Parts")}</span>
         <span className="mono text-xs text-zinc-500">≈ {ramOf(catalog, value)} MB RAM</span>
       </div>
       <div className="flex items-center justify-between rounded-lg border border-white/5 px-3 py-2 text-sm text-zinc-500">
-        <span>{t("Postgres, Auth, REST API, gateway")} <span className="text-xs">({t("always on")})</span></span>
+        <span>{t("Database, user accounts and API")} <span className="text-xs">({t("always on")})</span></span>
         <span className="mono text-xs">{catalog.core_ram_mb} MB</span>
       </div>
       {catalog.components.map((c) => (
@@ -122,14 +165,16 @@ function Databases() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [components, setComponents] = useState<string[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [connectApp, setConnectApp] = useState<string | null>(null); // ?connect=<app>: connected once installed
   const onDomain = useCallback((c: DomainChoice | null) => setChoice(c), []);
+  useEffect(() => { setConnectApp(new URLSearchParams(window.location.search).get("connect")); }, []);
 
   const load = useCallback(() => {
     api<{ instance: Instance | null; requirements: Requirements; catalog: Catalog }>("/supabase").then((r) => {
       setInst(r.instance);
       setReqs(r.requirements);
       setCatalog(r.catalog);
-      setComponents((prev) => r.instance ? r.instance.components : prev ?? r.catalog.components.filter((c) => c.default).map((c) => c.id));
+      setComponents((prev) => r.instance ? r.instance.components : prev ?? suggested(r.catalog, r.requirements.memory_available_mb));
       if (r.instance && r.instance.status !== "installing") api<Backup[]>("/supabase/backups").then(setBackups).catch(() => {});
       if (r.instance?.status === "running") api<Stats>("/supabase/stats").then(setStats).catch(() => {});
       else setStats(null);
@@ -159,7 +204,7 @@ function Databases() {
         if (choice.zone) await api("/dns/records", { method: "POST", body: { zone: choice.zone, subdomain: choice.subdomain, overwrite: choice.overwrite } });
         domain = choice.domain;
       }
-      await api("/supabase", { method: "POST", body: { domain, components } });
+      await api("/supabase", { method: "POST", body: { domain, components, connect: connectApp ? [connectApp] : [] } });
     });
   }
 
@@ -183,6 +228,7 @@ function Databases() {
           <div className="grid gap-8 lg:grid-cols-2">
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">{t("Deploy Supabase")}</h2>
+              {connectApp && <Notice>{t("{app} will be connected to it automatically once it is installed.", { app: connectApp })}</Notice>}
               <ul className="space-y-2 text-sm text-zinc-500">
                 <li>• {t("Official docker stack, every port bound to 127.0.0.1")}</li>
                 <li>• {t("Only the public API is published (HTTPS); Studio stays private (SSH tunnel)")}</li>
@@ -196,7 +242,7 @@ function Databases() {
                 )}
               </div>
               {!memOk && <p className="text-xs text-amber-500">{t("These components need about {n} MB of free memory; your other services may slow down.", { n: estimate })}</p>}
-              {catalog && components && <ComponentPicker catalog={catalog} value={components} onChange={setComponents} />}
+              {catalog && components && <PresetPicker catalog={catalog} value={components} onChange={setComponents} freeMb={reqs.memory_available_mb} />}
             </div>
             <div className="space-y-4">
               <label className="flex items-center gap-2 text-sm font-medium">
@@ -264,9 +310,9 @@ function Databases() {
             </Card>
 
             {catalog && components && (
-              <Card title={t("Components")} actions={<span className="mono text-xs text-zinc-500">≈ {inst.estimated_ram_mb} MB</span>}>
+              <Card title={t("Features")} actions={<span className="mono text-xs text-zinc-500">≈ {inst.estimated_ram_mb} MB</span>}>
                 <div className="space-y-4">
-                  <ComponentPicker catalog={catalog} value={components} onChange={setComponents} />
+                  <PresetPicker catalog={catalog} value={components} onChange={setComponents} freeMb={null} />
                   <div className="flex flex-wrap items-center gap-2">
                     <Button variant="primary" disabled={!changed || !!busy}
                       onClick={() => run("components", () => api("/supabase/components", { method: "PUT", body: { components } }), t("Components updated."))}>

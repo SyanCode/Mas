@@ -249,24 +249,58 @@ REST, Realtime, Storage, Studio) on the server:
   stored encrypted;
 - a `pg_dump` runs every day, the last 7 are kept in `/var/lib/mas/backups/supabase`.
 
-On an app, **Connect Supabase** adds `SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, the anon and
-service_role keys and `DATABASE_URL` to its (encrypted) environment and redeploys. One instance
-per server; the stack needs Docker with the compose plugin.
+One instance per server (every connected app shares its database); the stack needs Docker with
+the compose plugin.
 
-**Low-memory profile.** The full official stack uses about 2 GB of RAM. Mas only runs what you
-tick, and you can change it later from the Databases page (`docker compose up -d --remove-orphans`,
-data volumes are kept):
+**What to install.** Pick what your apps need, Mas suggests the choice that fits the free memory:
 
-| Component | Default | ≈ RAM |
+| Choice | What apps can do | ≈ RAM |
 |---|---|---|
-| Postgres, Auth, REST, Kong (always on) | on | 400 MB |
-| Studio + pg-meta | on (start/stop on demand) | 250 MB |
-| Realtime | on | 150 MB |
-| Storage | on | 80 MB |
-| Image transformations (imgproxy) | off | 60 MB |
-| Edge Functions | off | 150 MB |
-| Logs & analytics (Logflare + Vector) | off | 600 MB |
-| Connection pooler (Supavisor) | off: Postgres is published directly on `127.0.0.1` | 150 MB |
+| **Essential** | database, user accounts, API | 400 MB |
+| **Recommended** | + file uploads, live updates, admin dashboard | 880 MB |
+| **Complete** | + image resizing, server functions, logs, many connections | 1.8 GB |
+
+**Customize** shows the parts one by one, and the Databases page changes them later
+(`docker compose up -d --remove-orphans`, data volumes are kept):
+
+| Part | Supabase name | Recommended | ≈ RAM |
+|---|---|---|---|
+| Database, user accounts and API (always on) | Postgres, Auth, REST, Kong | on | 400 MB |
+| Admin dashboard (private, start/stop on demand) | Studio + pg-meta | on | 250 MB |
+| Live updates | Realtime | on | 150 MB |
+| File uploads | Storage | on | 80 MB |
+| Image resizing | imgproxy | off | 60 MB |
+| Server functions | Edge Functions | off | 150 MB |
+| Logs and statistics | Logflare + Vector | off | 600 MB |
+| Many connections | Supavisor (off: Postgres is published directly on `127.0.0.1`) | off | 150 MB |
+
+#### Connecting an app
+
+The **Database** card of an app reads its repository and adapts to it:
+
+- **It finds out the app uses Supabase** from its libraries (`@supabase/supabase-js`,
+  `@supabase/ssr`, `supabase` for Python…), its example env file or a `supabase/` folder. When the
+  server has no Supabase yet, **Create the database and connect** installs it and connects the app
+  as soon as it runs. In **Apps → New app**, a Supabase app is connected before its first build.
+- **Connect the database** writes the URL and keys under the names the code reads: the usual ones
+  (`SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+  `DATABASE_URL`…), the framework ones (`VITE_…`, `PUBLIC_…` for Astro and SvelteKit, `EXPO_PUBLIC_…`)
+  and every Supabase variable of its `.env.example`. A secret (service_role key, Postgres URL) is
+  never written to a variable the browser can read (`NEXT_PUBLIC_`, `VITE_`…): Mas lists it instead.
+- **The repository describes its database** with the layout of the Supabase CLI:
+  `supabase/migrations/<timestamp>_<name>.sql` and `supabase/seed.sql`. On every deploy of a
+  connected app, Mas runs the new migrations before the build, in order, each in one transaction,
+  and records them in `supabase_migrations.schema_migrations` like `supabase db push`. If one
+  fails, the deploy stops and the site stays on its current version. The seed is loaded once,
+  when you tick it while connecting. The card lists the migrations, applied or pending.
+- **Import my dev database** copies the `public` schema of a supabase.com project (tables,
+  functions, policies, with or without the rows) and connects the app. Paste the *Session pooler*
+  connection string (project → **Connect**); it is passed to `pg_dump` in the environment, never
+  on a command line, and not kept. Tables that already exist here are refused unless you tick
+  *replace them*. Mas runs a `pg_dump` as recent as the source server. Not copied: users
+  (`auth`), files (Storage) and triggers on `auth.users`.
+
+An app connected to another Supabase project (its `SUPABASE_URL` points elsewhere) is left alone.
 
 The services that stay are tuned for a small server: Postgres `shared_buffers=64MB` and smaller
 work memory, one Kong worker with a 32 MB cache, a capped Node.js heap for Studio, Storage and

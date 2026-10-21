@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from mas import __version__, api_cms, api_deploy, api_dns, api_supabase, auth
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
+from mas.appdb import AppDatabases
 from mas.deploy import Deployer
 from mas.github import GitHubApp
 from mas.cms import CmsManager
@@ -165,6 +166,7 @@ def create_app(
     deployer = Deployer(host, config, db, github_client, find_service=scanner.get,
                         on_change=lambda: scanner.refresh())
     supabase = SupabaseManager(host, config, db, deployer)
+    appdb = AppDatabases(host, config, db, supabase, deployer, github_client)
     cms = CmsManager(db, github_client, deployer, Path(db.path).parent, supabase=supabase)
 
     @asynccontextmanager
@@ -474,11 +476,13 @@ def create_app(
 
     app.state.deployer = deployer
     api_deploy.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
-                        deployer=deployer, github_client=github_client, reset_github=github_cache.clear)
+                        deployer=deployer, github_client=github_client, reset_github=github_cache.clear,
+                        appdb=appdb)
     api_dns.register(app, host=host, config=config, db=db, current_session=current_session, deployer=deployer,
                      opener=ovh_opener)
     api_supabase.register(app, host=host, db=db, current_session=current_session, deployer=deployer,
-                          manager=supabase)
+                          manager=supabase, appdb=appdb)
+    app.state.appdb = appdb
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms)
 
     # -- dashboard ---------------------------------------------------------

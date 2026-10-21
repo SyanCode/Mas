@@ -10,16 +10,28 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from mas.appdb import AppDatabases, AppDbError
 from mas.db import Database
 from mas.deploy import DOMAIN_RE, Deployer
-from mas.envcrypt import decrypt_env, encrypt_env, load_fernet
 from mas.host import Host
-from mas.supabase import COMPONENTS, CORE_RAM, SupabaseError, SupabaseManager, estimate_ram, requirements
+from mas.supabase import COMPONENTS, CORE_RAM, PRESETS, SupabaseError, SupabaseManager, estimate_ram, requirements
 
 
 class InstallBody(BaseModel):
     domain: str | None = Field(default=None, max_length=253)
     components: list[str] | None = Field(default=None, max_length=len(COMPONENTS))
+    connect: list[str] = Field(default_factory=list, max_length=100)  # apps connected once it runs
+    seed: bool = False
+
+
+class ConnectBody(BaseModel):
+    seed: bool = False
+
+
+class ImportBody(BaseModel):
+    url: str = Field(min_length=12, max_length=2000)
+    with_data: bool = True
+    replace: bool = False
 
 
 class ComponentsBody(BaseModel):
@@ -34,13 +46,15 @@ def _check_components(names: list[str] | None) -> list[str] | None:
 
 
 def register(app: FastAPI, *, host: Host, db: Database, current_session: Callable, deployer: Deployer,
-             manager: SupabaseManager) -> None:
+             manager: SupabaseManager, appdb: AppDatabases) -> None:
 
-    def call(fn, *args):
+    def call(fn, *args, **kwargs):
         try:
-            return fn(*args)
+            return fn(*args, **kwargs)
         except SupabaseError as exc:
             raise HTTPException(409, str(exc)) from None
+        except AppDbError as exc:
+            raise HTTPException(400, str(exc)) from None
 
     def public(inst: dict | None) -> dict | None:
         if not inst:
@@ -54,7 +68,9 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
 
     catalog = {"core_ram_mb": CORE_RAM,
                "components": [{"id": k, "label": c["label"], "help": c["help"], "ram_mb": c["ram"],
-                               "default": c["default"]} for k, c in COMPONENTS.items()]}
+                               "default": c["default"]} for k, c in COMPONENTS.items()],
+               "presets": [{"id": k, "label": p["label"], "help": p["help"], "components": p["components"],
+                            "ram_mb": estimate_ram(p["components"])} for k, p in PRESETS.items()]}
 
     @app.get("/api/supabase")
     async def status(_=Depends(current_session)) -> dict:
@@ -66,6 +82,8 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
         domain = (body.domain or "").strip().lower() or None
         if domain and not DOMAIN_RE.fullmatch(domain):
             raise HTTPException(400, f"invalid domain: {domain}")
+        if body.connect:
+            call(appdb.queue, body.connect, seed=body.seed)  # checked before anything starts
         call(manager.start_install, domain, _check_components(body.components))
         db.audit(s.username, "supabase-install", True, detail=domain or "no domain")
         return {"ok": True}
@@ -149,17 +167,38 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
         db.audit(s.username, "supabase-remove", True, detail="; ".join(done))
         return {"ok": True, "done": done}
 
-    @app.post("/api/apps/{app_id}/supabase")
-    def connect(app_id: str, s=Depends(current_session)) -> dict:
-        target = db.get_app(app_id)
-        if target is None:
+    def known(app_id: str) -> None:
+        if db.get_app(app_id) is None:
             raise HTTPException(404, f"unknown app {app_id}")
-        if target["mode"] != "managed":
-            raise HTTPException(400, "adopted services manage their own environment: copy the credentials instead")
-        variables = call(manager.connection_env)
-        fernet = load_fernet(host, deployer.config.secret_key_path)
-        env = decrypt_env(fernet, target["env"]) | variables
-        db.update_app(app_id, env=encrypt_env(fernet, env))
-        db.audit(s.username, "supabase-connect", True, detail=f"{app_id}: {', '.join(sorted(variables))}")
-        rid = deployer.enqueue(app_id, "manual", s.username)
-        return {"ok": True, "variables": sorted(variables), "release_id": rid, "at": time.time()}
+
+    @app.get("/api/apps/{app_id}/database")
+    async def database(app_id: str, _=Depends(current_session)) -> dict:
+        """What the repository needs, whether the app is connected, its migrations."""
+        known(app_id)
+        return await asyncio.to_thread(call, appdb.info, app_id)
+
+    @app.post("/api/apps/{app_id}/supabase")
+    async def connect(app_id: str, body: ConnectBody | None = None, s=Depends(current_session)) -> dict:
+        known(app_id)
+        result = await asyncio.to_thread(call, appdb.connect, app_id, s.username, seed=bool(body and body.seed))
+        return {"ok": True, **result, "at": time.time()}
+
+    @app.post("/api/apps/{app_id}/database/import")
+    async def import_dev(app_id: str, body: ImportBody, s=Depends(current_session)) -> dict:
+        known(app_id)
+        try:
+            return await asyncio.to_thread(call, appdb.import_dev, app_id, body.url, body.with_data, body.replace,
+                                           s.username)
+        except HTTPException as exc:
+            db.audit(s.username, "supabase-import", False, service_id=app_id, detail=str(exc.detail)[:300])
+            raise
+
+    @app.get("/api/github/database")
+    async def repo_database(repo: str, installation_id: int, ref: str, root_dir: str = "",
+                            _=Depends(current_session)) -> dict:
+        """Detection before the app exists (new app page)."""
+        found = await asyncio.to_thread(appdb.scan, {"id": repo, "repo": repo, "installation_id": installation_id,
+                                                     "branch": ref, "root_dir": root_dir})
+        inst = manager.get()
+        return {"instance": inst["status"] if inst else None,
+                **{k: found[k] for k in ("uses_supabase", "evidence", "migrations", "seed")}}

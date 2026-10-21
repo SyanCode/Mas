@@ -21,6 +21,14 @@ function CompatBadge({ compat }: { compat?: CmsCompat }) {
   return <span title={what}><Badge tone="emerald">{t("Mas compatible")}</Badge></span>;
 }
 
+interface RepoDatabase {
+  instance: string | null;
+  uses_supabase: boolean;
+  evidence: string[];
+  migrations: { file: string }[];
+  seed: boolean;
+}
+
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24);
 
 function NewApp() {
@@ -43,6 +51,9 @@ function NewApp() {
   const [detecting, setDetecting] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [db, setDb] = useState<RepoDatabase | null>(null);
+  const [connectDb, setConnectDb] = useState(true);
+  const [seedDb, setSeedDb] = useState(true);
   const [compat, setCompat] = useState<Record<string, CmsCompat>>({});
 
   useEffect(() => {
@@ -86,6 +97,18 @@ function NewApp() {
     return () => clearTimeout(timer);
   }, [shown, compat]);
 
+  // Does the repository use Supabase? (libraries, .env.example, supabase/migrations)
+  useEffect(() => {
+    setDb(null);
+    if (!repo || !branch) return;
+    const timer = setTimeout(() => {
+      const q = `repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}&ref=${encodeURIComponent(branch)}&root_dir=${encodeURIComponent(rootDir)}`;
+      api<RepoDatabase>(`/github/database?${q}`).then(setDb).catch(() => {});
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [repo, branch, rootDir]);
+  const canConnect = !!db?.uses_supabase && (db.instance === "running" || db.instance === "installing");
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!repo) return;
@@ -107,6 +130,7 @@ function NewApp() {
         body: {
           id, repo: repo.full_name, branch, installation_id: repo.installation_id, domain: choice?.domain ?? null, type, env,
           build_command: buildCommand || null, start_command: startCommand || null, root_dir: rootDir, auto_deploy: autoDeploy,
+          supabase: canConnect && connectDb, supabase_seed: seedDb,
         },
       });
       window.location.href = `/apps/view/?id=${encodeURIComponent(created.id)}&release=${created.release_id}`;
@@ -178,6 +202,25 @@ function NewApp() {
           </label>
         </div>
       </Card>
+      {db?.uses_supabase && (
+        <Card title={t("Database")}>
+          <div className="space-y-2 text-sm">
+            <p className="text-zinc-500">{t("This app uses Supabase")} <span className="text-xs">({db.evidence.join(", ")})</span></p>
+            {canConnect ? (
+              <>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={connectDb} onChange={(e) => setConnectDb(e.target.checked)} />
+                  {db.instance === "running" ? t("Connect it to the Supabase of this server before its first build") : t("Connect it once Supabase is installed")}
+                </label>
+                {connectDb && db.migrations.length > 0 && <p className="text-xs text-zinc-500">{t("Its {n} migration(s) will create the tables before the build.", { n: db.migrations.length })}</p>}
+                {connectDb && db.seed && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={seedDb} onChange={(e) => setSeedDb(e.target.checked)} /> {t("Load supabase/seed.sql (sample data) once")}</label>}
+              </>
+            ) : (
+              <p className="text-xs text-zinc-500">{t("No Supabase on this server yet: once the app is created, its Database card creates one and connects it.")}</p>
+            )}
+          </div>
+        </Card>
+      )}
       <Card title={t("Domain (optional)")} actions={
         <label className="flex items-center gap-1.5 text-xs font-normal">
           <input type="checkbox" checked={withDomain} onChange={(e) => setWithDomain(e.target.checked)} /> {t("give it an address")}

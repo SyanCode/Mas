@@ -155,20 +155,83 @@ function DomainCard({ app, onLinked }: { app: App; onLinked: (releaseId: number)
   );
 }
 
-function SupabaseCard({ app, onLinked }: { app: App; onLinked: (releaseId: number) => void }) {
+interface DbInfo {
+  instance: string | null;
+  connected: "local" | "external" | null;
+  variables: string[];
+  found: { uses_supabase: boolean; evidence: string[]; folder: string | null; seed: boolean };
+  scan_error: string | null;
+  migrations: { version: string; name: string; file: string; applied: boolean | null }[];
+  seed_pending: boolean;
+  queued: boolean;
+  shared_with: string[];
+}
+
+/** Copies the public schema of a dev database (supabase.com) here and connects the app. */
+function ImportDevDatabase({ appId, onDone }: { appId: string; onDone: (releaseId: number | null) => void }) {
   const t = useT();
-  const [status, setStatus] = useState<string | null | undefined>(undefined);
+  const [url, setUrl] = useState("");
+  const [withData, setWithData] = useState(true);
+  const [replace, setReplace] = useState(false);
+  const [clash, setClash] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => {
-    api<{ instance: { status: string } | null }>("/supabase").then((r) => setStatus(r.instance?.status ?? null)).catch(() => setStatus(null));
-  }, []);
+  const [done, setDone] = useState("");
+
+  async function run() {
+    setBusy(true);
+    setError("");
+    setDone("");
+    try {
+      const r = await api<{ tables: string[]; connected: { release_id: number | null } | null }>(
+        `/apps/${encodeURIComponent(appId)}/database/import`, { method: "POST", body: { url, with_data: withData, replace } });
+      setUrl("");
+      setDone(t("{n} table(s) imported.", { n: r.tables.length }));
+      onDone(r.connected?.release_id ?? null);
+    } catch (e) {
+      const detail = (e as ApiError).detail;
+      setClash(detail.includes("already exist"));
+      setError(detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <details className="rounded-lg border border-zinc-200/80 p-3 dark:border-white/[0.06]">
+      <summary className="cursor-pointer text-sm font-medium">{t("Import my dev database")}</summary>
+      <div className="mt-3 space-y-3 text-sm">
+        <p className="text-xs text-zinc-500">{t("Copies the tables of a Supabase project (supabase.com) here and connects this app. In the project: Connect → Session pooler, copy the connection string with its password. It is used once and not kept.")}</p>
+        <Input type="password" autoComplete="off" placeholder="postgresql://postgres.xxxx:password@aws-0-eu-west-3.pooler.supabase.com:5432/postgres"
+          value={url} onChange={(e) => setUrl(e.target.value)} />
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={withData} onChange={(e) => setWithData(e.target.checked)} /> {t("Copy the rows too (otherwise only the structure)")}</label>
+        {clash && <label className="flex items-center gap-2 text-xs text-rose-500"><input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} /> {t("Replace the tables that already exist here (their rows are lost)")}</label>}
+        <ErrorText>{error}</ErrorText>
+        <Notice>{done}</Notice>
+        <Button onClick={run} disabled={busy || !url.trim()}>{busy ? <Spinner /> : null}{t("Import and connect")}</Button>
+      </div>
+    </details>
+  );
+}
+
+function DatabaseCard({ app, onLinked }: { app: App; onLinked: (releaseId: number) => void }) {
+  const t = useT();
+  const [info, setInfo] = useState<DbInfo | null>(null);
+  const [seed, setSeed] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api<DbInfo>(`/apps/${encodeURIComponent(app.id)}/database`).then(setInfo).catch((e: ApiError) => setError(e.detail));
+  }, [app.id]);
+  useEffect(load, [load]);
 
   async function connect() {
     setBusy(true);
     setError("");
     try {
-      onLinked((await api<{ release_id: number }>(`/apps/${encodeURIComponent(app.id)}/supabase`, { method: "POST" })).release_id);
+      const r = await api<{ release_id: number }>(`/apps/${encodeURIComponent(app.id)}/supabase`, { method: "POST", body: { seed } });
+      onLinked(r.release_id);
+      load();
     } catch (e) {
       setError((e as ApiError).detail);
     } finally {
@@ -176,18 +239,78 @@ function SupabaseCard({ app, onLinked }: { app: App; onLinked: (releaseId: numbe
     }
   }
 
-  if (status === undefined) return null;
+  if (!info) return error ? <Card title={t("Database")}><ErrorText>{error}</ErrorText></Card> : null;
+  const pending = info.migrations.filter((m) => m.applied === false).length;
+  const uses = info.found.uses_supabase;
+  const badge = info.connected === "local" ? <Badge tone="emerald">{t("connected")}</Badge>
+    : info.connected === "external" ? <Badge tone="sky">{t("external Supabase")}</Badge>
+    : uses ? <Badge tone="amber">{t("not connected")}</Badge> : null;
+
   return (
-    <Card title="Supabase" actions={status === "running" ? <Badge tone="emerald">{t("available")}</Badge> : null}>
-      {status === "running" ? (
-        <div className="space-y-3 text-sm">
-          <p className="text-zinc-500">{t("Adds SUPABASE_URL, the anon and service_role keys and DATABASE_URL to this app, then redeploys.")}</p>
-          <ErrorText>{error}</ErrorText>
-          <Button variant="primary" onClick={connect} disabled={busy}>{busy ? <Spinner /> : null}{t("Connect Supabase")}</Button>
-        </div>
-      ) : (
-        <p className="text-sm text-zinc-500">{t("Need a database?")} <Link href="/databases/" className="font-medium text-indigo-500 hover:underline">{t("Deploy Supabase on this server")} →</Link></p>
-      )}
+    <Card title={t("Database")} actions={badge}>
+      <div className="space-y-3 text-sm">
+        {uses && !info.connected && (
+          <p className="text-zinc-500">{t("This app uses Supabase")} <span className="text-xs">({info.found.evidence.join(", ")})</span></p>
+        )}
+
+        {info.connected === "external" && (
+          <p className="text-zinc-500">{t("Connected to another Supabase project through its environment variables: Mas leaves it alone.")}</p>
+        )}
+
+        {info.connected === "local" && (
+          <>
+            <p className="text-zinc-500">{t("Connected to the Supabase of this server.")} <span className="mono text-xs">{info.variables.join(", ")}</span></p>
+            {info.migrations.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-zinc-500">{t("Migrations ({folder})", { folder: `${info.found.folder}/migrations` })}</div>
+                <ul className="space-y-0.5">
+                  {info.migrations.map((m) => (
+                    <li key={m.file} className="flex justify-between gap-2 text-xs">
+                      <span className="mono truncate">{m.file}</span>
+                      <span className={m.applied ? "text-emerald-500" : "text-amber-500"}>{m.applied === null ? "?" : m.applied ? t("applied") : t("at the next deploy")}</span>
+                    </li>
+                  ))}
+                </ul>
+                {pending > 0 && <p className="text-xs text-zinc-500">{t("New migrations run at every deploy, before the build. If one fails, the site stays on its current version.")}</p>}
+              </div>
+            )}
+            {info.shared_with.length > 0 && <p className="text-xs text-zinc-500">{t("Same database as: {apps}.", { apps: info.shared_with.join(", ") })}</p>}
+          </>
+        )}
+
+        {!info.connected && info.instance === "running" && (
+          <div className="space-y-3">
+            {!uses && <p className="text-zinc-500">{t("Give this app a database: Mas adds the URL and keys to its environment, then redeploys.")}</p>}
+            {info.migrations.length > 0 && <p className="text-xs text-zinc-500">{t("Its {n} migration(s) will create the tables before the build.", { n: info.migrations.length })}</p>}
+            {info.found.seed && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={seed} onChange={(e) => setSeed(e.target.checked)} /> {t("Load supabase/seed.sql (sample data) once")}</label>}
+            <ErrorText>{error}</ErrorText>
+            <Button variant="primary" onClick={connect} disabled={busy}>{busy ? <Spinner /> : null}{t("Connect the database")}</Button>
+          </div>
+        )}
+
+        {!info.connected && info.instance === "installing" && (
+          <p className="flex items-center gap-2 text-zinc-500"><Spinner /> {info.queued ? t("Supabase is being installed: this app will be connected automatically.") : t("Supabase is being installed…")}</p>
+        )}
+
+        {!info.connected && (info.instance === null || info.instance === "failed" || info.instance === "stopped") && (
+          uses ? (
+            <div className="space-y-2">
+              <p className="text-zinc-500">{info.instance === "stopped" ? t("The Supabase of this server is stopped.") : t("Mas can create the database on this server and connect this app as soon as it is ready.")}</p>
+              <Link href={info.instance === "stopped" ? "/databases/" : `/databases/?connect=${encodeURIComponent(app.id)}`}
+                className="inline-flex h-8 items-center rounded-lg bg-indigo-500 px-3 text-[13px] font-medium text-white hover:bg-indigo-400">
+                {info.instance === "stopped" ? t("Open Databases") : t("Create the database and connect")} →
+              </Link>
+            </div>
+          ) : (
+            <p className="text-zinc-500">{t("Need a database?")} <Link href={`/databases/?connect=${encodeURIComponent(app.id)}`} className="font-medium text-indigo-500 hover:underline">{t("Create one on this server")} →</Link></p>
+          )
+        )}
+
+        {info.instance === "running" && info.connected !== "external" && (
+          <ImportDevDatabase appId={app.id} onDone={(rid) => { if (rid) onLinked(rid); load(); }} />
+        )}
+        {info.scan_error && <p className="text-xs text-zinc-500">{t("Could not read the repository: {error}", { error: info.scan_error })}</p>}
+      </div>
     </Card>
   );
 }
@@ -682,7 +805,7 @@ function AppView() {
           {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && (
             <LoadBalancingCard key={`${app.instances}-${app.backends.join()}`} app={app} onSaved={(rid) => { setSelected(rid); load(); }} />
           )}
-          {app.mode === "managed" && <SupabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
+          {app.mode === "managed" && <DatabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           {app.installation_id && <CmsCard appId={app.id} />}
           {app.mode === "managed" && <EnvCard appId={app.id} />}
         </div>
