@@ -252,11 +252,11 @@ def requirements(host: Host) -> dict:
     }
 
 
-def api_health(url: str, anon_key: str, timeout: float) -> tuple[bool, str]:
+def api_health(url: str, key: str, timeout: float) -> tuple[bool, str]:
     deadline = time.monotonic() + timeout
     last = "no answer"
     while True:
-        req = urllib.request.Request(url, headers={"apikey": anon_key, "Authorization": f"Bearer {anon_key}"})
+        req = urllib.request.Request(url, headers={"apikey": key, "Authorization": f"Bearer {key}"})
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return True, f"HTTP {resp.status}"
@@ -475,7 +475,9 @@ class SupabaseManager:
         self.deployer._cmd(rlog, self._compose("up", "-d"), timeout=1200)
 
         rlog.step("Waiting for the API")
-        ok, detail = self.health(f"http://127.0.0.1:{kong_http}/rest/v1/", values["ANON_KEY"], self.health_timeout)
+        # Envoy keeps the /rest/v1/ root (the OpenAPI schema) to the service_role key; the anon key gets a 403.
+        ok, detail = self.health(f"http://127.0.0.1:{kong_http}/rest/v1/", values["SERVICE_ROLE_KEY"],
+                                 self.health_timeout)
         rlog.line(f"api: {'ok' if ok else 'FAILED'} ({detail})")
         if not ok:
             raise SupabaseError(f"the Supabase API did not answer ({detail}); see `docker compose -p {PROJECT} logs`")

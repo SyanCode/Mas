@@ -171,7 +171,11 @@ def manager(tmp_path):
     db = Database(tmp_path / "mas.db")
     config = Config(secret_key_path="/etc/mas/secret.key", dns_wait_seconds=0)
     deployer = Deployer(host, config, db, lambda: None)
-    return SupabaseManager(host, config, db, deployer, health=lambda url, key, t: (True, "HTTP 200")), host, db
+    probes = []
+    mgr = SupabaseManager(host, config, db, deployer,
+                          health=lambda url, key, t: (probes.append((url, key)) or True, "HTTP 200"))
+    mgr.probes = probes
+    return mgr, host, db
 
 
 def test_install_pipeline(manager):
@@ -186,6 +190,7 @@ def test_install_pipeline(manager):
     assert "127.0.0.1:${KONG_HTTP_PORT}" in host.read_text(f"{mgr.dir}/docker-compose.yml")
     ports = mgr.ports(inst)
     assert f"API_GW_HTTP_PORT={ports['kong_http']}" in env  # Envoy listens where Mas waits for the API
+    assert mgr.probes == [(f"http://127.0.0.1:{ports['kong_http']}/rest/v1/", secrets["SERVICE_ROLE_KEY"])]
     assert secrets["SERVICE_ROLE_KEY"] not in inst["secrets"]  # encrypted at rest
     ports = mgr.ports(inst)
     assert len(set(ports.values())) == 4 and all(7100 <= p <= 7999 for p in ports.values())
