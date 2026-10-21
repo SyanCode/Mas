@@ -55,7 +55,7 @@ def test_compose_files():
     mc = TEMPLATES["minecraft"].compose(ctx("minecraft", {"eula": True, "whitelist": "Alice,Bob"},
                                             ports={"game": 25570}))["services"]["minecraft"]
     assert mc["ports"] == ["25570:25565/tcp"] and mc["environment"]["EULA"] == "TRUE"
-    assert mc["environment"]["WHITELIST"] == "Alice,Bob" and mc["volumes"] == ["/srv/mas/stacks/x/data/data:/data"]
+    assert mc["environment"]["WHITELIST"] == "Alice,Bob" and mc["volumes"] == ["/srv/mas/stacks/x/data:/data"]
     kuma = TEMPLATES["uptime-kuma"].compose(ctx("uptime-kuma", {}, web_port=7105, domain="up.example.com"))
     assert kuma["services"]["uptime-kuma"]["ports"] == ["127.0.0.1:7105:3001"]  # nginx only
     mail = TEMPLATES["mail"].compose(ctx("mail", {"mail_domain": "example.com"}, domain="mail.example.com",
@@ -76,6 +76,22 @@ def test_catalog_texts_are_listed_for_translation():
     listed = (Path(__file__).resolve().parent.parent / "web" / "lib" / "stackTexts.ts").read_text(encoding="utf-8")
     missing = [t for t in ui_texts() if f"msg({json.dumps(t, ensure_ascii=False)})" not in listed]
     assert not missing, f"run `python -m mas.stacks > web/lib/stackTexts.ts`: {missing[:5]}"
+
+
+def test_data_lives_in_the_data_folder():
+    """What every template keeps is in /srv/mas/stacks/<name>/data (backups and the docs rely on it)."""
+    from mas.stacks import TEMPLATES
+    for t in TEMPLATES.values():
+        options = {f["key"]: f.get("default") for f in t.fields}
+        options.update({"eula": True, "mail_domain": "e2e.test", "image": "nginx", "volume": "/data"})
+        c = Ctx("x", options, {"admin_token": "t", "mailbox_password": "p"}, "/srv/mas/stacks/x/data",
+                "/srv/mas/stacks/x/data", 7100, {p.name: p.container for p in t.ports}, "x.example.com")
+        for service in t.compose(c)["services"].values():
+            for volume in service.get("volumes", []):
+                source = volume.split(":")[0]
+                if source.startswith("/srv/mas/stacks/"):
+                    assert source == c.data or source.rsplit("/", 1)[0] == c.data, (t.id, volume)
+                    assert not source.startswith(f"{c.data}/data"), (t.id, volume)
 
 
 def test_dkim_record():

@@ -122,7 +122,7 @@ def _minecraft(ctx: Ctx) -> dict:
         env["OPS"] = o["ops"]
     return {"services": {"minecraft": _service(
         "itzg/minecraft-server:latest", ctx, environment=env, tty=True, stdin_open=True,
-        ports=[f"{ctx.ports['game']}:25565/tcp"], volumes=[f"{ctx.data}/data:/data"], stop_grace_period="60s")}}
+        ports=[f"{ctx.ports['game']}:25565/tcp"], volumes=[f"{ctx.data}:/data"], stop_grace_period="60s")}}
 
 
 def _bedrock(ctx: Ctx) -> dict:
@@ -134,7 +134,7 @@ def _bedrock(ctx: Ctx) -> dict:
         env.update(ALLOW_LIST="true", ALLOW_LIST_USERS=o["whitelist"])
     return {"services": {"bedrock": _service(
         "itzg/minecraft-bedrock-server:latest", ctx, environment=env, tty=True, stdin_open=True,
-        ports=[f"{ctx.ports['game']}:19132/udp"], volumes=[f"{ctx.data}/data:/data"])}}
+        ports=[f"{ctx.ports['game']}:19132/udp"], volumes=[f"{ctx.data}:/data"])}}
 
 
 def _game_info(ctx: Ctx, host: Host, ip: str | None) -> dict:
@@ -252,14 +252,14 @@ def _mail_add(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
 
 def _uptime_kuma(ctx: Ctx) -> dict:
     return {"services": {"uptime-kuma": _service("louislam/uptime-kuma:1", ctx, 3001,
-                                                 volumes=[f"{ctx.data}/data:/app/data"])}}
+                                                 volumes=[f"{ctx.data}:/app/data"])}}
 
 
 def _vaultwarden(ctx: Ctx) -> dict:
     env = {"DOMAIN": f"https://{ctx.domain}", "SIGNUPS_ALLOWED": "true" if ctx.options["signups"] else "false",
            "ADMIN_TOKEN": ctx.secrets["admin_token"]}
     return {"services": {"vaultwarden": _service("vaultwarden/server:latest", ctx, 80, environment=env,
-                                                 volumes=[f"{ctx.data}/data:/data"])}}
+                                                 volumes=[f"{ctx.data}:/data"])}}
 
 
 def _n8n(ctx: Ctx) -> dict:
@@ -267,7 +267,7 @@ def _n8n(ctx: Ctx) -> dict:
            "WEBHOOK_URL": f"https://{ctx.domain}/", "GENERIC_TIMEZONE": ctx.options["timezone"],
            "TZ": ctx.options["timezone"]}
     return {"services": {"n8n": _service("docker.n8n.io/n8nio/n8n:latest", ctx, 5678, environment=env,
-                                         volumes=[f"{ctx.data}/data:/home/node/.n8n"])}}
+                                         volumes=[f"{ctx.data}:/home/node/.n8n"])}}
 
 
 def _gitea(ctx: Ctx) -> dict:
@@ -275,7 +275,7 @@ def _gitea(ctx: Ctx) -> dict:
            "GITEA__server__ROOT_URL": f"https://{ctx.domain}/", "GITEA__server__DISABLE_SSH": "true",
            "GITEA__service__DISABLE_REGISTRATION": "false" if ctx.options["signups"] else "true"}
     return {"services": {"gitea": _service("gitea/gitea:latest", ctx, 3000, environment=env,
-                                           volumes=[f"{ctx.data}/data:/data"])}}
+                                           volumes=[f"{ctx.data}:/data"])}}
 
 
 def _web_info(rows: Callable[[Ctx], list[dict]] | None = None):
@@ -301,7 +301,7 @@ def parse_env_lines(text: str) -> list[tuple[str, str]]:
 def _custom(ctx: Ctx) -> dict:
     o = ctx.options
     ports = [s.strip() for s in o.get("public_ports", "").split(",") if s.strip()]
-    volumes = [f"{ctx.data}/data:{o['volume']}"] if o.get("volume") else []
+    volumes = [f"{ctx.data}:{o['volume']}"] if o.get("volume") else []
     extra = {"environment": dict(parse_env_lines(o.get("env", "")))} if o.get("env") else {}
     if volumes:
         extra["volumes"] = volumes

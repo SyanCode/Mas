@@ -14,18 +14,18 @@ from e2e_helpers import http_get, port_open, sh
 from mas.stacks import StackManager
 
 def imap_login(user: str, password: str, timeout: float = 90) -> None:
-    """Log in over IMAPS, retrying while Dovecot is still starting."""
+    """Log in over IMAPS like a mail app: reconnect while Dovecot starts or reloads its accounts."""
     deadline = time.monotonic() + timeout
     while True:
         try:
             imap = imaplib.IMAP4_SSL("127.0.0.1", 993, ssl_context=TLS, timeout=10)
-            break
-        except OSError:
+            assert imap.login(user, password)[0] == "OK"
+            imap.logout()
+            return
+        except (OSError, imaplib.IMAP4.abort, imaplib.IMAP4.error):
             if time.monotonic() > deadline:
                 raise
             time.sleep(3)
-    assert imap.login(user, password)[0] == "OK"
-    imap.logout()
 
 
 TLS = ssl.create_default_context()
