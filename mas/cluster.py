@@ -48,6 +48,7 @@ BUILD_TIMEOUT = 1800
 WINDOW_SHORT, WINDOW_LONG = 60, 900  # seconds: requests of the last minute / quarter of an hour
 UPSTREAM_TAIL = 8 * 1024 * 1024      # read the end of the upstream log only
 TRAFFIC_CACHE_S = 3                  # several open pages share one reading
+FAILOVER_AFTER = 120                 # seconds a server may be silent before its copies move elsewhere
 
 
 class ClusterError(Exception):
@@ -112,6 +113,7 @@ class Cluster:
         self.opener = opener
         deployer.spread = self.spread
         self._tails: dict[str, dict] = {}
+        self.down_since: dict[int, float] = {}  # server id → monotonic time it stopped answering
         self._traffic_cache: tuple[float, dict] | None = None
 
     # -- this server -------------------------------------------------------------
@@ -222,8 +224,10 @@ class Cluster:
         servers = self.db.list_cluster_servers()
 
         def probe(server: dict) -> dict:
+            down = self.down_since.get(server["id"])
             out = {"id": server["id"], "name": server["name"], "url": server["url"], "address": server["address"],
-                   "info": None, "error": None, "latency_ms": None}
+                   "info": None, "error": None, "latency_ms": None,
+                   "down_for_s": round(time.monotonic() - down) if down is not None else None}
             started = time.monotonic()
             try:
                 out["info"] = self._call(server, "GET", "/api/cluster/self", timeout=6)
@@ -238,6 +242,64 @@ class Cluster:
         with ThreadPoolExecutor(max_workers=8) as pool:
             peers = list(pool.map(probe, servers))
         return {"self": self.info(), "servers": peers, "tokens": self.db.list_cluster_tokens()}
+
+    # -- keeping the copies up (auto-fill) ----------------------------------------------
+
+    def watch(self, now: float | None = None) -> list[str]:
+        """Probe the servers; when one that runs copies has not answered for FAILOVER_AFTER seconds,
+        move its copies to an available server (the one with the most free memory) and redeploy the
+        app, so the load balancer gets its capacity back. Called by the background loop of the primary."""
+        now = now or time.monotonic()
+        servers = self.db.list_cluster_servers()
+        if not servers:
+            return []
+        healthy: dict[int, dict] = {}
+
+        def probe(server: dict) -> tuple[dict, dict | None]:
+            try:
+                return server, self._call(server, "GET", "/api/cluster/self", timeout=5)
+            except ClusterError:
+                return server, None
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for server, info in pool.map(probe, servers):
+                if info is None:
+                    self.down_since.setdefault(server["id"], now)
+                else:
+                    if self.down_since.pop(server["id"], None) is not None:
+                        self.db.audit("cluster", "server-back", True, detail=server["name"])
+                    healthy[server["id"]] = info
+        notes = []
+        apps = self.db.list_apps()
+        # a server that came back may still run a copy that was moved elsewhere meanwhile: remove it
+        for sid, info in healthy.items():
+            server = next(s for s in servers if s["id"] == sid)
+            for copy in info.get("apps") or []:
+                owner = next((a for a in apps if a["id"] == copy["id"]), None)
+                if copy.get("replica_of") == self.name() and owner is not None \
+                        and sid not in json.loads(owner.get("cluster") or "[]"):
+                    try:
+                        self._call(server, "DELETE", f"/api/cluster/copies/{copy['id']}")
+                        notes.append(f"{copy['id']}: old copy removed from {server['name']}")
+                    except ClusterError as exc:
+                        notes.append(str(exc))
+        for app in apps:
+            chosen = json.loads(app.get("cluster") or "[]")
+            dead = [sid for sid in chosen if now - self.down_since.get(sid, now) >= FAILOVER_AFTER]
+            if not dead:
+                continue
+            spare = sorted((sid for sid in healthy if sid not in chosen),
+                           key=lambda sid: -(healthy[sid].get("memory", {}).get("available_mb") or 0))
+            names = {s["id"]: s["name"] for s in servers}
+            new = [sid for sid in chosen if sid not in dead] + spare[:len(dead)]
+            moved = ", ".join(f"{names[d]} → {names[n]}" for d, n in zip(dead, spare))
+            note = f"{app['id']}: {', '.join(names[d] for d in dead)} down" + \
+                (f", copy moved ({moved})" if spare else ", no other server available: left out of the load balancer")
+            self.db.update_app(app["id"], cluster=json.dumps(sorted(new)) if new else None)
+            self.db.audit("cluster", "failover", bool(spare), service_id=app["id"], detail=note)
+            self.deployer.enqueue(app["id"], "failover", "cluster")
+            notes.append(note)
+        return notes
 
     # -- live traffic (the cluster map) -------------------------------------------------
 

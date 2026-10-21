@@ -164,6 +164,10 @@ def create_app(
                 await asyncio.to_thread(site_stats.refresh_all)
             except Exception:
                 log.exception("site statistics failed")
+            try:  # the other servers of the cluster: a silent one gets its copies moved
+                await asyncio.to_thread(cluster.watch)
+            except Exception:
+                log.exception("cluster watch failed")
             try:
                 await asyncio.to_thread(supabase.auto_backup)
             except Exception:

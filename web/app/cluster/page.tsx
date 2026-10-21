@@ -19,7 +19,7 @@ interface ServerInfo {
   uptime_s: number;
   apps: { id: string; name: string; type: string; domain: string | null; replica_of: string | null; status: string | null }[];
 }
-interface Peer { id: number; name: string; url: string; address: string | null; info: ServerInfo | null; error: string | null; latency_ms: number | null }
+interface Peer { id: number; name: string; url: string; address: string | null; info: ServerInfo | null; error: string | null; latency_ms: number | null; down_for_s?: number | null }
 interface Overview { self: ServerInfo; servers: Peer[]; tokens: { id: number; name: string; created_at: string; last_used: string | null }[] }
 
 interface Traffic {
@@ -300,7 +300,12 @@ function Cluster() {
                   <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setLeaving(p)}>{t("Remove")}</Button>
                 </span>
               }>
-                {p.error ? <ErrorText>{p.error}</ErrorText> : p.info && <Metrics info={p.info} />}
+                {p.error ? (
+                  <div className="space-y-2">
+                    <ErrorText>{p.error}</ErrorText>
+                    {p.down_for_s != null && <p className="text-xs text-zinc-500">{p.down_for_s >= 120 ? t("Silent for {n} min: its copies were moved to the other servers.", { n: Math.round(p.down_for_s / 60) }) : t("Silent for {n} s: after 2 minutes its copies move to another server.", { n: p.down_for_s })}</p>}
+                  </div>
+                ) : p.info && <Metrics info={p.info} />}
                 <p className="mt-3 text-xs text-zinc-500"><a href={p.url} target="_blank" rel="noreferrer" className="hover:underline">{p.url} ↗</a></p>
               </Card>
             ))}

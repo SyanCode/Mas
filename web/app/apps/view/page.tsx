@@ -17,6 +17,7 @@ const RUNNING = new Set(["queued", "building"]);
 const BALANCED_TYPES = new Set(["nextjs", "node", "python"]);
 const TRIGGERS: Record<string, string> = {
   push: msg("push"), manual: msg("manual"), rollback: msg("rollback"), create: msg("create"), cms: msg("CMS edit"),
+  failover: msg("server down"), cluster: msg("cluster"),
 };
 
 interface ClusterServer { id: number; name: string; url: string; address: string | null; error: string | null }
@@ -69,7 +70,7 @@ function LoadBalancingCard({ app, onSaved }: { app: App; onSaved: (releaseId: nu
         {servers && servers.length > 0 && (
           <div className="space-y-2">
             <div className="text-zinc-500">{t("Servers of the cluster")}</div>
-            <p className="text-xs text-zinc-500">{t("Mas builds the same version on each server you tick, on every deploy, and adds the copies that answer to the load balancer.")}</p>
+            <p className="text-xs text-zinc-500">{t("Mas builds the same version on each server you tick, on every deploy, and adds the copies that answer to the load balancer.")} {t("If a server stays silent for 2 minutes, its copy is rebuilt on another available server.")}</p>
             {servers.map((s) => {
               const live = (app.cluster_backends ?? []).some((b) => s.address && b.startsWith(`${s.address}:`));
               return (

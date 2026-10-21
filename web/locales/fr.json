@@ -799,5 +799,10 @@
   "On the other server, run once:": "Sur l'autre serveur, lancez une fois :",
   "It becomes an agent (no dashboard, almost no CPU or memory, listening on its private address only) and prints its address and join token. A Mas with its own dashboard can join too: use its https:// address and a token from its Servers page.": "Il devient un agent (pas de tableau de bord, presque aucun CPU ni mémoire, à l'écoute sur son adresse privée uniquement) et affiche son adresse et son jeton d'adhésion. Un Mas avec son propre tableau de bord peut aussi rejoindre : utilisez son adresse https:// et un jeton de sa page Serveurs.",
   "Its address": "Son adresse",
-  "agent": "agent"
+  "agent": "agent",
+  "Silent for {n} min: its copies were moved to the other servers.": "Silencieux depuis {n} min : ses copies ont été déplacées sur les autres serveurs.",
+  "Silent for {n} s: after 2 minutes its copies move to another server.": "Silencieux depuis {n} s : au bout de 2 minutes, ses copies passent sur un autre serveur.",
+  "If a server stays silent for 2 minutes, its copy is rebuilt on another available server.": "Si un serveur reste silencieux 2 minutes, sa copie est reconstruite sur un autre serveur disponible.",
+  "server down": "serveur en panne",
+  "cluster": "cluster"
 }

@@ -185,3 +185,46 @@ def test_an_agent_has_no_dashboard(tmp_path):
     for bad in ("http://203.0.113.4:7070", "http://mas.example.com", "ftp://10.0.0.7"):
         with pytest.raises(ClusterError):
             validate_url(bad)
+
+
+def test_a_silent_server_gets_its_copies_moved(tmp_path):
+    peers, down = {}, set()
+
+    def route(method, url, headers, body, timeout):
+        name = url.split("//")[1].split(".")[0]  # mas-b / mas-c
+        if name in down:
+            raise OSError("timed out")
+        client = peers[name]
+        r = client.request(method, "/" + url.split("/", 3)[3], headers=headers, content=body)
+        return r.status_code, r.json()
+
+    tokens = {}
+    for name, addr in (("mas-b", "10.0.0.2"), ("mas-c", "10.0.0.3")):
+        client, app, db, host, h = mas(tmp_path, name)
+        app.state.deployer._start_worker = lambda: None
+        client.put("/api/cluster/self", json={"name": name, "address": addr}, headers=h)
+        tokens[name] = client.post("/api/cluster/tokens", json={"name": "a"}, headers=h).json()["token"]
+        peers[name] = client
+    a, a_app, db, a_host, ah = mas(tmp_path, "a", opener=route)
+    a_app.state.deployer._start_worker = lambda: None
+    ids = {n: a.post("/api/cluster/servers", json={"url": f"https://{n}.example.com", "token": tokens[n]},
+                     headers=ah).json()["id"] for n in tokens}
+    db.create_app("web", name="web", repo="acme/web", branch="main", installation_id=7, domain="web.example.com",
+                  type="nextjs", port=7100, mode="managed", cluster=json.dumps([ids["mas-b"]]))
+    cluster = a_app.state.cluster
+    assert cluster.watch(now=1000) == []  # everybody answers
+    down.add("mas-b")
+    assert cluster.watch(now=1010) == [] and json.loads(db.get_app("web")["cluster"]) == [ids["mas-b"]]  # not yet
+    notes = cluster.watch(now=1010 + 121)
+    assert "copy moved (mas-b → mas-c)" in notes[0]
+    assert json.loads(db.get_app("web")["cluster"]) == [ids["mas-c"]]
+    assert db.list_releases("web", 1)[0]["trigger"] == "failover"  # the redeploy builds the copy on mas-c
+    assert a.get("/api/cluster").json()["servers"][0]["down_for_s"] is not None
+    # mas-b comes back with its old copy: removed there
+    peers["mas-b"].app.state.cluster.db.create_app("web", name="web", repo="acme/web", branch="main", type="nextjs",
+                                                   port=7300, mode="managed", replica_of=cluster.name(),
+                                                   bind="10.0.0.2")
+    down.clear()
+    notes = cluster.watch(now=2000)
+    assert any("old copy removed from mas-b" in n for n in notes)
+    assert peers["mas-b"].app.state.cluster.db.get_app("web") is None
