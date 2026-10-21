@@ -40,11 +40,14 @@ def test_any_image_with_web_and_public_ports(env):
                                                      "env": "E2E=first"}, {}, None, "e2e")
     try:
         Path(stacks.dir("e2e-nginx"), "data").mkdir(parents=True, exist_ok=True)
-        Path(stacks.dir("e2e-nginx"), "data", "index.html").write_text("hello from mas e2e")
+        page = Path(stacks.dir("e2e-nginx"), "data", "index.html")
+        page.write_text("hello from mas e2e")
+        page.chmod(0o644)  # what a user puts there; nginx reads it as its own user
         env.deploy(created["release_id"])
         app = env.db.get_app("e2e-nginx")
         status, body = http_get(f"http://127.0.0.1:{app['port']}/")  # web port, on 127.0.0.1 only
-        assert status == 200 and "hello from mas e2e" in body  # the kept folder is mounted
+        listing = stacks.exec(app, "app", ["ls", "-lan", "/usr/share/nginx/html"]) if status != 200 else ""
+        assert status == 200 and "hello from mas e2e" in body, listing  # the kept folder is mounted
         assert http_get("http://127.0.0.1:18089/")[0] == 200  # published port
         assert stacks.exec(app, "app", ["printenv", "E2E"]).strip() == "first"
         assert "ready for start up" in stacks.logs("e2e-nginx")  # nginx's entrypoint says so

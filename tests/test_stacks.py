@@ -167,6 +167,7 @@ def test_mail_server_setup(env, tmp_path):
     assert calls[0] == ["setup", "email", "add", "contact@example.com", ctx.secrets["mailbox_password"]]
     assert calls[1] == ["setup", "config", "dkim", "domain", "example.com"] and calls[2] == ["compose", "restart"]
     assert calls[3] == ["wait", True]  # the deploy ends once the server is healthy (IMAP listening)
+    assert calls[4] == ["doveadm", "auth", "test", "contact@example.com", ctx.secrets["mailbox_password"]]
 
     host.makedirs("/srv/mas/stacks/mail/data/config/opendkim/keys/example.com")
     host.write_text("/srv/mas/stacks/mail/data/config/opendkim/keys/example.com/mail.txt",
@@ -174,7 +175,7 @@ def test_mail_server_setup(env, tmp_path):
     host.write_text("/srv/mas/stacks/mail/data/config/postfix-accounts.cf", "contact@example.com|{SHA512-CRYPT}x")
     calls.clear()
     TEMPLATES["mail"].after(stacks, app, ctx, ReleaseLog(tmp_path / "m2.log"))
-    assert calls == [["wait", True]]  # already set up: only waits for it
+    assert [c[0] for c in calls] == ["wait", "doveadm"]  # already set up: only waits for it
     info = client.get("/api/apps/mail/stack").json()
     records = {(r["type"], r["name"]): r["value"] for r in info["dns"]}
     assert records[("MX", "example.com")] == "10 mail.example.com"
@@ -183,7 +184,8 @@ def test_mail_server_setup(env, tmp_path):
 
     r = client.post("/api/apps/mail/stack/actions/add-mailbox", json={"values": {"name": "Sales"}}, headers=h)
     assert r.status_code == 200 and r.json()["output"].startswith("sales@example.com created")
-    assert calls[-1][:4] == ["setup", "email", "add", "sales@example.com"]
+    assert calls[-2][:4] == ["setup", "email", "add", "sales@example.com"]
+    assert calls[-1][:4] == ["doveadm", "auth", "test", "sales@example.com"]  # usable when shown
     bad = client.post("/api/apps/mail/stack/actions/add-mailbox", json={"values": {"name": "a b"}}, headers=h)
     assert bad.status_code == 400
     assert client.post("/api/apps/mail/stack/actions/nope", json={}, headers=h).status_code == 400

@@ -228,6 +228,13 @@ def _mail_after(mgr: "StackManager", app: dict, ctx: Ctx, rlog: ReleaseLog) -> N
         mgr.exec(app, "mailserver", ["setup", "config", "dkim", "domain", domain], retries=5)
         mgr.compose(app, ["restart"], rlog)
     mgr._wait(app, rlog, timeout=300, healthy=True)
+    rlog.line("checking that the mailbox accepts its password")
+    _mail_ready(mgr, app, f"{ctx.options['mailbox']}@{domain}", ctx.secrets["mailbox_password"])
+
+
+def _mail_ready(mgr: "StackManager", app: dict, address: str, password: str) -> None:
+    """docker-mailserver picks up new accounts a few seconds later: wait until Dovecot accepts it."""
+    mgr.exec(app, "mailserver", ["doveadm", "auth", "test", address, password], retries=30)
 
 
 def _mail_add(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
@@ -237,6 +244,7 @@ def _mail_add(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
     password = secrets.token_urlsafe(12)
     address = f"{local}@{ctx.options['mail_domain']}"
     mgr.exec(app, "mailserver", ["setup", "email", "add", address, password])
+    _mail_ready(mgr, app, address, password)
     return f"{address} created. Password: {password}"
 
 
