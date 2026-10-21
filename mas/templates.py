@@ -154,7 +154,7 @@ EnvironmentFile=-@@ENV_FILE@@
 Environment="PORT=@@PORT@@" "HOST=@@BIND@@" "HOSTNAME=@@BIND@@" "NODE_ENV=production" "PATH=@@PATH@@"
 # Fewer glibc malloc arenas: much less memory for Node (sharp, native modules) and Python threads.
 Environment="MALLOC_ARENA_MAX=2"
-ExecStart=@@EXEC@@
+@@LIMITS@@ExecStart=@@EXEC@@
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=yes
@@ -203,12 +203,28 @@ def upstream_block(app_id: str, servers: list[str]) -> str:
     return f"upstream {upstream_name(app_id)} {{\n    least_conn;\n{lines}}}\n\n"
 
 
-def proxy_body(port: int, pages_dir: str, upstream: str | None = None, app_id: str = "app") -> str:
+# An app that sleeps when nobody visits it: the first request finds no backend, Mas starts the app and
+# answers a "starting" page that refreshes until the app answers.
+WAKE_LOCATION = """
+    location @mas_wake {
+        proxy_pass http://127.0.0.1:@@MAS_PORT@@/api/wake/@@APP@@;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+"""
+
+
+def proxy_body(port: int, pages_dir: str, upstream: str | None = None, app_id: str = "app",
+               wake_port: int | None = None) -> str:
     # With an upstream, a request that hits a restarting or dead backend is retried on the next one.
     next_upstream = ("\n        proxy_next_upstream error timeout http_502 http_503 http_504;"
                      "\n        proxy_next_upstream_tries 3;") if upstream else ""
-    return fill(PROXY_BODY, target=upstream or f"127.0.0.1:{port}", next_upstream=next_upstream,
+    body = fill(PROXY_BODY, target=upstream or f"127.0.0.1:{port}", next_upstream=next_upstream,
                 pages=pages_dir, page="deploying", app=app_id)
+    if wake_port:
+        body = body.replace("error_page 502 503 504 =503 /__mas/status.html;", "error_page 502 503 504 = @mas_wake;", 1)
+        body += fill(WAKE_LOCATION, mas_port=wake_port, app=app_id)
+    return body
 
 
 def supabase_body(port: int, pages_dir: str, studio_allow: list[str] = ()) -> str:
@@ -279,6 +295,8 @@ STATUS_PAGES = {
     "unavailable": dict(title="Not available yet", refresh="60", ring="off",
                         text="The first deployment of this site did not succeed. The owner has been notified in "
                              "the dashboard."),
+    "waking": dict(title="Starting…", refresh="2", ring="",
+                   text="This site was asleep to save resources and is starting. This page refreshes by itself."),
     "service": dict(title="Running", refresh="3600", ring="off",
                     text="This address belongs to a service (mail, game server…) and has no website."),
 }
@@ -303,6 +321,13 @@ def systemd_quote(command: str) -> str:
 
 
 def unit(app_id: str, repo: str, user: str, current: str, env_file: str, port: int, path: str, exec_start: str,
-         bind: str = "127.0.0.1") -> str:
+         bind: str = "127.0.0.1", memory_mb: int | None = None, node: bool = False) -> str:
+    limits = ""
+    if memory_mb:
+        # The kernel reclaims from 90 % and stops the app at the limit; Node keeps its heap under ~75 %
+        # (an NODE_OPTIONS of the app, in its environment file, wins over this one).
+        limits = f"MemoryHigh={memory_mb * 9 // 10}M\nMemoryMax={memory_mb}M\n"
+        if node:
+            limits += f'Environment="NODE_OPTIONS=--max-old-space-size={max(64, memory_mb * 3 // 4)}"\n'
     return fill(UNIT, app=app_id, repo=repo, user=user, current=current, env_file=env_file, port=port,
-                path=path, exec=exec_start, bind=bind)
+                path=path, exec=exec_start, bind=bind, limits=limits)

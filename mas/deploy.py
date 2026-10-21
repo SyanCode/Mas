@@ -119,6 +119,15 @@ def app_instances(app: dict) -> list[tuple[str, int]]:
             for i, p in enumerate(ports) if p]
 
 
+def app_resources(app: dict) -> dict:
+    """{memory_mb, sleep_after_min, autoscale: {min, max}} of an app (mas.resources); {} when unset."""
+    try:
+        value = json.loads(app.get("resources") or "{}")
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def app_aliases(app: dict) -> list[str]:
     return json.loads(app.get("aliases") or "[]")
 
@@ -575,20 +584,7 @@ class Deployer:
         self.host.makedirs(ENV_DIR, mode=0o700)
         self.host.write_text(env_file(app["id"]), systemd_env_file(env), mode=0o600)
         instances = app_instances(app)
-        changed = bool(self._remove_extra_units(app["id"], {u for u, _ in instances}, rlog))
-        for unit, port in instances:
-            one = {**app, "port": port}
-            content = templates.unit(
-                app["id"], app["repo"], app_user(app["id"]), paths.current, env_file(app["id"]),
-                port, self._unit_path(app_type, paths.current),
-                self._exec_start(one, app_type, paths.current, workdir), app.get("bind") or "127.0.0.1",
-            )
-            path = f"/etc/systemd/system/{unit}"
-            if self.host.read_text(path) != content:
-                rlog.line(f"writing {path}")
-                self.host.backup(path)
-                self.host.write_text(path, content)
-                changed = True
+        changed = self._write_units(app, app_type, paths, workdir, rlog)
         if changed:
             self._system(rlog, ["systemctl", "daemon-reload"])
             self._system(rlog, ["systemctl", "enable", *(u for u, _ in instances)])
@@ -598,6 +594,84 @@ class Deployer:
             self._system(rlog, ["systemctl", "restart", unit])
             if len(instances) > 1:  # stop the rollout at the first instance that does not come back
                 self._health(app, app_type, workdir or paths.current, rlog, port=port)
+
+    def _write_units(self, app: dict, app_type: ServiceType, paths: AppPaths, workdir: str | None,
+                     rlog: ReleaseLog) -> bool:
+        """The unit file of every instance (and none for instances not configured anymore)."""
+        instances = app_instances(app)
+        changed = bool(self._remove_extra_units(app["id"], {u for u, _ in instances}, rlog))
+        for unit, port in instances:
+            one = {**app, "port": port}
+            content = templates.unit(
+                app["id"], app["repo"], app_user(app["id"]), paths.current, env_file(app["id"]),
+                port, self._unit_path(app_type, paths.current),
+                self._exec_start(one, app_type, paths.current, workdir), app.get("bind") or "127.0.0.1",
+                app_resources(app).get("memory_mb"), app_type in (ServiceType.NODE, ServiceType.NEXTJS),
+            )
+            path = f"/etc/systemd/system/{unit}"
+            if self.host.read_text(path) != content:
+                rlog.line(f"writing {path}")
+                self.host.backup(path)
+                self.host.write_text(path, content)
+                changed = True
+        return changed
+
+    def apply_resources(self, app_id: str, rlog: ReleaseLog) -> None:
+        """New memory limit or sleep setting: rewrite the units and the nginx site of the live release
+        and restart the instances one by one, without a rebuild."""
+        with self._lock:
+            app = self.db.get_app(app_id)
+            app_type = ServiceType(app["type"])
+            paths = app_paths(self.config, app_id)
+            if app["mode"] != "managed" or app_type not in PROXY_TYPES or not self.host.exists(paths.current):
+                return  # applied at the first deploy
+            if self._write_units(app, app_type, paths, None, rlog):
+                self._system(rlog, ["systemctl", "daemon-reload"])
+                if self.db.get_setting(f"asleep:{app_id}") != "1":
+                    for unit, port in app_instances(app):
+                        self._system(rlog, ["systemctl", "restart", unit])
+                        self._health(app, app_type, paths.current, rlog, port=port)
+            if app["domain"]:
+                self._install_vhost(app, app_type, paths, rlog)
+
+    def scale(self, app_id: str, count: int, rlog: ReleaseLog) -> int:
+        """Run ``count`` instances of the live release, without a rebuild: new instances are started and
+        checked before nginx sends them requests; removed ones leave nginx before they stop."""
+        with self._lock:
+            app = self.db.get_app(app_id)
+            app_type = ServiceType(app["type"])
+            paths = app_paths(self.config, app_id)
+            if app["mode"] != "managed" or app_type not in PROXY_TYPES or not self.host.exists(paths.current):
+                raise DeployError("only a deployed Node.js, Next.js or Python app can scale")
+            before = app_instances(app)
+            count = max(1, min(MAX_INSTANCES, count))
+            if count == len(before):
+                return count
+            extra = [p for _, p in before][1:count]
+            if count > len(before):
+                used = used_ports(self.host, self.db)
+                free = [p for p in range(self.config.port_min, self.config.port_max + 1) if p not in used]
+                extra += free[:count - len(before)]
+            self.db.update_app(app_id, extra_ports=json.dumps(extra))
+            app = self.db.get_app(app_id)
+            after = app_instances(app)
+            if len(after) > len(before):
+                rlog.step(f"Scaling {app_id} up: {len(before)} → {len(after)} instances")
+                self._write_units(app, app_type, paths, None, rlog)
+                self._system(rlog, ["systemctl", "daemon-reload"])
+                added = [(u, p) for u, p in after if (u, p) not in before]
+                self._system(rlog, ["systemctl", "enable", "--now", *(u for u, _ in added)])
+                for _, port in added:
+                    self._health(app, app_type, paths.current, rlog, port=port)
+                if app["domain"]:
+                    self._install_vhost(app, app_type, paths, rlog)
+            else:
+                rlog.step(f"Scaling {app_id} down: {len(before)} → {len(after)} instances")
+                if app["domain"]:
+                    self._install_vhost(app, app_type, paths, rlog)  # nginx stops sending them requests first
+                self._write_units(app, app_type, paths, None, rlog)  # stops and removes the others
+                self._system(rlog, ["systemctl", "daemon-reload"])
+            return len(after)
 
     def _fpm_socket(self) -> str:
         sockets = sorted(self.host.glob("/run/php/php*-fpm.sock"))
@@ -620,8 +694,10 @@ class Deployer:
         root = paths.current + (f"/{app['root_dir'].strip('/')}" if app.get("root_dir") else "")
         if app_type in PROXY_TYPES:
             balanced = len(self._upstream_servers(app)) > 1
+            sleeps = bool(app_resources(app).get("sleep_after_min"))
             return templates.proxy_body(app["port"], self.config.pages_dir,
-                                        templates.upstream_name(app["id"]) if balanced else None, app["id"])
+                                        templates.upstream_name(app["id"]) if balanced else None, app["id"],
+                                        self.config.port if sleeps else None)
         if app_type == ServiceType.PHP:
             return templates.php_body(root, self._fpm_socket())
         return templates.static_body(root)
@@ -939,6 +1015,7 @@ class Deployer:
                     self._restart_instances(app)
             raise
 
+        self.db.set_setting(f"asleep:{app['id']}", None)  # just restarted: awake
         if handed is not None:
             replaced = json.loads(app["replaces"])["service_id"]
             self.db.update_app(app["id"], replaces=None)

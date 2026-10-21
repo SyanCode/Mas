@@ -168,13 +168,14 @@ MIGRATIONS = [
     ("apps", "cluster_backends TEXT"),  # JSON ["10.0.0.2:7101"]: those copies, after the last deploy
     ("apps", "bind TEXT"),         # address the app listens on (copy of an app of another server)
     ("apps", "replica_of TEXT"),   # copy driven by another Mas: its name
+    ("apps", "resources TEXT"),    # JSON {memory_mb, sleep_after_min, autoscale: {min, max}} (mas.resources)
 ]
 ROLES = ("admin", "editor")
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
               "current_release", "extra_ports", "backends", "stack", "aliases", "replaces", "cluster",
-              "cluster_backends", "bind", "replica_of"}
+              "cluster_backends", "bind", "replica_of", "resources"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
 
 

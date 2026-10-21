@@ -22,6 +22,111 @@ const TRIGGERS: Record<string, string> = {
 
 interface ClusterServer { id: number; name: string; url: string; address: string | null; error: string | null }
 
+interface ResourceSettings { memory_mb?: number; sleep_after_min?: number; autoscale?: { min: number; max: number } }
+interface Advice { id: string; level: "info" | "warning"; params: Record<string, string | number>; set: ResourceSettings | null }
+interface ResourcesInfo {
+  resources: ResourceSettings; asleep: boolean; instances: number; last_request_at: number | null;
+  target_rpm_per_instance: number; memory_now_mb: number | null; advice: Advice[];
+}
+
+const ADVICE: Record<string, string> = {
+  "memory-limit": msg("Uses {used} MB per instance with no limit: cap it at {mb} MB so it cannot take the memory of the other apps."),
+  "memory-high": msg("Uses {used} MB per instance, close to its {limit} MB limit: it slows down then restarts. Give it more or look for a leak."),
+  sleep: msg("Almost no visits ({rpm} req/min): let it sleep after {min} minutes without a visit, it starts again on the next one."),
+  autoscale: msg("{n} instances for {rpm} req/min: let the instances follow the traffic instead."),
+  "next-standalone": msg("Add output: \"standalone\" to next.config: the server loads only the files it needs and uses much less memory."),
+};
+
+function ResourcesCard({ app }: { app: App }) {
+  const t = useT();
+  const [info, setInfo] = useState<ResourcesInfo | null>(null);
+  const [memory, setMemory] = useState("");
+  const [sleep, setSleep] = useState("");
+  const [auto, setAuto] = useState(false);
+  const [low, setLow] = useState(1);
+  const [high, setHigh] = useState(4);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState("");
+  const fill = (r: ResourcesInfo) => {
+    setInfo(r);
+    setMemory(r.resources.memory_mb ? String(r.resources.memory_mb) : "");
+    setSleep(r.resources.sleep_after_min ? String(r.resources.sleep_after_min) : "");
+    setAuto(!!r.resources.autoscale);
+    setLow(r.resources.autoscale?.min ?? 1);
+    setHigh(r.resources.autoscale?.max ?? Math.max(2, r.instances));
+  };
+  const load = useCallback(() => {
+    api<ResourcesInfo>(`/apps/${encodeURIComponent(app.id)}/resources`).then(fill).catch((e) => setError((e as ApiError).detail));
+  }, [app.id]);
+  useEffect(load, [load]);
+
+  async function save(value: ResourceSettings) {
+    setBusy(true);
+    setError("");
+    setDone("");
+    try {
+      await api(`/apps/${encodeURIComponent(app.id)}/resources`, { method: "PUT", body: value });
+      setDone(t("Applied: the instances restart one by one."));
+      setTimeout(load, 3000);
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const current = (): ResourceSettings => ({
+    memory_mb: Number(memory) || undefined, sleep_after_min: Number(sleep) || undefined,
+    autoscale: auto ? { min: low, max: high } : undefined,
+  });
+
+  if (!info) return error ? <Card title={t("Resources")}><ErrorText>{error}</ErrorText></Card> : null;
+  return (
+    <Card title={t("Resources")} actions={info.asleep ? <Badge tone="amber">{t("asleep")}</Badge>
+      : info.memory_now_mb != null ? <Badge tone="emerald">{info.memory_now_mb} MB</Badge> : null}>
+      <div className="space-y-4 text-sm">
+        <p className="text-xs text-zinc-500">
+          {info.asleep ? t("Stopped since nobody visits it: the next visit starts it (a few seconds).")
+            : t("{n} instance(s) running.", { n: info.instances })}{" "}
+          {info.last_request_at ? t("Last request {when}.", { when: timeAgo(new Date(info.last_request_at * 1000).toISOString()) }) : ""}
+        </p>
+        {info.advice.length > 0 && (
+          <div className="space-y-2">
+            {info.advice.map((a) => (
+              <div key={a.id} className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ${a.level === "warning" ? "border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10" : "border-zinc-200 dark:border-white/[0.08]"}`}>
+                <span className="text-xs">{t(ADVICE[a.id] ?? a.id, a.params)}</span>
+                {a.set && <Button disabled={busy} onClick={() => save({ ...current(), ...a.set })}>{t("Apply")}</Button>}
+              </div>
+            ))}
+          </div>
+        )}
+        <Label title={t("Memory limit (MB)")} hint={t("Above 90 % the app is slowed down, at the limit it restarts. Node apps get a matching heap size. Empty: no limit.")}>
+          <Input type="number" min={64} max={65536} value={memory} onChange={(e) => setMemory(e.target.value)} placeholder="512" />
+        </Label>
+        <Label title={t("Sleep after (minutes without a visit)")} hint={t("The app is stopped and uses nothing; the next visitor sees a short “starting” page. Empty: always on.")}>
+          <Input type="number" min={5} max={10080} value={sleep} onChange={(e) => setSleep(e.target.value)} placeholder="30" />
+        </Label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+          <span>{t("Instances follow the traffic")}</span>
+        </label>
+        {auto && (
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-3">
+              <Label title={t("Minimum")}><Input type="number" min={1} max={16} value={low} onChange={(e) => setLow(Math.max(1, Math.min(16, Number(e.target.value) || 1)))} /></Label>
+              <Label title={t("Maximum")}><Input type="number" min={1} max={16} value={high} onChange={(e) => setHigh(Math.max(1, Math.min(16, Number(e.target.value) || 1)))} /></Label>
+            </div>
+            <p className="text-xs text-zinc-500">{t("One more instance per {rpm} requests a minute or when the CPU stays above 70 %, one less after 10 quiet minutes. No rebuild.", { rpm: info.target_rpm_per_instance })}</p>
+          </div>
+        )}
+        <ErrorText>{error}</ErrorText>
+        {done && <p className="text-xs text-emerald-600">{done}</p>}
+        <Button variant="primary" disabled={busy} onClick={() => save(current())}>{busy ? <Spinner /> : null}{t("Save")}</Button>
+      </div>
+    </Card>
+  );
+}
+
 function LoadBalancingCard({ app, onSaved }: { app: App; onSaved: (releaseId: number) => void }) {
   const t = useT();
   const [instances, setInstances] = useState(app.instances);
@@ -873,6 +978,7 @@ function AppView() {
           {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && (
             <LoadBalancingCard key={`${app.instances}-${app.backends.join()}`} app={app} onSaved={(rid) => { setSelected(rid); load(); }} />
           )}
+          {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && <ResourcesCard app={app} />}
           {app.mode === "managed" && <DatabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           {app.installation_id && <CmsCard appId={app.id} />}
           {app.mode === "managed" && <EnvCard appId={app.id} />}

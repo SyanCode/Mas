@@ -17,10 +17,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_cluster, api_cms, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, api_cluster, api_cms, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
+from mas.resources import Resources
 from mas.deploy import Deployer
 from mas.github import GitHubApp
 from mas.cms import CmsManager
@@ -169,6 +170,10 @@ def create_app(
                 await asyncio.to_thread(cluster.watch)
             except Exception:
                 log.exception("cluster watch failed")
+            try:  # instances follow the traffic, idle apps fall asleep
+                await asyncio.to_thread(resources.tick)
+            except Exception:
+                log.exception("resources tick failed")
             try:
                 await asyncio.to_thread(supabase.auto_backup)
             except Exception:
@@ -207,6 +212,7 @@ def create_app(
     site_stats = SiteStats(host, config, db, find_service=scanner.get)
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \
         Cluster(host, config, db, deployer)
+    resources = Resources(host, config, db, deployer, cluster)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -549,6 +555,8 @@ def create_app(
     api_stacks.register(app, db=db, current_session=current_session, manager=stacks, backups=stack_backups)
     api_cluster.register(app, db=db, current_session=current_session, cluster=cluster, deployer=deployer)
     app.state.cluster = cluster
+    api_resources.register(app, db=db, current_session=current_session, deployer=deployer, resources=resources)
+    app.state.resources = resources
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,

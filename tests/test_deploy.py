@@ -19,7 +19,8 @@ from mas import auth, templates
 from mas.api import create_app
 from mas.config import Config, load_config, save_section
 from mas.db import Database
-from mas.deploy import DeployError, Deployer, app_paths, replacement_plan, used_ports, validate_app, validate_backends
+from mas.deploy import (DeployError, Deployer, ReleaseLog, app_paths, replacement_plan, used_ports, validate_app,
+                        validate_backends)
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env, systemd_env_file
 from mas.github import app_jwt, git_auth_env, repo_from_remote, verify_signature
 from mas.health import check_certificates, check_dns, check_nginx, load_lineages
@@ -695,3 +696,32 @@ def test_a_copy_listens_on_the_private_address(env):
     assert urls == ["http://10.0.0.2:7100/"]
     clone_env = next(e for a, e in env["calls"] if a[:2] == ["git", "clone"])
     assert base64.b64encode(b"x-access-token:ghs_from_a").decode() in clone_env["GIT_CONFIG_VALUE_0"]
+
+
+def test_memory_limit_sleep_and_scaling_without_a_rebuild(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    db.update_app("web", resources=json.dumps({"memory_mb": 512, "sleep_after_min": 30}))
+    rid, ok = deploy_once(env, SHA1)
+    assert ok, deployer.log_path("web", rid).read_text()
+    unit = host.read_text("/etc/systemd/system/mas-app-web.service")
+    assert "MemoryHigh=460M\nMemoryMax=512M\n" in unit and '"NODE_OPTIONS=--max-old-space-size=384"' in unit
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert "error_page 502 503 504 = @mas_wake;" in vhost and "/api/wake/web;" in vhost
+
+    log = ReleaseLog(Path(db.path).parent / "scale.log")
+    clones = sum(1 for a, _ in env["calls"] if a[:2] == ["git", "clone"])
+    assert deployer.scale("web", 3, log) == 3
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    ports = json.loads(db.get_app("web")["extra_ports"])
+    assert len(ports) == 2 and all(f"server 127.0.0.1:{p}" in vhost for p in [7100, *ports])
+    assert host.exists(f"/etc/systemd/system/mas-app-web.3.service")
+    assert any(a[:3] == ["systemctl", "enable", "--now"] for a in host.executed)
+    assert deployer.scale("web", 1, log) == 1
+    assert not host.exists("/etc/systemd/system/mas-app-web.2.service")
+    assert "upstream mas_app_web" not in host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert sum(1 for a, _ in env["calls"] if a[:2] == ["git", "clone"]) == clones  # no rebuild
+
+    db.update_app("web", resources=json.dumps({"memory_mb": 1024}))
+    deployer.apply_resources("web", log)
+    assert "MemoryMax=1024M" in host.read_text("/etc/systemd/system/mas-app-web.service")
+    assert "@mas_wake" not in host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
