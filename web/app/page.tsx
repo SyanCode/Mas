@@ -50,6 +50,7 @@ function ServiceCard({ s }: { s: Service }) {
         <Badge tone={TYPE_TONE[s.type] ?? "zinc"}>{s.type}{s.type_source === "manual" ? "*" : ""}</Badge>
         <Badge>{s.manager}</Badge>
         {s.port && <Badge className="mono">:{s.port}</Badge>}
+        {s.app && <Badge tone="violet">{t("Mas app: {name}", { name: s.app.name })}</Badge>}
       </div>
       <div className="mt-auto flex items-center justify-between gap-2 border-t border-zinc-200/70 pt-3 text-xs text-zinc-500 dark:border-white/[0.06]">
         <span className="truncate">{gh ? gh.replace("https://github.com/", "") : s.path ?? "—"}</span>

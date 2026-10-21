@@ -113,8 +113,9 @@ def default_web_dir(config: Config) -> Path | None:
     return next((p for p in candidates if (p / "index.html").is_file()), None)
 
 
-def service_payload(svc: Service) -> dict:
+def service_payload(svc: Service, apps: list[dict] | None = None, apps_dir: str = "/srv/mas/apps") -> dict:
     data = svc.model_dump(mode="json")
+    data["app"] = runtime.app_for(svc, apps, apps_dir) if apps is not None else None
     data["actions"] = available_actions(svc)
     data["confirm_actions"] = sorted(CONFIRM_ACTIONS & set(data["actions"]))
     return data
@@ -367,13 +368,14 @@ def create_app(
     @app.get("/api/services")
     def list_services(_: SessionInfo = Depends(current_session)) -> dict:
         res = scanner.result()
+        apps = db.list_apps()
         return {"scanned_at": res.scanned_at.isoformat(), "warnings": res.warnings,
-                "services": [service_payload(s) for s in res.services]}
+                "services": [service_payload(s, apps, config.apps_dir) for s in res.services]}
 
     @app.get("/api/services/{service_id}")
     def get_service(service_id: str, _: SessionInfo = Depends(current_session)) -> dict:
         svc = find_service(service_id)
-        return service_payload(svc) | {"history": db.history(service_id, 30)}
+        return service_payload(svc, db.list_apps(), config.apps_dir) | {"history": db.history(service_id, 30)}
 
     @app.post("/api/scan")
     async def rescan(_: SessionInfo = Depends(current_session)) -> dict:

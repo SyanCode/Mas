@@ -55,3 +55,15 @@ def test_private_port_without_domain_gets_a_tunnel(tmp_path):
                       "command": "ssh -L 8000:127.0.0.1:8000 <you>@203.0.113.7"}]
     links = _links(svc, [{"port": 25565, "address": "0.0.0.0", "public": True}], Config())
     assert links == [{"kind": "port", "port": 25565, "url": "http://<server>:25565"}]
+
+
+def test_the_site_of_a_mas_app_is_linked_to_it(tmp_path):
+    from mas.models import Manager, Service
+    from mas.runtime import app_for
+    apps = [{"id": "bb", "name": "bb", "mode": "managed", "port": None, "service_id": None}]
+    site = Service(id="bb.example.com", name="bb.example.com", manager=Manager.NGINX_STATIC,
+                   path="/srv/mas/apps/bb/current/dist", nginx_files=["/etc/nginx/sites-enabled/mas-app-bb.conf"])
+    assert app_for(site, apps, "/srv/mas/apps") == {"id": "bb", "name": "bb"}
+    other = site.model_copy(update={"path": "/var/www/bb", "nginx_files": ["/etc/nginx/sites-enabled/bb.conf"]})
+    assert app_for(other, apps, "/srv/mas/apps") is None
+    assert app_for(other.model_copy(update={"path": "/srv/mas/apps/bbb/current"}), apps, "/srv/mas/apps") is None

@@ -32,6 +32,8 @@ export interface ServiceRuntime {
 export interface Service {
   id: string;
   name: string;
+  /** The Mas app this service belongs to (its site, unit or folder). */
+  app?: { id: string; name: string } | null;
   display_name: string | null;
   notes: string | null;
   domains: string[];

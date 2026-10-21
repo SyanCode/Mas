@@ -10,6 +10,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 
 from mas.collectors import ScanContext
 from mas.collectors import ports as ports_collector
@@ -177,13 +178,22 @@ def _links(svc: Service, ports: list[dict], config: Config) -> list[dict]:
     return links
 
 
-def _app_for(svc: Service, db: Database) -> dict | None:
-    """The Mas app behind this service (adopted service, or the unit / port of a managed app)."""
-    for app in db.list_apps():
+def app_for(svc: Service, apps: list[dict], apps_dir: str) -> dict | None:
+    """The Mas app behind this service: an adopted service, or the unit, port, nginx file or folder
+    of an app Mas deploys (its site shows up in the scan like any other)."""
+    base = apps_dir.rstrip("/")
+    for app in apps:
+        folder = f"{base}/{app['id']}"
         if (app.get("service_id") == svc.id or (svc.unit and svc.unit.startswith(f"mas-app-{app['id']}"))
-                or (app.get("mode") == "managed" and svc.port and app.get("port") == svc.port)):
+                or (app.get("mode") == "managed" and svc.port and app.get("port") == svc.port)
+                or any(PurePosixPath(f).name == f"mas-app-{app['id']}.conf" for f in svc.nginx_files)
+                or (svc.path and (svc.path == folder or svc.path.startswith(folder + "/")))):
             return {"id": app["id"], "name": app["name"]}
     return None
+
+
+def _app_for(svc: Service, db: Database, config: Config) -> dict | None:
+    return app_for(svc, db.list_apps(), config.apps_dir)
 
 
 def service_runtime(host: Host, config: Config, db: Database, svc: Service, sample: float = 0.5) -> dict:
@@ -209,5 +219,5 @@ def service_runtime(host: Host, config: Config, db: Database, svc: Service, samp
     if out["process"]:
         out["process"].pop("pids", None)
     out["links"] = _links(svc, out["ports"], config)
-    out["app"] = _app_for(svc, db)
+    out["app"] = _app_for(svc, db, config)
     return out
