@@ -721,5 +721,7 @@
   "Commit {sha}": "Commit {sha}",
   "Listening ports": "Puertos a la escucha",
   "local": "local",
-  "The service keeps running now, but will not start again after a reboot of the server.": "El servicio sigue funcionando, pero no se iniciará tras reiniciar el servidor."
+  "The service keeps running now, but will not start again after a reboot of the server.": "El servicio sigue funcionando, pero no se iniciará tras reiniciar el servidor.",
+  "A static site: nginx serves its files, no process of its own to measure.": "Un sitio estático: nginx sirve sus archivos, no tiene proceso propio que medir.",
+  "No running process found for this service.": "No se encontró ningún proceso en ejecución para este servicio."
 }

@@ -112,10 +112,13 @@ function Live({ svc, onRuntime, onBoot }: { svc: Service; onRuntime: (r: Service
     <Card title={t("Right now")} actions={<span className="text-xs text-zinc-500">{t("every 10 s")}</span>}>
       <ErrorText>{error}</ErrorText>
       {!rt && !error && <p className="text-sm text-zinc-500">{t("Loading…")}</p>}
-      {rt && (
+      {rt && !p && !sd && !dk && (
+        <p className="text-sm text-zinc-500">{svc.manager === "nginx-static" ? t("A static site: nginx serves its files, no process of its own to measure.") : t("No running process found for this service.")}</p>
+      )}
+      {rt && (p || sd || dk) && (
         <dl className="divide-y divide-zinc-100 dark:divide-zinc-800">
           <Row label={t("Memory")}>{mb(memory) && <span>{mb(memory)}{sd?.memory_peak_mb ? <span className="text-zinc-500"> · {t("peak {v}", { v: mb(sd.memory_peak_mb) ?? "" })}</span> : null}{dk?.memory_limit_mb ? <span className="text-zinc-500"> / {mb(dk.memory_limit_mb)}</span> : null}</span>}</Row>
-          <Row label="CPU">{cpu !== null && cpu !== undefined && `${cpu} %`}{sd?.cpu_seconds ? <span className="text-zinc-500"> · {t("{n} s in total", { n: sd.cpu_seconds })}</span> : null}</Row>
+          <Row label="CPU">{cpu !== null && cpu !== undefined ? <span>{cpu} %{sd?.cpu_seconds ? <span className="text-zinc-500"> · {t("{n} s in total", { n: sd.cpu_seconds })}</span> : null}</span> : null}</Row>
           <Row label={t("Started")}>{started && <span title={started}>{timeAgo(started)}</span>}</Row>
           <Row label={t("Restarts")}>{restarts !== null && restarts !== undefined && String(restarts)}</Row>
           <Row label={t("Processes")}>{p && t("{n} process(es), {threads} threads", { n: p.processes, threads: p.threads })}</Row>
