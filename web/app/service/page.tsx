@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
+import { TrafficStats } from "@/components/TrafficStats";
 import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, StatusDot } from "@/components/ui";
 import {
   api, ApiError, daysUntil, githubUrl, SERVICE_TYPES, timeAgo,
@@ -381,6 +382,7 @@ function ServiceDetail() {
               </Row>
             </dl>
           </Card>
+          {svc.domains.length > 0 && <TrafficStats url={`/services/${encodeURIComponent(svc.id)}/stats`} title={t("Traffic")} />}
           <Logs id={svc.id} />
         </div>
         <div className="space-y-4">

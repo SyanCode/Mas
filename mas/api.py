@@ -25,7 +25,8 @@ from mas.resources import Resources
 from mas.deploy import Deployer
 from mas.github import GitHubApp
 from mas.cms import CmsManager
-from mas.sitestats import SiteStats
+from mas.restartall import RestartAll, RestartError
+from mas.sitestats import SiteStats, service_target
 from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
@@ -103,6 +104,13 @@ class DisableTotpBody(BaseModel):
     code: str = Field(max_length=16)
 
 
+class RestartAllBody(BaseModel):
+    skip: list[str] = Field(default_factory=list, max_length=500)
+
+
+NO_STATS = {"days": [], "totals": None, "top_pages": [], "since": None, "tracked_since": None}
+
+
 @dataclass
 class SessionInfo:
     token_hash: str
@@ -154,6 +162,10 @@ def create_app(
 
     async def scan_loop() -> None:
         last_scan = -1e9
+        try:  # the per-site log the statistics of the services read
+            await asyncio.to_thread(deployer.ensure_nginx_maps)
+        except Exception:
+            log.exception("nginx maps not written")
         while True:
             idle = time.monotonic() - activity["at"] > IDLE_AFTER
             if time.monotonic() - last_scan >= (max(config.scan_interval, IDLE_SCAN) if idle else config.scan_interval):
@@ -163,7 +175,7 @@ def create_app(
                     log.exception("background scan failed")
                 last_scan = time.monotonic()
             try:
-                await asyncio.to_thread(site_stats.refresh_all)
+                await asyncio.to_thread(lambda: site_stats.refresh_all(scanner.result().services))
             except Exception:
                 log.exception("site statistics failed")
             try:  # the other servers of the cluster: a silent one gets its copies moved
@@ -213,6 +225,7 @@ def create_app(
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \
         Cluster(host, config, db, deployer)
     resources = Resources(host, config, db, deployer, cluster)
+    restart_all = RestartAll(host, config, db, deployer, scanner)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -452,6 +465,42 @@ def create_app(
         db.audit(s.username, action, result.ok, service_id, result.command, result.output)
         asyncio.get_running_loop().run_in_executor(None, scanner.refresh)
         return result.as_dict()
+
+    @app.get("/api/services/{service_id}/stats")
+    async def service_stats(service_id: str, days: int = Query(30, ge=7, le=365),
+                            _: SessionInfo = Depends(current_session)) -> dict:
+        """Visits per day of the site behind this service (nginx access logs, totals only)."""
+        svc = find_service(service_id)
+        target = service_target(svc, db.list_apps(), config.apps_dir)
+        if target is None or not target.get("domain"):
+            return {**NO_STATS, "reason": "no-domain"}
+        report = await asyncio.to_thread(site_stats.report, target, days)
+        return {**report, "shared_log": target.get("own_log") is False}
+
+    @app.get("/api/apps/{app_id}/stats")
+    async def app_stats(app_id: str, days: int = Query(30, ge=7, le=365),
+                        _: SessionInfo = Depends(current_session)) -> dict:
+        target = db.get_app(app_id)
+        if target is None:
+            raise HTTPException(404, "unknown app")
+        if not target["domain"]:
+            return {**NO_STATS, "reason": "no-domain"}
+        return await asyncio.to_thread(site_stats.report, target, days)
+
+    # -- restart every service at once, exactly as it was ------------------------
+
+    @app.get("/api/restart-all")
+    async def restart_all_plan(_: SessionInfo = Depends(current_session)) -> dict:
+        if restart_all.state["running"]:
+            return restart_all.status()
+        return {**restart_all.status(), "plan": await asyncio.to_thread(restart_all.plan)}
+
+    @app.post("/api/restart-all")
+    def restart_all_start(body: RestartAllBody, s: SessionInfo = Depends(current_session)) -> dict:
+        try:
+            return restart_all.start(s.username, set(body.skip))
+        except RestartError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @app.patch("/api/services/{service_id}")
     def patch_service(service_id: str, body: PatchService, s: SessionInfo = Depends(current_session)) -> dict:

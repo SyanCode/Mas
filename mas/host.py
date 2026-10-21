@@ -270,9 +270,9 @@ class Host:
 
     # -- docker ----------------------------------------------------------
 
-    def docker_request(self, method: str, api_path: str) -> bytes:
+    def docker_request(self, method: str, api_path: str, timeout: float | None = None) -> bytes:
         """Call the Docker Engine API over the unix socket. Raises on failure."""
-        conn = _UnixHTTPConnection(str(self.real(DOCKER_SOCKET)), self.timeout)
+        conn = _UnixHTTPConnection(str(self.real(DOCKER_SOCKET)), timeout or self.timeout)
         try:
             conn.request(method, api_path)
             resp = conn.getresponse()
@@ -364,7 +364,7 @@ class FixtureHost(Host):
     def euid(self) -> int:
         return 0
 
-    def docker_request(self, method: str, api_path: str) -> bytes:
+    def docker_request(self, method: str, api_path: str, timeout: float | None = None) -> bytes:
         if not self.exists(DOCKER_SOCKET):
             raise FileNotFoundError(DOCKER_SOCKET)
         if method != "GET":

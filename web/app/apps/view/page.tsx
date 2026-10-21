@@ -6,6 +6,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
 import { StackCard } from "@/components/StackCard";
+import { TrafficStats } from "@/components/TrafficStats";
 import {
   Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner,
   StatusDot, Terminal, Textarea,
@@ -946,6 +947,8 @@ function AppView() {
           ) : (
             <Card><p className="text-sm text-zinc-500">{t("No deployment yet. Click “Redeploy”.")}</p></Card>
           )}
+
+          {app.domain && <TrafficStats url={`/apps/${encodeURIComponent(app.id)}/stats`} title={t("Traffic")} />}
 
           <Card title={t("Deployments")} padded={false}>
             <ol className="relative">

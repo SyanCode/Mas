@@ -184,3 +184,16 @@ def test_security_headers(env):
     assert r.headers["x-frame-options"] == "DENY"
     assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
     assert r.headers["cache-control"] == "no-store"
+
+
+def test_stats_of_a_service_and_restart_all_plan(env):
+    client, db, _, host = env
+    csrf = login(client)
+    r = client.get("/api/services/blog.example.com/stats?days=7")
+    assert r.status_code == 200 and r.json()["shared_log"] is True
+    assert client.get("/api/services/systemd-mariadb/stats").json()["reason"] == "no-domain"
+    host._commands = {"systemctl is-active *": {"output": "inactive\n"}, **host._commands}
+    plan = client.get("/api/restart-all").json()
+    assert plan["running"] is False and any(i["key"] == "unit:mariadb.service" for i in plan["plan"])
+    assert client.post("/api/restart-all", json={"skip": []}).status_code in (401, 403)  # CSRF needed
+    assert csrf

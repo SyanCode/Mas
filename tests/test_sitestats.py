@@ -90,3 +90,25 @@ def test_only_new_lines_are_read_and_rotation_is_followed(tmp_path):
     assert row["pageviews"] == 7 and row["visitors"] == 5  # 4.4.4.4 (end of .1), 5.5.5.5; 2.2.2.2 already came
     stats.refresh(app, force=True)  # nothing new
     assert db.site_stats("bb", today.isoformat())[0]["pageviews"] == 7
+
+
+def test_a_site_of_the_server_is_counted_from_the_shared_log(tmp_path):
+    """blog.example.com writes to the shared access.log: its lines of mas-hosts.access.log are counted."""
+    from mas.sitestats import HOSTS_LOG, service_target
+    from mas.state import Scanner
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    config = Config()
+    svc = Scanner(host, config, db).get("blog.example.com")
+    target = service_target(svc, db.list_apps(), config.apps_dir)
+    assert target["own_log"] is False and target["hosts"] == ["blog.example.com", "www.blog.example.com"]
+    host.write_text(HOSTS_LOG, "\n".join([
+        "blog.example.com " + line("1.1.1.1", "21", "/"), "www.blog.example.com " + line("2.2.2.2", "21", "/a"),
+        "docs.example.com " + line("3.3.3.3", "21", "/"), "BLOG.example.com " + line("1.1.1.1", "21", "/b"),
+    ]) + "\n")
+    stats = SiteStats(host, config, db)
+    report = stats.report(target, days=7, today=date(2026, 10, 21))
+    assert report["totals"] == {"requests": 3, "pageviews": 3, "visitors": 2}
+    host.write_text(HOSTS_LOG, host.read_text(HOSTS_LOG) + "blog.example.com " + line("4.4.4.4", "21", "/") + "\n")
+    stats._done.clear()
+    assert stats.report(target, days=7, today=date(2026, 10, 21))["totals"]["requests"] == 4

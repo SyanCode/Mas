@@ -726,6 +726,18 @@ class Deployer:
         rlog.line(f"wrote {path} (nginx -t ok)")
         self._system(rlog, ["systemctl", "reload", "nginx"])
 
+    def ensure_nginx_maps(self) -> bool:
+        """conf.d/mas-maps.conf up to date (websocket map, log formats, the per-site log of the sites
+        without one). Restored if nginx -t refuses it."""
+        if not self.host.is_dir("/etc/nginx/conf.d") or self.host.read_text(UPGRADE_MAP_PATH) == templates.UPGRADE_MAP:
+            return False
+        rlog = ReleaseLog(Path(self.db.path).parent / "logs" / "nginx.log")
+        try:
+            self._nginx_apply(rlog, UPGRADE_MAP_PATH, templates.UPGRADE_MAP, None)
+        finally:
+            rlog.close()
+        return True
+
     def _has_cert(self, domain: str) -> bool:
         return self.host.exists(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
 

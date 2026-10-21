@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { RestartAll } from "@/components/RestartAll";
 import { Shell } from "@/components/Shell";
 import {
   Badge, Button, ConfirmDialog, EmptyState, ErrorText, Input, Notice, PageHeader, Spinner, Stat, StatusDot,
@@ -139,6 +140,7 @@ function Overview() {
         subtitle={data ? `${t("Scanned {when}", { when: timeAgo(data.scanned_at) })} · nginx, systemd, PM2, Docker, PHP-FPM` : t("Scanning…")}
         actions={
           <>
+            <RestartAll />
             <Button onClick={() => setConfirmNginx(true)}>{t("Reload nginx")}</Button>
             <Button variant="primary" onClick={rescan} disabled={scanning}>{scanning ? <Spinner /> : null}{t("Rescan")}</Button>
           </>

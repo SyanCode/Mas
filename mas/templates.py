@@ -16,6 +16,12 @@ map $http_upgrade $mas_connection_upgrade {
 
 # Which backend answered each request of an app (the cluster map of Mas reads it).
 log_format mas_upstream '$msec $upstream_addr $upstream_status $request_time';
+
+# The sites without an access log of their own write to the shared access.log, which does not say
+# which site a line is for: this one starts with the name of the site (statistics of each service).
+log_format mas_hosts '$host $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent '
+                     '"$http_referer" "$http_user_agent"';
+access_log /var/log/nginx/mas-hosts.access.log mas_hosts;
 """
 
 # Served while the app restarts (502/503/504 from the backend) and by placeholder vhosts.

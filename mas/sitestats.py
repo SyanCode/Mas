@@ -37,12 +37,15 @@ REFRESH_SECONDS = 60
 CHUNK_BYTES = 50 * 1024 * 1024  # new lines read per refresh at most (the rest comes next time)
 MAX_BYTES = 200 * 1024 * 1024  # read at most this much log per refresh
 TOP_PAGES = 50
+HOSTS_LOG = "/var/log/nginx/mas-hosts.access.log"  # "<host> <combined line>" of the sites without a log (mas_hosts)
 
 
 def access_logs(host: Host, config: Config, app: dict, service: Service | None = None) -> list[str]:
     """The access log of the app and its rotated copies, oldest first."""
     if app.get("mode") == "managed" or not service:
         bases = [f"/var/log/nginx/mas-app-{app['id']}.access.log"]
+    elif str(app["id"]).startswith("svc:"):  # a site of the server: its own log, else its lines of the shared one
+        bases = own_access_logs(service) or [HOSTS_LOG]
     else:  # an adopted site keeps the logs of its own vhost
         bases = [p for p in service.log_paths if "access" in p.rsplit("/", 1)[-1]]
     files: list[str] = []
@@ -62,6 +65,18 @@ def _lines(host: Host, path: str, budget: list[int]):
         except (OSError, EOFError):
             return
     yield from data.decode("utf-8", "replace").splitlines()
+
+
+def for_hosts(lines, hosts: list[str] | None):
+    """Lines of the shared mas_hosts log that are for these sites, without the leading host."""
+    if not hosts:
+        yield from lines
+        return
+    wanted = {h.lower() for h in hosts}
+    for line in lines:
+        name, _, rest = line.partition(" ")
+        if name.lower() in wanted:
+            yield rest
 
 
 def tally(lines) -> dict[str, dict]:
@@ -92,6 +107,27 @@ def count(lines) -> dict[str, dict]:
                   "pages": dict(d["pages"].most_common(TOP_PAGES))} for day, d in tally(lines).items()}
 
 
+def own_access_logs(service: Service) -> list[str]:
+    """Access logs of this site only: the default /var/log/nginx/access.log is shared by every site
+    without a log of its own (the combined format does not say which site a line is for)."""
+    return [p for p in service.log_paths if "access" in p.rsplit("/", 1)[-1]
+            and p.rsplit("/", 1)[-1] not in ("access.log", "other_vhosts_access.log")]
+
+
+def service_target(service: Service, apps: list[dict], apps_dir: str) -> dict | None:
+    """What to count for a service of the scan: its Mas app, or the service itself when its nginx site
+    has an access log of its own (``own_log``); None when it has no domain."""
+    from mas.runtime import app_for  # runtime imports the collectors: kept out of the module import
+    linked = app_for(service, apps, apps_dir)
+    if linked:
+        return next((a for a in apps if a["id"] == linked["id"]), None)
+    if not service.domains:
+        return None
+    own = bool(own_access_logs(service))
+    return {"id": f"svc:{service.id}", "mode": "adopted", "service_id": service.id, "domain": service.domains[0],
+            "own_log": own, "hosts": None if own else list(service.domains), "_service": service}
+
+
 class SiteStats:
     def __init__(self, host: Host, config: Config, db: Database, find_service=lambda service_id: None) -> None:
         self.host, self.config, self.db = host, config, db
@@ -109,7 +145,7 @@ class SiteStats:
         if not force and time.monotonic() - self._done.get(app["id"], -1e9) < REFRESH_SECONDS:
             return
         self._done[app["id"]] = time.monotonic()
-        service = self.find_service(app["service_id"]) if app.get("service_id") else None
+        service = app.get("_service") or (self.find_service(app["service_id"]) if app.get("service_id") else None)
         files = access_logs(self.host, self.config, app, service)
         if not files or files[-1].endswith(".gz") or re.search(r"\.\d+$", files[-1]):
             return  # no current log
@@ -141,7 +177,7 @@ class SiteStats:
 
     def _recount(self, app: dict, files: list[str]) -> None:
         budget = [MAX_BYTES]
-        days = tally(line for path in files for line in _lines(self.host, path, budget))
+        days = tally(for_hosts((line for path in files for line in _lines(self.host, path, budget)), app.get("hosts")))
         self._read_to = {}
         if days:
             self.db.save_site_stats(app["id"], [
@@ -156,15 +192,20 @@ class SiteStats:
             data = self.host.read_from(path, offset, CHUNK_BYTES)
             cut = data.rfind(b"\n") + 1  # a line still being written stays for next time
             self._read_to[path] = offset + cut
-            for day, d in tally(data[:cut].decode("utf-8", "replace").splitlines()).items():
+            for day, d in tally(for_hosts(data[:cut].decode("utf-8", "replace").splitlines(), app.get("hosts"))).items():
                 self.db.add_site_counts(app["id"], day, d["requests"], d["pageviews"], d["visitors"], dict(d["pages"]),
                                         TOP_PAGES)
         self.db.keep_site_visitors(app["id"], (date.today() - timedelta(days=1)).isoformat())
 
-    def refresh_all(self) -> None:
-        for app in self.db.list_apps():
-            if app.get("domain") and app.get("mode") in ("managed", "adopted"):
+    def refresh_all(self, services: list[Service] = ()) -> None:
+        apps = self.db.list_apps()
+        for app in apps:
+            if app.get("domain") and app.get("mode") in ("managed", "adopted", "stack"):
                 self.refresh(app)
+        for svc in services:  # sites of the server that Mas does not deploy, with an access log of their own
+            target = service_target(svc, apps, self.config.apps_dir)
+            if target and str(target["id"]).startswith("svc:"):
+                self.refresh(target)
 
     def report(self, app: dict, days: int = 30, today: date | None = None) -> dict:
         self.refresh(app)
