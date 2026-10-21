@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from mas import auth
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import Database
+from mas.sitestats import SiteStats
 
 
 class NewUser(BaseModel):
@@ -65,7 +66,7 @@ class NewEntryBody(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, any_session: Callable, current_session: Callable,
-             manager: CmsManager) -> None:
+             manager: CmsManager, stats: SiteStats | None = None) -> None:
 
     def call(fn, *args):
         try:
@@ -243,6 +244,14 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         target = site(s, app_id)
         content = await asyncio.to_thread(call, manager.load, app_id)
         return {**site_payload(target), **content}
+
+    @app.get("/api/cms/sites/{app_id}/stats")
+    async def site_stats(app_id: str, days: int = Query(30, ge=7, le=365), s=Depends(any_session)) -> dict:
+        """Visits per day, from the nginx access logs of the site (totals only)."""
+        target = site(s, app_id)
+        if stats is None or not target["domain"]:
+            return {"days": [], "totals": None, "top_pages": [], "since": None, "tracked_since": None}
+        return await asyncio.to_thread(stats.report, target, days)
 
     @app.get("/api/cms/sites/{app_id}/status")
     def status(app_id: str, s=Depends(any_session)) -> dict:

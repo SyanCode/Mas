@@ -117,6 +117,16 @@ CREATE TABLE IF NOT EXISTS invites (            -- one-time sign-up links for CM
     used_at TEXT,
     used_by TEXT
 );
+CREATE TABLE IF NOT EXISTS site_stats (      -- daily totals read from nginx access logs (no IP kept)
+    app_id TEXT NOT NULL,
+    day TEXT NOT NULL,                         -- YYYY-MM-DD, server time
+    requests INTEGER NOT NULL,                 -- every request, bots and files included
+    pageviews INTEGER NOT NULL,                -- pages seen by people (no bot, no image / script)
+    visitors INTEGER NOT NULL,                 -- distinct visitors of the day (hashed in memory only)
+    pages TEXT,                                -- JSON {path: views} of the day, 50 most viewed
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (app_id, day)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -370,6 +380,21 @@ class Database:
 
     # -- settings (key/value; secrets are stored encrypted by the caller) --
 
+    def save_site_stats(self, app_id: str, days: list[dict]) -> None:
+        with self.tx() as c:
+            for d in days:
+                c.execute("INSERT INTO site_stats (app_id, day, requests, pageviews, visitors, pages, updated_at) "
+                          "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(app_id, day) DO UPDATE SET "
+                          "requests = excluded.requests, pageviews = excluded.pageviews, "
+                          "visitors = excluded.visitors, pages = excluded.pages, updated_at = excluded.updated_at",
+                          (app_id, d["day"], d["requests"], d["pageviews"], d["visitors"], json.dumps(d["pages"]),
+                           _now()))
+
+    def site_stats(self, app_id: str, since: str) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM site_stats WHERE app_id = ? AND day >= ? ORDER BY day",
+                                               (app_id, since))]
+
     def get_setting(self, key: str) -> str | None:
         with self.tx() as c:
             row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
@@ -420,6 +445,7 @@ class Database:
     def delete_app(self, app_id: str) -> None:
         with self.tx() as c:
             c.execute("DELETE FROM apps WHERE id = ?", (app_id,))
+            c.execute("DELETE FROM site_stats WHERE app_id = ?", (app_id,))
 
     def create_release(self, app_id: str, trigger: str, actor: str | None, sha: str | None = None,
                        status: str = "queued") -> int:

@@ -731,5 +731,22 @@
   "Deploy and replace the site": "Déployer et remplacer le site",
   "A Mas app (deployed from GitHub, CMS) takes over its domains without interruption": "Une app Mas (déployée depuis GitHub, avec le CMS) reprend ses domaines sans interruption",
   "Replace with a Mas app": "Remplacer par une app Mas",
-  "A site whose build only writes pages (dist/, build/…) is static.": "Un site dont le build ne fait que générer des pages (dist/, build/…) est de type static."
+  "A site whose build only writes pages (dist/, build/…) is static.": "Un site dont le build ne fait que générer des pages (dist/, build/…) est de type static.",
+  "Requests": "Requêtes",
+  "Page views": "Pages vues",
+  "Visitors": "Visiteurs",
+  "Statistics": "Statistiques",
+  "Period": "Période",
+  "{n} days": "{n} jours",
+  "No statistics: the site has no domain yet.": "Pas de statistiques : le site n'a pas encore de domaine.",
+  "{metric} per day": "{metric} par jour",
+  "max {n}": "max {n}",
+  "requests": "requêtes",
+  "page views": "pages vues",
+  "visitors": "visiteurs",
+  "Most viewed pages": "Pages les plus vues",
+  "Table": "Tableau",
+  "Day": "Jour",
+  "Counted from the server logs, without cookies: no address is kept. Page views leave out robots, images and scripts; a visitor is counted once per day.": "Compté à partir des journaux du serveur, sans cookie : aucune adresse n'est conservée. Les pages vues excluent les robots, les images et les scripts ; un visiteur est compté une fois par jour.",
+  "Data since {date}.": "Données depuis le {date}."
 }

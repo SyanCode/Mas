@@ -22,6 +22,7 @@ from mas.appdb import AppDatabases
 from mas.deploy import Deployer
 from mas.github import GitHubApp
 from mas.cms import CmsManager
+from mas.sitestats import SiteStats
 from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
@@ -148,6 +149,10 @@ def create_app(
             except Exception:
                 log.exception("background scan failed")
             try:
+                await asyncio.to_thread(site_stats.refresh_all)
+            except Exception:
+                log.exception("site statistics failed")
+            try:
                 await asyncio.to_thread(supabase.auto_backup)
             except Exception:
                 log.exception("Supabase backup failed")
@@ -177,6 +182,7 @@ def create_app(
     stacks = StackManager(host, config, db, deployer)
     stack_backups = StackBackups(stacks, keep=config.stacks_keep_backups)
     cms = CmsManager(db, github_client, deployer, Path(db.path).parent, supabase=supabase)
+    site_stats = SiteStats(host, config, db, find_service=scanner.get)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -509,7 +515,8 @@ def create_app(
     api_stacks.register(app, db=db, current_session=current_session, manager=stacks, backups=stack_backups)
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
-    api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms)
+    api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,
+                     stats=site_stats)
 
     # -- dashboard ---------------------------------------------------------
 
