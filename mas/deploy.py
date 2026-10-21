@@ -382,6 +382,12 @@ class Deployer:
                 dirs.append(str(PurePosixPath(found).parent))
         return ":".join(dirs + [BASE_PATH])
 
+    def _unit_path(self, app_type: ServiceType, current: str) -> str:
+        """PATH of the app unit: start scripts find their tools in node_modules/.bin, as under npm."""
+        if app_type in (ServiceType.NEXTJS, ServiceType.NODE):
+            return f"{current}/node_modules/.bin:{self._tool_path()}"
+        return self._tool_path()
+
     def _cmd(self, rlog: ReleaseLog, argv: list[str], cwd: str | None = None, env: dict | None = None,
              user: str | None = None, timeout: float = 1800, check: bool = True) -> int:
         full_env = {"PATH": self._tool_path(), "LANG": "C.UTF-8", "CI": "1", "HOME": "/root", **(env or {})}
@@ -449,12 +455,18 @@ class Deployer:
         else:
             rlog.line("nothing to build")
 
-    def _exec_start(self, app: dict, app_type: ServiceType, current: str) -> str:
+    def _exec_start(self, app: dict, app_type: ServiceType, current: str, release: str | None = None) -> str:
         if app.get("start_command"):
             return templates.systemd_quote(app["start_command"])
         if app_type == ServiceType.NEXTJS:
             return f"{current}/node_modules/.bin/next start -H 127.0.0.1 -p {app['port']}"
         if app_type == ServiceType.NODE:
+            # The start script itself: `npm start` keeps an npm process (~60 MB) around the app.
+            scripts = self._package_scripts(release or current)
+            start = scripts.get("start")
+            if (isinstance(start, str) and start.strip() and not CONTROL_RE.search(start)
+                    and not scripts.get("prestart") and not scripts.get("poststart")):
+                return templates.systemd_quote(start.strip())
             return f"{shutil.which('npm') or '/usr/bin/npm'} start"
         raise DeployError("a start command is required for python apps (e.g. .venv/bin/uvicorn main:app "
                           "--host 127.0.0.1 --port $PORT)")
@@ -506,7 +518,8 @@ class Deployer:
             one = {**app, "port": port}
             content = templates.unit(
                 app["id"], app["repo"], app_user(app["id"]), paths.current, env_file(app["id"]),
-                port, self._tool_path(), self._exec_start(one, app_type, paths.current),
+                port, self._unit_path(app_type, paths.current),
+                self._exec_start(one, app_type, paths.current, workdir),
             )
             path = f"/etc/systemd/system/{unit}"
             if self.host.read_text(path) != content:

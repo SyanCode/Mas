@@ -148,6 +148,8 @@ Group=@@USER@@
 WorkingDirectory=@@CURRENT@@
 EnvironmentFile=-@@ENV_FILE@@
 Environment="PORT=@@PORT@@" "HOST=127.0.0.1" "HOSTNAME=127.0.0.1" "NODE_ENV=production" "PATH=@@PATH@@"
+# Fewer glibc malloc arenas: much less memory for Node (sharp, native modules) and Python threads.
+Environment="MALLOC_ARENA_MAX=2"
 ExecStart=@@EXEC@@
 Restart=on-failure
 RestartSec=3

@@ -16,6 +16,7 @@ const FIX_TEXTS = [
   msg("Renew through nginx"), msg("The renewal file is backed up, switched to the nginx method (no more nginx stop), then a test renewal checks it; it is restored if the test fails."),
   msg("Turn on automatic renewal"), msg("Runs systemctl enable --now certbot.timer."),
   msg("Restart nginx under systemd"), msg("Every site is down for about a second while the stray nginx is stopped and systemd starts it again."),
+  msg("Create a swap file"), msg("Mas creates /swapfile (1 or 2 GB, if the disk keeps 2 GB free), turns it on now and at boot (swapfile.swap) and sets vm.swappiness=10: it is only used when the memory is full."),
 ];
 
 type Result = { ok: boolean; output: string };

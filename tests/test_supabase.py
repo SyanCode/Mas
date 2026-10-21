@@ -285,6 +285,11 @@ def test_envoy_gateway_ports_are_bound_to_loopback():
     assert ports[4]["host_ip"] == "127.0.0.1"
 
 
+def test_container_logs_are_rotated():
+    services = yaml.safe_load(apply_profile(FULL_COMPOSE, DEFAULT_COMPONENTS))["services"]
+    assert all(s["logging"]["options"] == {"max-size": "10m", "max-file": "3"} for s in services.values())
+
+
 def test_restart_marks_an_interrupted_install_failed(tmp_path):
     host = FixtureHost(server.build(tmp_path / "srv"))
     db = Database(tmp_path / "mas.db")

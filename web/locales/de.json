@@ -689,5 +689,7 @@
   "Restored. The previous data is kept in data.before-restore.": "Wiederhergestellt. Die vorherigen Daten liegen in data.before-restore.",
   "Restore": "Wiederherstellen",
   "Restore this backup?": "Diese Sicherung wiederherstellen?",
-  "The service is stopped, its data replaced by the backup, then started again. The current data is kept aside in data.before-restore.": "Der Dienst wird gestoppt, seine Daten durch die Sicherung ersetzt und dann neu gestartet. Die aktuellen Daten werden in data.before-restore beiseitegelegt."
+  "The service is stopped, its data replaced by the backup, then started again. The current data is kept aside in data.before-restore.": "Der Dienst wird gestoppt, seine Daten durch die Sicherung ersetzt und dann neu gestartet. Die aktuellen Daten werden in data.before-restore beiseitegelegt.",
+  "Create a swap file": "Auslagerungsdatei (Swap) anlegen",
+  "Mas creates /swapfile (1 or 2 GB, if the disk keeps 2 GB free), turns it on now and at boot (swapfile.swap) and sets vm.swappiness=10: it is only used when the memory is full.": "Mas legt /swapfile an (1 oder 2 GB, wenn auf der Festplatte 2 GB frei bleiben), aktiviert sie sofort und beim Start (swapfile.swap) und setzt vm.swappiness=10: Sie wird nur genutzt, wenn der Speicher voll ist."
 }

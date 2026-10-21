@@ -14,6 +14,7 @@ Docker opens them in the firewall by itself.
 from __future__ import annotations
 
 import json
+import copy
 import logging
 import re
 import secrets
@@ -98,12 +99,17 @@ class Template:
                             for k, a in self.actions.items()]}
 
 
+# Docker keeps every line a container prints, forever: 3 files of 10 MB per container at most.
+LOG_ROTATION = {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}}
+
+
 def _service(image: str, ctx: Ctx, web: int | None = None, **extra) -> dict:
-    """One compose service: restarted on failure, its web port on 127.0.0.1 only."""
+    """One compose service: restarted on failure, its web port on 127.0.0.1 only, logs rotated."""
     ports = list(extra.pop("ports", []))
     if web and ctx.web_port:
         ports.insert(0, f"127.0.0.1:{ctx.web_port}:{web}")
-    return {"image": image, "restart": "unless-stopped", **extra, **({"ports": ports} if ports else {})}
+    return {"image": image, "restart": "unless-stopped", "logging": copy.deepcopy(LOG_ROTATION), **extra,
+            **({"ports": ports} if ports else {})}
 
 
 # -- games --------------------------------------------------------------------------

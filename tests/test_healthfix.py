@@ -116,3 +116,33 @@ def test_retire_switch_and_timer(env):
 
     host._commands["systemctl enable --now certbot.timer"] = {"returncode": 0}
     assert fix(client, h, "certbot-timer", "certbot.timer").json()["ok"]
+
+
+def test_swap_file_on_a_small_server(env):
+    client, host, db, h = env
+    host.write_text("/proc/meminfo", "MemTotal:  2000000 kB\nMemAvailable: 300000 kB\nSwapTotal: 0 kB\n")
+    checks = client.get("/api/health/checks", params={"refresh": 1}).json()["checks"]
+    swap = next(c for c in checks if c["category"] == "memory")
+    assert swap["level"] == "warning" and swap["action"]["id"] == "swap-create" and "1.9 GB" in swap["title"]
+
+    host._commands["df -Pm /"] = {"output": "Filesystem 1M-blocks Used Available Use% Mounted on\n/dev/vda1 20000 "
+                                            "18500 1500 93% /\n"}
+    r = fix(client, h, "swap-create", "swapfile")
+    assert r.status_code == 400 and "not enough disk space" in r.json()["detail"]  # 2 GB stay free
+
+    host._commands["df -Pm /"]["output"] = ("Filesystem 1M-blocks Used Available Use% Mounted on\n"
+                                            "/dev/vda1 20000 5000 15000 25% /\n")
+    host._commands["systemd-run *"] = {"output": "NAME      TYPE SIZE USED PRIO\n/swapfile file   2G   0B   -2\n"}
+    r = fix(client, h, "swap-create", "swapfile")
+    assert r.status_code == 200 and r.json()["ok"], r.json()
+    run = next(a for a in host.executed if a[0] == "systemd-run")
+    assert run[-3:-1] == ["bash", "-c"] and "fallocate -l 2048M /swapfile" in run[-1]
+    assert "vm.swappiness = 10" in run[-1] and "WantedBy=swap.target" in run[-1]
+
+    # swap on, or a big server: nothing to report
+    host.write_text("/proc/meminfo", "MemTotal:  2000000 kB\nSwapTotal: 2097148 kB\n")
+    assert not [c for c in client.get("/api/health/checks", params={"refresh": 1}).json()["checks"]
+                if c["category"] == "memory"]
+    host.write_text("/proc/meminfo", "MemTotal: 16000000 kB\nSwapTotal: 0 kB\n")
+    assert not [c for c in client.get("/api/health/checks", params={"refresh": 1}).json()["checks"]
+                if c["category"] == "memory"]

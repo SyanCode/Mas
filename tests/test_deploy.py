@@ -551,3 +551,20 @@ def test_nextjs_static_export_is_served_by_nginx(env):
     assert "root /srv/mas/apps/web/current/out;" in vhost and "proxy_pass" not in vhost
     assert not host.exists("/etc/systemd/system/mas-app-web.service")
     assert served == [("http://127.0.0.1/", "web.example.com")]
+
+
+def test_node_app_runs_its_start_script_without_npm(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    db.update_app("web", type="node")
+
+    def scripts(argv, cwd, env_vars):
+        if argv[:2] == ["git", "clone"]:
+            (Path(argv[-1]) / "package.json").write_text(json.dumps({"scripts": {"start": "node server.js"}}))
+
+    host.stream_hooks.append(scripts)
+    rid, ok = deploy_once(env, SHA1)
+    assert ok, deployer.log_path("web", rid).read_text()
+    unit = host.read_text("/etc/systemd/system/mas-app-web.service")
+    assert 'ExecStart=/bin/sh -c "exec node server.js"' in unit  # no npm process kept around the app
+    assert '"PATH=/srv/mas/apps/web/current/node_modules/.bin:' in unit
+    assert 'Environment="MALLOC_ARENA_MAX=2"' in unit

@@ -1,4 +1,4 @@
-"""Server health checks: certificates, certbot renewal, nginx, DNS. Read-only.
+"""Server health checks: certificates, certbot renewal, nginx, DNS, memory. Read-only.
 
 Each check explains the problem and, when there is a safe fix, the command
 to run. Nothing here changes the system: a check that can be fixed from the
@@ -32,7 +32,7 @@ SOON_DAYS = 14
 @dataclass
 class Check:
     level: str  # error | warning | info
-    category: str  # certificates | nginx | dns
+    category: str  # certificates | nginx | dns | memory
     title: str
     detail: str = ""
     fix: str | None = None
@@ -187,6 +187,42 @@ def check_nginx(host: Host, sites: list[NginxSite], sockets: list[ListeningSocke
     return checks
 
 
+SWAP_FILE = "/swapfile"
+SWAP_BELOW_MB = 8192  # servers with less RAM than this get a swap file as a safety net
+
+
+def meminfo(host: Host) -> dict[str, int]:
+    """/proc/meminfo in MB."""
+    out: dict[str, int] = {}
+    for line in (host.read_text("/proc/meminfo") or "").splitlines():
+        key, _, rest = line.partition(":")
+        parts = rest.split()
+        if parts and parts[0].isdigit():
+            out[key] = int(parts[0]) // 1024
+    return out
+
+
+def swap_size_mb(total_mb: int) -> int:
+    """The swap file Mas creates: 1 GB on very small servers, 2 GB otherwise."""
+    return 1024 if total_mb < 1536 else 2048
+
+
+def check_memory(host: Host) -> list[Check]:
+    mem = meminfo(host)
+    total, swap = mem.get("MemTotal"), mem.get("SwapTotal")
+    if not total or swap is None or swap > 0 or total >= SWAP_BELOW_MB or host.exists(SWAP_FILE):
+        return []
+    size = swap_size_mb(total)
+    return [Check(
+        "warning", "memory", f"No swap on a server with {total / 1024:.1f} GB of RAM",
+        "When the memory is full, the kernel kills a process (often the database or a site) instead of "
+        f"slowing down. A {size // 1024} GB swap file, used only in that case (vm.swappiness=10), avoids it.",
+        f"sudo fallocate -l {size}M {SWAP_FILE} && sudo chmod 600 {SWAP_FILE} && sudo mkswap {SWAP_FILE} && "
+        f"sudo swapon {SWAP_FILE}   # then add it to /etc/fstab",
+        "swap-create", "swapfile",
+    )]
+
+
 def _resolve(name: str) -> list[str]:
     try:
         return sorted({info[4][0] for info in socket.getaddrinfo(name, None, socket.AF_INET)})
@@ -239,7 +275,7 @@ def run_checks(host: Host, config: Config | None = None, dns: bool = True, publi
     sites = nginx_collector.collect(ctx)
     sockets = ports_collector.collect(ctx)
     lineages = load_lineages(host)
-    checks = check_nginx(host, sites, sockets) + check_certificates(host, sites, lineages)
+    checks = check_nginx(host, sites, sockets) + check_certificates(host, sites, lineages) + check_memory(host)
     if dns:
         names = {n for s in sites for n in s.names} | {d for lin in lineages for d in lin.domains}
         checks += check_dns(names, public_ip or ctx.config.public_ip)

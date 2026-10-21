@@ -239,6 +239,7 @@ def apply_profile(compose: str, components: list[str]) -> str:
         # No pooler: apps on this server reach Postgres directly (loopback only).
         services["db"].setdefault("ports", []).append("127.0.0.1:${POSTGRES_PORT}:5432")
     for svc in services.values():
+        svc.setdefault("logging", {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}})
         if isinstance(svc.get("ports"), list):
             svc["ports"] = [_loopback_port(p) for p in svc["ports"]]
     if "kong" in services:

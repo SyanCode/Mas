@@ -58,6 +58,7 @@ def test_compose_files():
     assert mc["environment"]["WHITELIST"] == "Alice,Bob" and mc["volumes"] == ["/srv/mas/stacks/x/data:/data"]
     kuma = TEMPLATES["uptime-kuma"].compose(ctx("uptime-kuma", {}, web_port=7105, domain="up.example.com"))
     assert kuma["services"]["uptime-kuma"]["ports"] == ["127.0.0.1:7105:3001"]  # nginx only
+    assert kuma["services"]["uptime-kuma"]["logging"]["options"]["max-size"] == "10m"  # Docker logs rotated
     mail = TEMPLATES["mail"].compose(ctx("mail", {"mail_domain": "example.com"}, domain="mail.example.com",
                                          ports={"smtp": 25, "submissions": 465, "submission": 587, "imaps": 993}))
     svc = mail["services"]["mailserver"]

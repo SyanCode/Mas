@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from mas.config import Config
-from mas.health import RENEWAL_DIR, run_checks
+from mas.health import RENEWAL_DIR, SWAP_FILE, meminfo, run_checks, swap_size_mb
 from mas.host import Host
 
 # Shown on the button and in the confirmation (English keys, translated by the dashboard).
@@ -32,7 +32,36 @@ ACTIONS: dict[str, dict] = {
     "nginx-systemd": {"label": "Restart nginx under systemd", "danger": True,
                       "confirm": "Every site is down for about a second while the stray nginx is stopped and "
                                  "systemd starts it again."},
+    "swap-create": {"label": "Create a swap file", "danger": False,
+                    "confirm": "Mas creates /swapfile (1 or 2 GB, if the disk keeps 2 GB free), turns it on now and "
+                               "at boot (swapfile.swap) and sets vm.swappiness=10: it is only used when the memory "
+                               "is full."},
 }
+# Run by systemd (PID 1) through systemd-run: mas.service cannot write /etc nor kernel settings.
+SWAP_SCRIPT = """set -e
+fail() { swapoff /swapfile 2>/dev/null || true; rm -f /swapfile /etc/systemd/system/swapfile.swap; exit 1; }
+trap fail ERR
+fallocate -l @@SIZE@@M /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=@@SIZE@@ status=none
+chmod 600 /swapfile
+mkswap /swapfile >/dev/null
+cat > /etc/systemd/system/swapfile.swap <<'UNIT'
+# Created by Mas (Health → Create a swap file).
+[Unit]
+Description=Swap file created by Mas
+
+[Swap]
+What=/swapfile
+
+[Install]
+WantedBy=swap.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now swapfile.swap
+trap - ERR
+echo 'vm.swappiness = 10' > /etc/sysctl.d/99-mas-swap.conf
+sysctl -q -w vm.swappiness=10 || true
+swapon --show
+"""
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._*-]{0,252}$")
 RETIRED_DIR = "/root/letsencrypt-retired"
 # Folders searched for programs that still use a certificate (docker compose files, other servers…).
@@ -133,6 +162,26 @@ class HealthFixer:
         return {"ok": True, "output": f"{path} now renews through nginx (backup: {backup})\n\n{tail(out, 1500)}"}
 
     # -- services ----------------------------------------------------------------------
+
+    def _swap_create(self, _target: str) -> dict:
+        if self.host.exists(SWAP_FILE):
+            raise FixError(f"{SWAP_FILE} already exists")
+        size = swap_size_mb(meminfo(self.host).get("MemTotal", 0))
+        ok, out = self._run(["df", "-Pm", "/"])
+        try:
+            free = int(out.splitlines()[-1].split()[3])
+        except (IndexError, ValueError):
+            raise FixError(f"cannot read the free disk space: {tail(out, 300)}") from None
+        if free < size + 2048:
+            raise FixError(f"not enough disk space: {free} MB free, {size + 2048} MB needed "
+                           f"({size} MB of swap and 2 GB kept free)")
+        script = SWAP_SCRIPT.replace("@@SIZE@@", str(size))
+        ok, out = self._run(["systemd-run", "--quiet", "--wait", "--collect", "--pipe", "bash", "-c", script],
+                            timeout=900)
+        if not ok:
+            return {"ok": False, "output": f"nothing was kept:\n{tail(out)}"}
+        return {"ok": True, "output": f"{size // 1024} GB of swap on {SWAP_FILE}, used only when the memory is full"
+                                      f"\n\n{tail(out, 1500)}"}
 
     def _certbot_timer(self, _target: str) -> dict:
         ok, out = self._run(["systemctl", "enable", "--now", "certbot.timer"])
