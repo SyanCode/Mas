@@ -74,6 +74,8 @@ class Config:
     healthcheck_timeout: int = 60
     dns_wait_seconds: int = 120  # wait for a new DNS record before certbot
     public_ip: str | None = None  # [health] override for DNS checks
+    cluster_role: str = "primary"  # [cluster] "agent": no dashboard, driven by the primary server
+    cluster_address: str | None = None  # [cluster] private address an agent listens on
 
     @property
     def github_configured(self) -> bool:
@@ -137,6 +139,11 @@ def load_config(host: Host, path: str = CONFIG_PATH) -> Config:
             setattr(cfg, key, deploy[key])
     if isinstance(data.get("health", {}).get("public_ip"), str):
         cfg.public_ip = data["health"]["public_ip"]
+    cluster = data.get("cluster", {})
+    if cluster.get("role") in ("primary", "agent"):
+        cfg.cluster_role = cluster["role"]
+    if isinstance(cluster.get("address"), str):
+        cfg.cluster_address = cluster["address"]
     return cfg
 
 

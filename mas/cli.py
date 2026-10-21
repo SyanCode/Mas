@@ -744,24 +744,93 @@ def serve(
     port: Annotated[Optional[int], typer.Option(help="Port (default from config: 7070).")] = None,
     insecure_cookie: Annotated[bool, typer.Option(hidden=True, help="Allow cookies over plain HTTP (dev).")] = False,
 ) -> None:
-    """Run the API and the dashboard (used by mas.service)."""
+    """Run the API and the dashboard (used by mas.service); an agent serves the cluster calls only."""
     import uvicorn
 
     from mas.api import create_app
 
+    env: Env = ctx.obj
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    if env.config.cluster_role == "agent":
+        from mas.agent import create_agent_app
+        from mas.cluster import ClusterError, validate_address
+        try:  # an agent listens on the private network, never on a public address
+            host = validate_address(env.config.cluster_address or "")
+        except ClusterError as exc:
+            fail(f"agent: [cluster] address in /etc/mas/config.toml: {exc}")
+        uvicorn.run(create_agent_app(env.host, env.config, env.db), host=host, port=port or env.config.port,
+                    proxy_headers=False, server_header=False, log_level="warning")
+        return
     try:
         loopback = ipaddress.ip_address(host).is_loopback
     except ValueError:
         loopback = host == "localhost"
     if not loopback:
         fail("Mas only listens on loopback; expose it through nginx (deploy/nginx-mas.conf)")
-    env: Env = ctx.obj
     if insecure_cookie:
         env.config.cookie_secure = False
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     application = create_app(env.host, env.config, env.db)
     uvicorn.run(application, host=host, port=port or env.config.port,
                 proxy_headers=False, server_header=False, log_level="info")
+
+
+agent_app = typer.Typer(help="This server as an agent of a cluster: no dashboard, driven by the primary server.",
+                        no_args_is_help=True)
+app.add_typer(agent_app, name="agent")
+
+
+@agent_app.command("init")
+def agent_init(
+    ctx: typer.Context,
+    address: Annotated[str, typer.Option(help="Private address of this server (VPC, WireGuard, Tailscale).")],
+    name: Annotated[Optional[str], typer.Option(help="Name shown in the cluster (default: hostname).")] = None,
+    restart: Annotated[bool, typer.Option(help="Restart mas to apply.")] = True,
+) -> None:
+    """Make this server an agent and print the join token to paste on the primary server."""
+    from mas.cluster import Cluster, ClusterError, validate_address
+    from mas.config import CONFIG_PATH, save_section
+    from mas.deploy import Deployer
+
+    env: Env = ctx.obj
+    try:
+        address = validate_address(address)
+    except ClusterError as exc:
+        fail(str(exc))
+    save_section(env.host, "cluster", {"role": "agent", "address": address}, CONFIG_PATH)
+    cluster = Cluster(env.host, env.config, env.db, Deployer(env.host, env.config, env.db, lambda: None))
+    cluster.configure(name, address)
+    token = cluster.create_token("primary")
+    if restart:
+        env.host.run(["systemctl", "restart", "mas"], timeout=60)
+    console.print(f"[green]✓[/] {cluster.name()} is an agent, listening on {address}:{env.config.port}\n")
+    console.print("On the primary server: Servers → Add a server")
+    console.print(f"  address: [bold]http://{address}:{env.config.port}[/]")
+    console.print(f"  token:   [bold]{token}[/]   (shown once)\n")
+    console.print("[dim]Open the port on the private network only. To show the dashboard again: "
+                  "sudo mas agent leave[/]")
+
+
+@agent_app.command("token")
+def agent_token(ctx: typer.Context) -> None:
+    """Create another join token (the previous ones keep working until revoked)."""
+    from mas.cluster import Cluster
+    from mas.deploy import Deployer
+
+    env: Env = ctx.obj
+    cluster = Cluster(env.host, env.config, env.db, Deployer(env.host, env.config, env.db, lambda: None))
+    console.print(cluster.create_token("primary"))
+
+
+@agent_app.command("leave")
+def agent_leave(ctx: typer.Context, restart: Annotated[bool, typer.Option(help="Restart mas to apply.")] = True) -> None:
+    """Back to a normal Mas with its dashboard (the copies it runs keep running until removed)."""
+    from mas.config import CONFIG_PATH, save_section
+
+    env: Env = ctx.obj
+    save_section(env.host, "cluster", {"role": "primary"}, CONFIG_PATH)
+    if restart:
+        env.host.run(["systemctl", "restart", "mas"], timeout=60)
+    console.print("[green]✓[/] this server is a normal Mas again (dashboard on 127.0.0.1, behind nginx)")
 
 
 @app.command("self-update")

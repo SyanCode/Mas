@@ -11,6 +11,7 @@ interface ServerInfo {
   name: string;
   version: string;
   address: string | null;
+  role?: "primary" | "agent";
   cpus: number | null;
   load: number[];
   memory: { total_mb: number | null; available_mb: number | null };
@@ -214,7 +215,7 @@ function JoinTokens({ tokens, onChange }: { tokens: Overview["tokens"]; onChange
 
 function AddServer({ onAdded }: { onAdded: () => void }) {
   const t = useT();
-  const [url, setUrl] = useState("https://");
+  const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -223,14 +224,17 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
     setBusy(true); setError("");
     try {
       await api("/cluster/servers", { method: "POST", body: { url, token } });
-      setUrl("https://"); setToken("");
+      setUrl(""); setToken("");
       onAdded();
     } catch (err) { setError((err as ApiError).detail); } finally { setBusy(false); }
   }
   return (
     <Card title={t("Add a server")}>
       <form onSubmit={submit} className="space-y-3">
-        <Label title={t("Address of its Mas dashboard")}><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mas.server-2.example.com" required /></Label>
+        <p className="text-sm text-zinc-500">{t("On the other server, run once:")}</p>
+        <CopyCode text="sudo mas agent init --address 10.0.0.2" />
+        <p className="text-xs text-zinc-500">{t("It becomes an agent (no dashboard, almost no CPU or memory, listening on its private address only) and prints its address and join token. A Mas with its own dashboard can join too: use its https:// address and a token from its Servers page.")}</p>
+        <Label title={t("Its address")}><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://10.0.0.2:7070" required /></Label>
         <Label title={t("Its join token")}><Input value={token} onChange={(e) => setToken(e.target.value)} placeholder="masc_…" className="mono" required /></Label>
         <ErrorText>{error}</ErrorText>
         <Button variant="primary" disabled={busy}>{busy ? <Spinner /> : null}{t("Add to the cluster")}</Button>
@@ -291,6 +295,7 @@ function Cluster() {
               <Card key={p.id} title={p.info?.name ?? p.name} actions={
                 <span className="flex items-center gap-2">
                   {p.error ? <Badge tone="red">{t("unreachable")}</Badge> : <Badge tone="emerald">{p.latency_ms} ms</Badge>}
+                  {p.info?.role === "agent" && <Badge tone="violet">{t("agent")}</Badge>}
                   {p.address && <Badge>{p.address}</Badge>}
                   <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setLeaving(p)}>{t("Remove")}</Button>
                 </span>

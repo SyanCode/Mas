@@ -795,5 +795,9 @@
   "this server": "dieser Server",
   "Requests of the last minute, per app and server, from the logs of nginx on this server; refreshed every 5 s. Hover a link for its errors and response time.": "Anfragen der letzten Minute pro App und Server, aus den nginx-Logs dieses Servers; alle 5 s aktualisiert. Fahre über eine Verbindung für Fehler und Antwortzeit.",
   "live": "live",
-  "errors": "Fehler"
+  "errors": "Fehler",
+  "On the other server, run once:": "Auf dem anderen Server einmal ausführen:",
+  "It becomes an agent (no dashboard, almost no CPU or memory, listening on its private address only) and prints its address and join token. A Mas with its own dashboard can join too: use its https:// address and a token from its Servers page.": "Er wird zum Agenten (kein Dashboard, kaum CPU oder Speicher, lauscht nur auf seiner privaten Adresse) und zeigt seine Adresse und sein Beitritts-Token. Ein Mas mit eigenem Dashboard kann auch beitreten: nutze seine https://-Adresse und ein Token seiner Server-Seite.",
+  "Its address": "Seine Adresse",
+  "agent": "Agent"
 }

@@ -165,3 +165,23 @@ def test_traffic_follows_the_log(pair):
         fh.write(f"{now:.3f} 127.0.0.1:7100 200 0.010\n")
     later = cluster.traffic(now + 10)["apps"][0]["backends"][0]
     assert later["requests_minute"] == 2 and reads == [len(f"{now - 2:.3f} 127.0.0.1:7100 200 0.010\n")]
+
+
+def test_an_agent_has_no_dashboard(tmp_path):
+    from mas.agent import create_agent_app
+    from mas.cluster import validate_url
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    config = Config(secret_key_path="/etc/mas/secret.key", cluster_role="agent", cluster_address="10.0.0.7")
+    app = create_agent_app(host, config, db)
+    client = TestClient(app)
+    assert client.get("/api/health").json() == {"ok": True, "role": "agent"}
+    for path in ("/api/services", "/api/apps", "/api/cluster", "/", "/api/session"):
+        assert client.get(path).status_code == 404  # nothing but the calls of the primary server
+    token = app.state.cluster.create_token("primary")
+    info = client.get("/api/cluster/self", headers={"Authorization": f"Bearer {token}"}).json()
+    assert info["address"] == "10.0.0.7"
+    assert validate_url("http://10.0.0.7:7070") == "http://10.0.0.7:7070"
+    for bad in ("http://203.0.113.4:7070", "http://mas.example.com", "ftp://10.0.0.7"):
+        with pytest.raises(ClusterError):
+            validate_url(bad)

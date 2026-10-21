@@ -23,6 +23,7 @@ import socket
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import deque
 from collections.abc import Callable
@@ -70,10 +71,21 @@ def validate_address(address: str) -> str:
 
 
 def validate_url(url: str) -> str:
+    """https://… (another Mas with its dashboard), or http://<private address>:<port> (an agent, reached
+    over the private network: VPC, WireGuard, Tailscale)."""
     url = url.strip().rstrip("/")
-    if not url.startswith("https://") or " " in url or len(url) > 300:
-        raise ClusterError("the address of the other Mas must start with https:// (its dashboard)")
-    return url
+    if " " in url or len(url) > 300:
+        raise ClusterError("invalid address")
+    if url.startswith("https://"):
+        return url
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme == "http" and parsed.hostname and not parsed.path:
+        try:
+            validate_address(parsed.hostname)
+            return url
+        except ClusterError:
+            pass
+    raise ClusterError("use https://… (a Mas with its dashboard) or http://<private address>:7070 (an agent)")
 
 
 Opener = Callable[[str, str, dict, bytes | None, float], tuple[int, Any]]
@@ -136,7 +148,7 @@ class Cluster:
             apps.append({"id": a["id"], "name": a["name"], "type": a["type"], "domain": a["domain"],
                          "replica_of": a.get("replica_of"), "sha": (live or {}).get("sha"),
                          "status": (self.db.list_releases(a["id"], 1) or [{}])[0].get("status")})
-        return {"name": self.name(), "version": __version__, "address": self.address(),
+        return {"name": self.name(), "version": __version__, "address": self.address(), "role": self.config.cluster_role,
                 "cpus": os.cpu_count(), "load": [float(x) for x in load],
                 "memory": {"total_mb": mem.get("MemTotal"), "available_mb": mem.get("MemAvailable")},
                 "disk": disk_info, "uptime_s": int(float(uptime)), "apps": apps}
