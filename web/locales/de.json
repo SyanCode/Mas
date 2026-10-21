@@ -723,5 +723,12 @@
   "local": "lokal",
   "The service keeps running now, but will not start again after a reboot of the server.": "Der Dienst läuft weiter, startet aber nach einem Neustart des Servers nicht wieder.",
   "A static site: nginx serves its files, no process of its own to measure.": "Eine statische Seite: nginx liefert ihre Dateien aus, kein eigener Prozess zu messen.",
-  "No running process found for this service.": "Kein laufender Prozess für diesen Dienst gefunden."
+  "No running process found for this service.": "Kein laufender Prozess für diesen Dienst gefunden.",
+  "This app replaces the site {domain}": "Diese App ersetzt die Seite {domain}",
+  "It takes over {names}. The current site keeps serving while the app builds; then nginx switches to the app in one reload, without interruption. If the app does not answer, the current site is put back.": "Sie übernimmt {names}. Die aktuelle Seite bleibt online, während die App gebaut wird; dann wechselt nginx mit einem einzigen Reload ohne Unterbrechung zur App. Antwortet die App nicht, wird die aktuelle Seite wiederhergestellt.",
+  "nginx files handed over (kept as a backup): {files}": "Übernommene nginx-Dateien (als Sicherung behalten): {files}",
+  "the folder {path} is left as it is": "der Ordner {path} bleibt unverändert",
+  "Deploy and replace the site": "Deployen und Seite ersetzen",
+  "A Mas app (deployed from GitHub, CMS) takes over its domains without interruption": "Eine Mas-App (von GitHub deployt, mit CMS) übernimmt ihre Domains ohne Unterbrechung",
+  "Replace with a Mas app": "Durch eine Mas-App ersetzen"
 }

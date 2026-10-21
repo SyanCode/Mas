@@ -181,9 +181,12 @@ def fill(template: str, **values: object) -> str:
     return out
 
 
-def vhost(app_id: str, domain: str, body: str, https: bool, upstream: str = "") -> str:
+def vhost(app_id: str, domain: str, body: str, https: bool, upstream: str = "", aliases: list[str] = ()) -> str:
+    """``server_name`` lists the domain and its aliases; the certificate is the one named after the domain."""
     server = HTTPS_SERVERS if https else HTTP_SERVER
-    return fill(HEADER, app=app_id) + upstream + fill(server, domain=domain, app=app_id, body=body)
+    server = server.replace("server_name @@DOMAIN@@;", "server_name @@NAMES@@;")
+    return fill(HEADER, app=app_id) + upstream + fill(server, names=" ".join([domain, *aliases]), domain=domain,
+                                                      app=app_id, body=body)
 
 
 def upstream_name(app_id: str) -> str:

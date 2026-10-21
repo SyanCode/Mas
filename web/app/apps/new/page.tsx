@@ -29,6 +29,9 @@ interface RepoDatabase {
   seed: boolean;
 }
 
+/** A detected site the new app takes over (GET /services/{id}/replacement). */
+interface Replacement { domain: string; aliases: string[]; files: string[]; repo: string | null; branch: string | null; type: string; path: string | null }
+
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24);
 
 function NewApp() {
@@ -55,14 +58,28 @@ function NewApp() {
   const [connectDb, setConnectDb] = useState(true);
   const [seedDb, setSeedDb] = useState(true);
   const [compat, setCompat] = useState<Record<string, CmsCompat>>({});
+  const [replaceId, setReplaceId] = useState<string | null>(null);  // ?replace=<service id>
+  const [replacement, setReplacement] = useState<Replacement | null>(null);
 
   useEffect(() => {
     api<Repo[]>("/github/repos").then(setRepos).catch((e: ApiError) => setError(e.detail));
+    const sid = new URLSearchParams(window.location.search).get("replace");
+    if (sid) {
+      setReplaceId(sid);
+      api<Replacement>(`/services/${encodeURIComponent(sid)}/replacement`).then(setReplacement).catch((e: ApiError) => setError(e.detail));
+    }
   }, []);
+
+  // Replacing a site: its repository is picked when the scan found it.
+  useEffect(() => {
+    if (!replacement?.repo || !repos || repo) return;
+    const found = repos.find((r) => r.full_name.toLowerCase() === replacement.repo!.toLowerCase());
+    if (found) setRepo(found);
+  }, [replacement, repos, repo]);
 
   useEffect(() => {
     if (!repo) return;
-    setId(slug(repo.full_name.split("/")[1]));
+    setId(slug(replacement ? replacement.domain.split(".")[0] : repo.full_name.split("/")[1]));
     setBranch(repo.default_branch);
     api<string[]>(`/github/branches?repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}`)
       .then(setBranches).catch(() => setBranches([repo.default_branch]));
@@ -74,7 +91,7 @@ function NewApp() {
     api<{ type: string; start_command: string | null }>(
       `/github/detect?repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}&ref=${encodeURIComponent(branch)}`,
     ).then((d) => {
-      setType(d.type === "unknown" ? "" : d.type);
+      setType(d.type === "unknown" ? (replacement && replacement.type !== "unknown" ? replacement.type : "") : d.type);
       if (d.start_command) setStartCommand(d.start_command);
     }).catch(() => {}).finally(() => setDetecting(false));
   }, [repo, branch]);
@@ -112,14 +129,14 @@ function NewApp() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!repo) return;
-    if (withDomain && !domainChoice) {
+    if (!replacement && withDomain && !domainChoice) {
       setError(t("Pick a valid domain, or untick “give it an address”."));
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const choice = withDomain ? domainChoice : null;
+      const choice = withDomain && !replacement ? domainChoice : null;
       if (choice?.zone) {
         await api("/dns/records", {
           method: "POST", body: { zone: choice.zone, subdomain: choice.subdomain, overwrite: choice.overwrite },
@@ -130,7 +147,7 @@ function NewApp() {
         body: {
           id, repo: repo.full_name, branch, installation_id: repo.installation_id, domain: choice?.domain ?? null, type, env,
           build_command: buildCommand || null, start_command: startCommand || null, root_dir: rootDir, auto_deploy: autoDeploy,
-          supabase: canConnect && connectDb, supabase_seed: seedDb,
+          supabase: canConnect && connectDb, supabase_seed: seedDb, replace_service: replacement ? replaceId : null,
         },
       });
       window.location.href = `/apps/view/?id=${encodeURIComponent(created.id)}&release=${created.release_id}`;
@@ -140,11 +157,20 @@ function NewApp() {
     }
   }
 
+  const replaceBanner = replacement ? (
+    <div className="glass space-y-1 rounded-xl px-4 py-3 text-sm">
+      <p className="font-medium">{t("This app replaces the site {domain}", { domain: replacement.domain })}</p>
+      <p className="text-zinc-500">{t("It takes over {names}. The current site keeps serving while the app builds; then nginx switches to the app in one reload, without interruption. If the app does not answer, the current site is put back.", { names: [replacement.domain, ...replacement.aliases].join(", ") })}</p>
+      <p className="text-xs text-zinc-500">{t("nginx files handed over (kept as a backup): {files}", { files: replacement.files.join(", ") })}{replacement.path ? ` · ${t("the folder {path} is left as it is", { path: replacement.path })}` : ""}</p>
+    </div>
+  ) : null;
+
   if (!repo) {
     return (
       <div className="space-y-4">
         <Link href="/apps/" className="text-sm text-zinc-500 hover:underline">← {t("Apps")}</Link>
         <PageHeader eyebrow={t("New app")} title={<>{t("Import a")} <span className="text-gradient">{t("Git repository")}</span></>} subtitle={t("Every push to the branch you pick deploys automatically.")} />
+        {replaceBanner}
         <ErrorText>{error}</ErrorText>
         <Input placeholder={t("Filter repositories…")} value={filter} onChange={(e) => setFilter(e.target.value)} autoFocus />
         <ul className="divide-y divide-zinc-200 overflow-hidden glass rounded-2xl">
@@ -174,6 +200,7 @@ function NewApp() {
     <form onSubmit={submit} className="space-y-4">
       <button type="button" onClick={() => setRepo(null)} className="text-sm text-zinc-500 hover:underline">← {t("Repositories")}</button>
       <PageHeader eyebrow={t("New app")} title={repo.full_name} subtitle={t("Review the settings, then deploy.")} />
+      {replaceBanner}
       {compat[repo.full_name]?.compatible && (
         <div className="glass flex items-center gap-3 rounded-xl px-4 py-3 text-sm">
           <CompatBadge compat={compat[repo.full_name]} />
@@ -221,7 +248,7 @@ function NewApp() {
           </div>
         </Card>
       )}
-      <Card title={t("Domain (optional)")} actions={
+      {!replacement && <Card title={t("Domain (optional)")} actions={
         <label className="flex items-center gap-1.5 text-xs font-normal">
           <input type="checkbox" checked={withDomain} onChange={(e) => setWithDomain(e.target.checked)} /> {t("give it an address")}
         </label>
@@ -231,7 +258,7 @@ function NewApp() {
         ) : (
           <p className="text-sm text-zinc-500">{t("No domain: the app only listens on 127.0.0.1. You can add one later.")}</p>
         )}
-      </Card>
+      </Card>}
       <Card title={t("Environment variables")}>
         <textarea
           value={env}
@@ -265,7 +292,7 @@ function NewApp() {
         </div>
       </Card>
       <ErrorText>{error}</ErrorText>
-      <Button variant="glow" type="submit" disabled={busy || !type} className="!h-10 px-6">{busy ? t("Creating…") : t("Deploy")}</Button>
+      <Button variant="glow" type="submit" disabled={busy || !type} className="!h-10 px-6">{busy ? t("Creating…") : replacement ? t("Deploy and replace the site") : t("Deploy")}</Button>
     </form>
   );
 }

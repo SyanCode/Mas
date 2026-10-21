@@ -19,11 +19,12 @@ from mas import auth, templates
 from mas.api import create_app
 from mas.config import Config, load_config, save_section
 from mas.db import Database
-from mas.deploy import DeployError, Deployer, app_paths, used_ports, validate_app, validate_backends
+from mas.deploy import DeployError, Deployer, app_paths, replacement_plan, used_ports, validate_app, validate_backends
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env, systemd_env_file
 from mas.github import app_jwt, git_auth_env, repo_from_remote, verify_signature
 from mas.health import check_certificates, check_dns, check_nginx, load_lineages
 from mas.host import FixtureHost
+from mas.state import Scanner
 
 SHA1 = "1" * 40
 SHA2 = "2" * 40
@@ -577,3 +578,54 @@ def test_redeploy_targets_skip_services_and_busy_apps(env):
     assert deployer.redeploy_targets() == ["blog", "web"]
     db.create_release("blog", "manual", "test")  # queued
     assert deployer.redeploy_targets() == ["web"]
+
+
+def _replacing_app(env):
+    host, db = env["host"], env["db"]
+    svc = next(s for s in Scanner(host, env["config"], db).refresh().services if s.id == "docs.example.com")
+    domain, aliases, files = replacement_plan(host, svc, db.list_apps())
+    db.create_app("docs", name="docs", repo="acme/docs", branch="main", installation_id=99, domain=domain,
+                  type="static", mode="managed", aliases=json.dumps(aliases),
+                  replaces=json.dumps({"service_id": svc.id, "files": files}))
+    written = []
+    original = host.write_text
+
+    def spy(path, content, mode=0o644):
+        if path.endswith("mas-app-docs.conf"):
+            written.append(content)
+        original(path, content, mode)
+
+    host.write_text = spy
+    return written
+
+
+def test_an_app_replaces_a_site_without_a_gap(env):
+    host, db, deployer, calls = env["host"], env["db"], env["deployer"], env["calls"]
+    old = host.read_text("/etc/nginx/conf.d/docs.conf")
+    written = _replacing_app(env)
+    rid = db.create_release("docs", "create", "test")
+    assert deployer.run(rid), deployer.log_path("docs", rid).read_text()
+    assert not any("deploying.html" in w or "unavailable.html" in w for w in written)  # the old site served meanwhile
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-docs.conf")
+    assert "server_name docs.example.com doc.example.com;" in vhost
+    assert not host.exists("/etc/nginx/conf.d/docs.conf")
+    kept = host.listdir("/var/lib/mas/backups/nginx")
+    assert len(kept) == 1 and host.read_text(f"/var/lib/mas/backups/nginx/{kept[0]}") == old
+    app = db.get_app("docs")
+    assert app["replaces"] is None and json.loads(app["aliases"]) == ["doc.example.com"]
+    certbot = next(a for a, _ in calls if "certonly" in a)
+    assert certbot[-4:] == ["-d", "docs.example.com", "-d", "doc.example.com"] and "--expand" in certbot
+
+
+def test_a_failed_replacement_gives_the_site_back(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    old = host.read_text("/etc/nginx/conf.d/docs.conf")
+    _replacing_app(env)
+    env["health"]["ok"] = False
+    rid = db.create_release("docs", "create", "test")
+    assert not deployer.run(rid)
+    assert host.read_text("/etc/nginx/conf.d/docs.conf") == old  # the old site is back
+    assert not host.exists("/etc/nginx/sites-enabled/mas-app-docs.conf")
+    assert not host.exists("/etc/nginx/sites-available/mas-app-docs.conf")  # no "unavailable" page either
+    assert db.get_app("docs")["replaces"]  # the next deploy tries again
+    assert "Restoring the previous site" in deployer.log_path("docs", rid).read_text()

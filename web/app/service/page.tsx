@@ -310,6 +310,11 @@ function ServiceDetail() {
           {gh && svc.path && ["systemd", "pm2", "php-fpm", "nginx-static"].includes(svc.manager) && (
             <Button onClick={adopt} title={t("Deploy this service on every push, in place")}>{t("Connect to GitHub")}</Button>
           )}
+          {svc.domains.length > 0 && svc.nginx_files.length > 0 && !rt?.app && (
+            <Link href={`/apps/new/?replace=${encodeURIComponent(svc.id)}`} className="inline-flex h-9 items-center rounded-lg bg-gradient-to-r from-indigo-500 via-sky-500 to-fuchsia-500 px-3 text-sm font-medium text-white hover:brightness-110" title={t("A Mas app (deployed from GitHub, CMS) takes over its domains without interruption")}>
+              {t("Replace with a Mas app")}
+            </Link>
+          )}
           {svc.actions.length === 0 && <span className="text-sm text-zinc-500">{t("No action available for this manager.")}</span>}
           {svc.actions.filter((a) => !BOOT_ACTIONS.includes(a)).map((a) => (
             <Button

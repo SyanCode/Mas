@@ -24,7 +24,8 @@ from mas.config import Config, save_section
 from mas.db import Database
 from mas.deploy import (
     BRANCH_RE, MAX_INSTANCES, PROXY_TYPES, REPO_RE, DeployError, Deployer, allocate_port, app_backends,
-    app_instances, suggest_start_command, used_ports, validate_app, validate_backends, validate_commands,
+    app_instances, replacement_plan, suggest_start_command, used_ports, validate_app, validate_backends,
+    validate_commands,
 )
 from mas.dns import server_ips
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env
@@ -64,6 +65,7 @@ class CreateApp(BaseModel):
     auto_deploy: bool = True
     supabase: bool = False  # connect it to the Supabase of this server before its first build
     supabase_seed: bool = False
+    replace_service: str | None = Field(default=None, max_length=200)  # a detected site the app takes over
 
 
 class HealthFix(BaseModel):
@@ -106,6 +108,8 @@ def app_payload(app: dict, db: Database) -> dict:
     data["instances"] = len(app_instances(app)) or 1
     data["instance_ports"] = [p for _, p in app_instances(app)]
     data["backends"] = app_backends(app)
+    data["aliases"] = json.loads(app.get("aliases") or "[]")
+    data["replaces"] = json.loads(app["replaces"]) if app.get("replaces") else None
     data.pop("extra_ports", None)
     data["stack"] = json.loads(app["stack"]) if app.get("stack") else None  # template and options, no secret
     releases = db.list_releases(app["id"], 1)
@@ -316,9 +320,31 @@ def register(
     def list_apps(_=Depends(current_session)) -> list[dict]:
         return [app_payload(a, db) for a in db.list_apps()]
 
+    def plan_for(service_id: str) -> tuple[str, list[str], list[str]]:
+        svc = scanner.get(service_id)
+        if svc is None:
+            raise HTTPException(404, "unknown service")
+        try:
+            return replacement_plan(host, svc, db.list_apps())
+        except DeployError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.get("/api/services/{service_id}/replacement")
+    def replacement(service_id: str, _=Depends(current_session)) -> dict:
+        """What an app replacing this site would take over (shown before creating it)."""
+        domain, aliases, files = plan_for(service_id)
+        svc = scanner.get(service_id)
+        return {"domain": domain, "aliases": aliases, "files": files, "repo": repo_from_remote(svc.git_remote),
+                "branch": svc.git_branch, "type": svc.type.value, "path": svc.path}
+
     @app.post("/api/apps")
     async def create_app(body: CreateApp, s=Depends(current_session)) -> dict:
         domain = (body.domain or "").strip().lower() or None
+        aliases: list[str] = []
+        replaces = None
+        if body.replace_service:
+            domain, aliases, files = plan_for(body.replace_service)
+            replaces = json.dumps({"service_id": body.replace_service, "files": files})
         try:
             validate_app(body.id, body.repo, body.branch, domain, body.type.value)
             validate_commands(body.build_command, body.start_command, body.root_dir.strip("/"))
@@ -336,8 +362,10 @@ def register(
                       mode="managed", root_dir=body.root_dir.strip("/"),
                       build_command=(body.build_command or "").strip() or None,
                       start_command=(body.start_command or "").strip() or None,
-                      env=token, auto_deploy=int(body.auto_deploy))
-        db.audit(s.username, "app-create", True, detail=f"{body.id}: {body.repo}@{body.branch} → {domain}")
+                      env=token, auto_deploy=int(body.auto_deploy),
+                      aliases=json.dumps(aliases) if aliases else None, replaces=replaces)
+        db.audit(s.username, "app-create", True, detail=f"{body.id}: {body.repo}@{body.branch} → {domain}"
+                 + (f" (replaces {body.replace_service})" if replaces else ""))
         if body.supabase and appdb is not None:
             inst = appdb.supabase.get()
             try:

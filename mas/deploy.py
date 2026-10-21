@@ -118,6 +118,15 @@ def app_instances(app: dict) -> list[tuple[str, int]]:
             for i, p in enumerate(ports) if p]
 
 
+def app_aliases(app: dict) -> list[str]:
+    return json.loads(app.get("aliases") or "[]")
+
+
+def app_names(app: dict) -> list[str]:
+    """Every name the app answers to: its domain, then its aliases."""
+    return [app["domain"], *app_aliases(app)] if app.get("domain") else []
+
+
 def app_backends(app: dict) -> list[str]:
     return json.loads(app.get("backends") or "[]")
 
@@ -190,6 +199,31 @@ def domain_conflict(host: Host, domain: str, own_files: set[str]) -> str | None:
         if domain in site.names and not set(site.files) <= own_files:
             return ", ".join(f for f in site.files if f not in own_files)
     return None
+
+
+def replacement_plan(host: Host, svc: Service, apps: list[dict]) -> tuple[str, list[str], list[str]]:
+    """(domain, aliases, nginx files) for an app replacing the site of ``svc``.
+
+    The app takes every name of the nginx site(s) behind the service; their files must serve nothing else."""
+    if not svc.nginx_files or not svc.domains:
+        raise DeployError("only a site nginx serves on a domain can be replaced by an app")
+    sites = nginx_collector.collect(ScanContext(host))
+    chosen = [s for s in sites if set(s.files) & set(svc.nginx_files)]
+    files = list(dict.fromkeys(f for s in chosen for f in s.files))
+    for other in sites:
+        shared = set(other.files) & set(files)
+        if other not in chosen and shared:
+            raise DeployError(f"{', '.join(sorted(shared))} also serves {', '.join(other.names) or 'another site'}: "
+                              "move that site to its own file first")
+    names = [n.lower() for n in dict.fromkeys(n for s in chosen for n in s.names) if DOMAIN_RE.fullmatch(n.lower())]
+    if not names:
+        raise DeployError("the site has no domain name Mas can take over")
+    domain = svc.domains[0].lower() if svc.domains[0].lower() in names else names[0]
+    taken = {n for a in apps for n in app_names(a)}
+    clash = [n for n in names if n in taken]
+    if clash:
+        raise DeployError(f"{', '.join(clash)} already belongs to a Mas app")
+    return domain, [n for n in names if n != domain], files
 
 
 def suggest_start_command(app_type: ServiceType, files: set[str]) -> str | None:
@@ -598,13 +632,18 @@ class Deployer:
     def _has_cert(self, domain: str) -> bool:
         return self.host.exists(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
 
+    def _cert_names(self, domain: str) -> list[str]:
+        from mas.health import _read_cert  # cryptography, loaded only here
+        return _read_cert(self.host, f"/etc/letsencrypt/live/{domain}/fullchain.pem")[1]
+
     def _install_vhost(self, app: dict, app_type: ServiceType, paths: AppPaths, rlog: ReleaseLog,
                        page: str | None = None) -> None:
         """Write the app vhost, or a placeholder serving the ``page`` status page."""
         available, enabled = vhost_paths(app["id"])
-        conflict = domain_conflict(self.host, app["domain"], {available, enabled})
-        if conflict:
-            raise DeployError(f"{app['domain']} is already served by {conflict}")
+        for name in app_names(app):
+            conflict = domain_conflict(self.host, name, {available, enabled})
+            if conflict:
+                raise DeployError(f"{name} is already served by {conflict}")
         if app_type in PROXY_TYPES and self.host.read_text(UPGRADE_MAP_PATH) != templates.UPGRADE_MAP:
             self._nginx_apply(rlog, UPGRADE_MAP_PATH, templates.UPGRADE_MAP, None)
         self._ensure_pages()
@@ -612,8 +651,60 @@ class Deployer:
         servers = self._upstream_servers(app)
         upstream = templates.upstream_block(app["id"], servers) \
             if app_type in PROXY_TYPES and page is None and len(servers) > 1 else ""
-        content = templates.vhost(app["id"], app["domain"], body, self._has_cert(app["domain"]), upstream)
+        content = templates.vhost(app["id"], app["domain"], body, self._has_cert(app["domain"]), upstream,
+                                  app_aliases(app))
         self._nginx_apply(rlog, available, content, enabled)
+
+    # -- replacing a detected site ---------------------------------------------------
+    # The app takes the names of a site nginx already serves. Nothing changes for visitors until the new
+    # release is built: then the old files leave nginx and the app's vhost arrives in the same reload
+    # (nginx reloads without dropping a connection). If the app does not answer, the old site comes back.
+
+    def _hand_over(self, app: dict, app_type: ServiceType, paths: AppPaths, rlog: ReleaseLog) -> list[dict]:
+        replaces = json.loads(app["replaces"])
+        rlog.step(f"Taking over {', '.join(app_names(app))} from {replaces['service_id']}")
+        moved: list[dict] = []
+        backups = f"{PurePosixPath(self.config.db_path).parent}/backups/nginx"
+        try:
+            for f in replaces["files"]:
+                target = self.host.readlink(f) if self.host.is_symlink(f) else None
+                if target is not None:
+                    self.host.remove(f)  # the file itself stays in sites-available
+                    moved.append({"file": f, "link": target})
+                elif self.host.is_file(f):
+                    self.host.makedirs(backups, mode=0o700)
+                    kept = f"{backups}/{PurePosixPath(f).name}.{time.strftime('%Y%m%d%H%M%S')}"
+                    self.host.write_text(kept, self.host.read_text(f) or "", mode=0o600)
+                    self.host.remove(f)
+                    moved.append({"file": f, "backup": kept})
+                else:
+                    continue
+                kept_in = f" (kept in {moved[-1]['backup']})" if "backup" in moved[-1] else ""
+                rlog.line(f"{f} leaves nginx{kept_in}")
+            self._install_vhost(app, app_type, paths, rlog)  # one nginx -t, one reload: no gap
+        except Exception:
+            self._give_back(app, moved, rlog, ours=False)
+            raise
+        return moved
+
+    def _give_back(self, app: dict, moved: list[dict], rlog: ReleaseLog, ours: bool = True) -> None:
+        """Put the replaced site back as it was (and remove the app's vhost)."""
+        rlog.step("Restoring the previous site")
+        for m in moved:
+            if "link" in m:
+                self.host.symlink_atomic(m["link"], m["file"])
+            else:
+                self.host.write_text(m["file"], self.host.read_text(m["backup"]) or "", mode=0o644)
+        if ours:
+            for path in vhost_paths(app["id"]):
+                self.host.remove(path)
+        test = self.host.run(["nginx", "-t"], timeout=60)
+        if test is not None and test.ok:
+            self.host.run(["systemctl", "reload", "nginx"], timeout=60)
+            rlog.line("the previous site is served again")
+        else:
+            rlog.line("warning: nginx -t fails after restoring the previous site: "
+                      + ((test.stderr if test else "nginx not found").strip()[-500:]))
 
     @staticmethod
     def _upstream_servers(app: dict) -> list[str]:
@@ -624,6 +715,9 @@ class Deployer:
         """Before building: the domain answers right away (status page on a first
         deploy) and gets its certificate, so visitors never hit another site's vhost."""
         rlog.step(f"Preparing {app['domain']}")
+        if app.get("replaces"):  # the replaced site keeps serving: only the certificate is prepared
+            self._ensure_certificate(app, rlog)
+            return
         page = "deploying" if first else None
         self._install_vhost(app, app_type, paths, rlog, page)
         if not self._has_cert(app["domain"]) and self._ensure_certificate(app, rlog):
@@ -649,14 +743,17 @@ class Deployer:
     def _ensure_certificate(self, app: dict, rlog: ReleaseLog) -> bool:
         """Request a certificate if missing. True when a new one was obtained."""
         domain = app["domain"]
+        names = app_names(app)
         if self._has_cert(domain):
-            return False
+            covered = self._cert_names(domain)
+            if not covered or set(names) <= set(covered):  # unreadable: keep it, as before
+                return False
         self._wait_dns(domain, rlog)
-        rlog.step(f"Requesting a certificate for {domain}")
+        rlog.step(f"Requesting a certificate for {', '.join(names)}")
         contact = ["-m", self.config.letsencrypt_email] if self.config.letsencrypt_email else \
             ["--register-unsafely-without-email"]
         certbot = ["certbot", "certonly", "--nginx", "--non-interactive", "--agree-tos", *contact,
-                   "--cert-name", domain, "-d", domain]
+                   "--cert-name", domain, "--expand", *(a for n in names for a in ("-d", n))]
         # mas.service has a read-only /etc (ProtectSystem=full): certbot's nginx plugin
         # checkpoints and restores files it cannot write from inside the sandbox, so it
         # runs as a transient unit of PID 1, like a certbot started from a shell.
@@ -747,7 +844,7 @@ class Deployer:
         try:
             self._managed_steps(app, app_type, release, paths, user, env_vars, gh, installation, commit, first, rlog)
         except Exception:
-            if first and app["domain"]:
+            if first and app["domain"] and not app.get("replaces"):  # a replaced site was given back
                 try:  # visitors see "not available" instead of another site or a raw error
                     self._install_vhost(app, app_type, paths, rlog, page="unavailable")
                 except Exception as exc:  # noqa: BLE001 - best effort, the original error matters
@@ -792,15 +889,20 @@ class Deployer:
 
         rlog.step(f"Switching current → {PurePosixPath(rel).name}")
         self.host.symlink_atomic(rel, paths.current)
+        handed: list[dict] | None = None
         try:
             if app_type in PROXY_TYPES:
                 self._install_unit(app, app_type, paths, env_vars, rlog, workdir=rel)
-            if app["domain"]:
+            if app["domain"] and app.get("replaces"):
+                handed = self._hand_over(app, app_type, paths, rlog)
+            elif app["domain"]:
                 rlog.step("nginx")
                 self._install_vhost(app, app_type, paths, rlog)
             self._health(app, app_type, f"{rel}/out" if export else rel, rlog)
         except (DeployError, EnvError) as exc:
             rlog.line(f"error: {exc}")
+            if handed is not None:
+                self._give_back(app, handed, rlog)
             if previous:
                 rlog.step(f"Rolling back to {PurePosixPath(previous).name}")
                 self.host.symlink_atomic(previous, paths.current)
@@ -808,6 +910,12 @@ class Deployer:
                     self._restart_instances(app)
             raise
 
+        if handed is not None:
+            replaced = json.loads(app["replaces"])["service_id"]
+            self.db.update_app(app["id"], replaces=None)
+            app = {**app, "replaces": None}
+            self.db.audit("deploy", "replace", True, replaced, detail=f"now served by app {app['id']}")
+            rlog.line(f"{replaced} is replaced by this app; its files stay where they were")
         if export:
             self._stop_unit(app, rlog)
         if app["domain"] and self._ensure_certificate(app, rlog):  # retry if it failed while preparing

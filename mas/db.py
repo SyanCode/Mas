@@ -131,12 +131,14 @@ MIGRATIONS = [
     ("apps", "extra_ports TEXT"),  # load balancing: JSON ports of instances 2..N on this server
     ("apps", "backends TEXT"),     # load balancing: JSON ["host:port"] of servers outside Mas
     ("apps", "stack TEXT"),        # mode "stack": JSON {template, options, ports} (mas.stacks)
+    ("apps", "aliases TEXT"),      # JSON ["www.example.com"]: more names served like the domain
+    ("apps", "replaces TEXT"),     # JSON {service_id, files}: nginx files handed over on the first deploy
 ]
 ROLES = ("admin", "editor")
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
-              "current_release", "extra_ports", "backends", "stack"}
+              "current_release", "extra_ports", "backends", "stack", "aliases", "replaces"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
 
 
