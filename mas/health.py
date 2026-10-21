@@ -1,7 +1,8 @@
 """Server health checks: certificates, certbot renewal, nginx, DNS. Read-only.
 
 Each check explains the problem and, when there is a safe fix, the command
-to run. Nothing here changes the system.
+to run. Nothing here changes the system: a check that can be fixed from the
+dashboard names its fix (``action``, ``target``), which mas.healthfix applies.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ class Check:
     title: str
     detail: str = ""
     fix: str | None = None
+    action: str | None = None  # one-click fix in mas.healthfix
+    target: str | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -98,17 +101,18 @@ def check_certificates(host: Host, sites: list[NginxSite], lineages: list[Lineag
         if not host.exists(cert_path):
             checks.append(Check("error", "certificates", f"{lin.name}: renewal config without certificate",
                                 f"{RENEWAL_DIR}/{lin.name}.conf points to {cert_path}, which does not exist. "
-                                "certbot fails on it at every run.", retire))
+                                "certbot fails on it at every run.", retire, "cert-retire", lin.name))
             continue
+        used = (lin.params.get("fullchain") or f"{live}/fullchain.pem") in used_paths or any(
+            d in served for d in lin.domains)
         if not host.is_symlink(cert_path):
             checks.append(Check("error", "certificates", f"{lin.name}: broken certbot lineage",
                                 f"{cert_path} should be a symlink to ../../archive; certbot skips this "
                                 "certificate, it will never be renewed (usually a copy without `cp -a`).",
                                 f"If unused: {retire}. If used: move it away and request a new one with "
-                                f"`certbot certonly --nginx -d {lin.name}`."))
+                                f"`certbot certonly --nginx -d {lin.name}`.",
+                                None if used else "cert-retire", None if used else lin.name))
 
-        used = (lin.params.get("fullchain") or f"{live}/fullchain.pem") in used_paths or any(
-            d in served for d in lin.domains)
         if lin.expires is not None:
             days = (lin.expires - now).days
             if days < 0:
@@ -117,7 +121,8 @@ def check_certificates(host: Host, sites: list[NginxSite], lineages: list[Lineag
             elif days < SOON_DAYS:
                 checks.append(Check("warning", "certificates", f"{lin.name}: expires in {days} days",
                                     "certbot renews 30 days before expiry: the renewal is failing.",
-                                    f"sudo certbot renew --cert-name {lin.name} --dry-run"))
+                                    f"sudo certbot renew --cert-name {lin.name} --dry-run",
+                                    "cert-renew-test", lin.name))
         if not used:
             checks.append(Check(
                 "info", "certificates", f"{lin.name}: not used by any enabled site",
@@ -125,6 +130,7 @@ def check_certificates(host: Host, sites: list[NginxSite], lineages: list[Lineag
                 "tries to renew it. Make sure no other program (Docker, another web server) uses it before removing.",
                 f"sudo grep -R '{lin.name}' /etc/nginx /etc/docker /opt 2>/dev/null   # then, if really unused: "
                 f"sudo certbot delete --cert-name {lin.name}",
+                "cert-delete", lin.name,
             ))
 
         auth = lin.params.get("authenticator", "")
@@ -136,6 +142,7 @@ def check_certificates(host: Host, sites: list[NginxSite], lineages: list[Lineag
                 "and stays down if nginx fails to start again.",
                 f"sudo sed -i -e 's/^authenticator = standalone$/authenticator = nginx/' -e '/^pre_hook = /d' "
                 f"-e '/^post_hook = /d' {RENEWAL_DIR}/{lin.name}.conf",
+                "renewal-nginx", lin.name,
             ))
         if auth == "webroot":
             for path in (lin.params.get("webroot_path") or "").split(","):
@@ -148,7 +155,7 @@ def check_certificates(host: Host, sites: list[NginxSite], lineages: list[Lineag
         if res is not None and res.stdout.strip() not in ("active", ""):
             checks.append(Check("warning", "certificates", "certbot.timer is not active",
                                 "Certificates are not renewed automatically.",
-                                "sudo systemctl enable --now certbot.timer"))
+                                "sudo systemctl enable --now certbot.timer", "certbot-timer", "certbot.timer"))
     return checks
 
 
@@ -170,6 +177,7 @@ def check_nginx(host: Host, sites: list[NginxSite], sockets: list[ListeningSocke
                 f"The nginx listening on 80/443 (pid {min(nginx_pids)}) is not the one systemd manages "
                 f"(MainPID={main}). `systemctl reload nginx` has no effect and a restart will fail.",
                 "sudo pkill -9 -x nginx; sleep 1; sudo systemctl start nginx   # sites down ~1 s",
+                "nginx-systemd", "nginx",
             ))
 
     test = host.run(["nginx", "-t"])

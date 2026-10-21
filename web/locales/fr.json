@@ -571,5 +571,21 @@
   "Parts": "Éléments",
   "Database, user accounts and API": "Base de données, comptes utilisateurs et API",
   "{app} will be connected to it automatically once it is installed.": "{app} y sera connectée automatiquement une fois l'installation terminée.",
-  "Features": "Fonctionnalités"
+  "Features": "Fonctionnalités",
+  "Delete the certificate": "Supprimer le certificat",
+  "Mas checks that no configuration uses it, keeps a copy in /var/lib/mas/backups/certbot, then runs certbot delete.": "Mas vérifie qu'aucune configuration ne l'utilise, en garde une copie dans /var/lib/mas/backups/certbot, puis lance certbot delete.",
+  "Retire the renewal file": "Retirer le fichier de renouvellement",
+  "The renewal file is moved to /root/letsencrypt-retired: certbot stops failing on it.": "Le fichier de renouvellement est déplacé dans /root/letsencrypt-retired : certbot arrête d'échouer dessus.",
+  "Test the renewal": "Tester le renouvellement",
+  "Runs certbot renew --dry-run: nothing changes, the output tells why it fails.": "Lance certbot renew --dry-run : rien ne change, la sortie explique pourquoi ça échoue.",
+  "Renew through nginx": "Renouveler via nginx",
+  "The renewal file is backed up, switched to the nginx method (no more nginx stop), then a test renewal checks it; it is restored if the test fails.": "Le fichier de renouvellement est sauvegardé, passé à la méthode nginx (plus d'arrêt de nginx), puis un renouvellement de test le vérifie ; il est restauré si le test échoue.",
+  "Turn on automatic renewal": "Activer le renouvellement automatique",
+  "Runs systemctl enable --now certbot.timer.": "Lance systemctl enable --now certbot.timer.",
+  "Restart nginx under systemd": "Redémarrer nginx sous systemd",
+  "Every site is down for about a second while the stray nginx is stopped and systemd starts it again.": "Tous les sites sont coupés environ une seconde, le temps d'arrêter le nginx isolé et que systemd le relance.",
+  "Delete the {n} unused certificates": "Supprimer les {n} certificats inutilisés",
+  "Fixed: {what}": "Corrigé : {what}",
+  "Hide the command": "Masquer la commande",
+  "Or by hand, on the server": "Ou à la main, sur le serveur"
 }

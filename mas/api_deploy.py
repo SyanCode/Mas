@@ -30,6 +30,7 @@ from mas.dns import server_ips
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env
 from mas.github import GitHubApp, GitHubError, convert_manifest, repo_from_remote, verify_signature
 from mas.health import run_checks
+from mas.healthfix import ACTIONS, FixError, HealthFixer
 from mas.host import Host
 from mas.models import ServiceType
 from mas.state import Scanner
@@ -63,6 +64,11 @@ class CreateApp(BaseModel):
     auto_deploy: bool = True
     supabase: bool = False  # connect it to the Supabase of this server before its first build
     supabase_seed: bool = False
+
+
+class HealthFix(BaseModel):
+    action: str = Field(max_length=40)
+    target: str = Field(max_length=253)
 
 
 class AdoptService(BaseModel):
@@ -148,8 +154,24 @@ def register(
         cached_at = health_cache.get("at", 0.0)
         if refresh or time.time() - float(cached_at) > HEALTH_TTL:
             checks = await asyncio.to_thread(run_checks, host, config, True, server_ips(db, config)[0])
-            health_cache.update(at=time.time(), checks=[c.as_dict() for c in checks])
+            health_cache.update(at=time.time(), checks=[
+                {**c.as_dict(), "action": {"id": c.action, **ACTIONS[c.action]} if c.action else None}
+                for c in checks])
         return {"checked_at": health_cache["at"], "checks": health_cache["checks"]}
+
+    fixer = HealthFixer(host, config, Path(db.path).parent / "backups")
+
+    @app.post("/api/health/fix")
+    async def health_fix(body: HealthFix, s=Depends(current_session)) -> dict:
+        """Apply the fix of a reported problem (never a command sent by the browser)."""
+        try:
+            result = await asyncio.to_thread(fixer.apply, body.action, body.target)
+        except FixError as exc:
+            db.audit(s.username, f"fix-{body.action}", False, detail=f"{body.target}: {exc}"[:500])
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, f"fix-{body.action}", result["ok"], detail=body.target)
+        health_cache.clear()  # the next visit checks again
+        return result
 
     # -- GitHub App --------------------------------------------------------
 

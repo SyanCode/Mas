@@ -571,5 +571,21 @@
   "Parts": "Partes",
   "Database, user accounts and API": "Base de datos, cuentas de usuario y API",
   "{app} will be connected to it automatically once it is installed.": "{app} se conectará automáticamente cuando termine la instalación.",
-  "Features": "Funciones"
+  "Features": "Funciones",
+  "Delete the certificate": "Eliminar el certificado",
+  "Mas checks that no configuration uses it, keeps a copy in /var/lib/mas/backups/certbot, then runs certbot delete.": "Mas comprueba que ninguna configuración lo usa, guarda una copia en /var/lib/mas/backups/certbot y luego ejecuta certbot delete.",
+  "Retire the renewal file": "Retirar el archivo de renovación",
+  "The renewal file is moved to /root/letsencrypt-retired: certbot stops failing on it.": "El archivo de renovación se mueve a /root/letsencrypt-retired: certbot deja de fallar con él.",
+  "Test the renewal": "Probar la renovación",
+  "Runs certbot renew --dry-run: nothing changes, the output tells why it fails.": "Ejecuta certbot renew --dry-run: no cambia nada, la salida explica por qué falla.",
+  "Renew through nginx": "Renovar con nginx",
+  "The renewal file is backed up, switched to the nginx method (no more nginx stop), then a test renewal checks it; it is restored if the test fails.": "Se guarda una copia del archivo de renovación, se cambia al método nginx (sin detener nginx) y una renovación de prueba lo comprueba; se restaura si la prueba falla.",
+  "Turn on automatic renewal": "Activar la renovación automática",
+  "Runs systemctl enable --now certbot.timer.": "Ejecuta systemctl enable --now certbot.timer.",
+  "Restart nginx under systemd": "Reiniciar nginx con systemd",
+  "Every site is down for about a second while the stray nginx is stopped and systemd starts it again.": "Todos los sitios se cortan durante un segundo mientras se detiene el nginx suelto y systemd lo vuelve a arrancar.",
+  "Delete the {n} unused certificates": "Eliminar los {n} certificados sin usar",
+  "Fixed: {what}": "Corregido: {what}",
+  "Hide the command": "Ocultar el comando",
+  "Or by hand, on the server": "O a mano, en el servidor"
 }

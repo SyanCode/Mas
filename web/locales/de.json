@@ -571,5 +571,21 @@
   "Parts": "Bestandteile",
   "Database, user accounts and API": "Datenbank, Benutzerkonten und API",
   "{app} will be connected to it automatically once it is installed.": "{app} wird automatisch verbunden, sobald die Installation fertig ist.",
-  "Features": "Funktionen"
+  "Features": "Funktionen",
+  "Delete the certificate": "Zertifikat löschen",
+  "Mas checks that no configuration uses it, keeps a copy in /var/lib/mas/backups/certbot, then runs certbot delete.": "Mas prüft, dass keine Konfiguration es nutzt, legt eine Kopie in /var/lib/mas/backups/certbot ab und führt dann certbot delete aus.",
+  "Retire the renewal file": "Erneuerungsdatei ausmustern",
+  "The renewal file is moved to /root/letsencrypt-retired: certbot stops failing on it.": "Die Erneuerungsdatei wird nach /root/letsencrypt-retired verschoben: certbot scheitert nicht mehr daran.",
+  "Test the renewal": "Erneuerung testen",
+  "Runs certbot renew --dry-run: nothing changes, the output tells why it fails.": "Führt certbot renew --dry-run aus: Nichts ändert sich, die Ausgabe zeigt, warum es scheitert.",
+  "Renew through nginx": "Über nginx erneuern",
+  "The renewal file is backed up, switched to the nginx method (no more nginx stop), then a test renewal checks it; it is restored if the test fails.": "Die Erneuerungsdatei wird gesichert, auf die nginx-Methode umgestellt (kein Stoppen von nginx mehr) und per Testerneuerung geprüft; schlägt der Test fehl, wird sie wiederhergestellt.",
+  "Turn on automatic renewal": "Automatische Erneuerung einschalten",
+  "Runs systemctl enable --now certbot.timer.": "Führt systemctl enable --now certbot.timer aus.",
+  "Restart nginx under systemd": "nginx unter systemd neu starten",
+  "Every site is down for about a second while the stray nginx is stopped and systemd starts it again.": "Alle Websites sind etwa eine Sekunde weg, während das verwaiste nginx gestoppt und von systemd neu gestartet wird.",
+  "Delete the {n} unused certificates": "Die {n} ungenutzten Zertifikate löschen",
+  "Fixed: {what}": "Behoben: {what}",
+  "Hide the command": "Befehl ausblenden",
+  "Or by hand, on the server": "Oder von Hand, auf dem Server"
 }

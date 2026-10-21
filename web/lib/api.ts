@@ -160,6 +160,9 @@ export interface Check {
   title: string;
   detail: string;
   fix: string | null;
+  /** One-click fix applied by Mas (the browser only names it). */
+  action: { id: string; label: string; confirm: string; danger: boolean } | null;
+  target: string | null;
 }
 
 export type ReleaseStatus = "queued" | "building" | "live" | "failed" | "superseded";
