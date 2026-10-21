@@ -176,6 +176,8 @@ def create_app(
         with db.tx() as c:  # a restart interrupts running deployments
             c.execute("UPDATE releases SET status = 'failed', error = 'interrupted (Mas restarted)' "
                       "WHERE status IN ('queued', 'building')")
+            c.execute("UPDATE supabase SET status = 'failed', error = 'interrupted (Mas restarted)' "
+                      "WHERE status = 'installing'")
         task = asyncio.create_task(scan_loop()) if background else None
         yield
         if task:

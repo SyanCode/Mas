@@ -275,3 +275,14 @@ def test_envoy_gateway_ports_are_bound_to_loopback():
     assert ports[:4] == ["127.0.0.1:${API_GW_HTTP_PORT:-${KONG_HTTP_PORT:-8000}}:8000/tcp", "127.0.0.1:9000:9000",
                          "127.0.0.1:9001:9001", 9002]
     assert ports[4]["host_ip"] == "127.0.0.1"
+
+
+def test_restart_marks_an_interrupted_install_failed(tmp_path):
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    db.save_supabase("supabase", status="installing", dir="/srv/mas/supabase/supabase")
+    with TestClient(create_app(host, Config(cookie_secure=False, secret_key_path="/etc/mas/secret.key"), db,
+                               background=False)):
+        pass
+    inst = db.get_supabase("supabase")
+    assert inst["status"] == "failed" and "interrupted" in inst["error"]
