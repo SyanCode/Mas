@@ -6,6 +6,9 @@ import getpass
 import ipaddress
 import logging
 import os
+import shlex
+import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Optional
@@ -60,7 +63,9 @@ class Env:
             try:
                 self._db = Database(self.config.db_path)
             except (OSError, PermissionError) as exc:
-                fail(f"cannot open {self.config.db_path} ({exc}). Run with sudo?")
+                if not is_root():
+                    fail(f"Mas needs administrator rights for this. Run: [bold]{sudo_hint(sys.argv[1:])}[/]")
+                fail(f"cannot open {self.config.db_path} ({exc})")
         return self._db
 
 
@@ -760,7 +765,7 @@ def self_update_cmd(
 
     env: Env = ctx.obj
     if env.host.euid != 0:
-        fail("run with sudo")
+        fail(f"Mas needs administrator rights for this. Run: [bold]{sudo_hint(sys.argv[1:])}[/]")
     try:
         self_update(env.config, from_archive, restart=not no_restart, log=console.print)
     except UpdateError as exc:
@@ -768,5 +773,27 @@ def self_update_cmd(
     console.print("[green]✓[/] Mas updated")
 
 
+def is_root() -> bool:
+    return getattr(os, "geteuid", lambda: 0)() == 0
+
+
+def sudo_hint(argv: list[str]) -> str:
+    return "sudo mas " + " ".join(shlex.quote(a) for a in argv)
+
+
+def run(argv: list[str] | None = None) -> None:
+    """Entry point of the ``mas`` command: permission problems become a hint to use sudo."""
+    argv = sys.argv[1:] if argv is None else argv
+    try:
+        app(args=argv, prog_name="mas")
+    except (PermissionError, sqlite3.OperationalError) as exc:
+        denied = isinstance(exc, PermissionError) or any(
+            s in str(exc) for s in ("unable to open database", "readonly database", "disk I/O error"))
+        if is_root() or not denied:
+            raise
+        err_console.print(f"[red]error:[/] Mas needs administrator rights for this. Run: [bold]{sudo_hint(argv)}[/]")
+        raise SystemExit(1) from None
+
+
 if __name__ == "__main__":
-    app()
+    run()

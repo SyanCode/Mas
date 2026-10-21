@@ -105,3 +105,22 @@ def test_cli_rejects_non_loopback_bind(host, tmp_path):
     r = CliRunner().invoke(app, ["--fixture", str(host.fixture_dir), "--db", str(tmp_path / "x.db"),
                                  "serve", "--host", "0.0.0.0"])
     assert r.exit_code == 1 and "loopback" in r.output
+
+
+@pytest.mark.parametrize("error", [PermissionError(13, "Permission denied", "/var/lib/mas/mas.db"),
+                                   __import__("sqlite3").OperationalError("unable to open database file")])
+def test_permission_errors_ask_for_sudo(monkeypatch, capsys, error):
+    from mas import cli
+
+    def boom(**_):
+        raise error
+
+    monkeypatch.setattr(cli, "app", boom)
+    monkeypatch.setattr(cli, "is_root", lambda: False)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.run(["apps", "--all"])
+    assert exit_info.value.code == 1
+    assert "sudo mas apps --all" in capsys.readouterr().err
+    monkeypatch.setattr(cli, "is_root", lambda: True)  # root: a real problem, not a missing sudo
+    with pytest.raises(type(error)):
+        cli.run(["apps"])
