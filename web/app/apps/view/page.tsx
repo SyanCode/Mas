@@ -19,23 +19,40 @@ const TRIGGERS: Record<string, string> = {
   push: msg("push"), manual: msg("manual"), rollback: msg("rollback"), create: msg("create"), cms: msg("CMS edit"),
 };
 
+interface ClusterServer { id: number; name: string; url: string; address: string | null; error: string | null }
+
 function LoadBalancingCard({ app, onSaved }: { app: App; onSaved: (releaseId: number) => void }) {
   const t = useT();
   const [instances, setInstances] = useState(app.instances);
   const [backends, setBackends] = useState(app.backends.join("\n"));
+  const [servers, setServers] = useState<ClusterServer[] | null>(null);
+  const [chosen, setChosen] = useState<number[]>(app.cluster ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    api<{ servers: ClusterServer[] }>("/cluster").then((r) => setServers(r.servers)).catch(() => setServers([]));
+  }, []);
   const list = backends.split(/\s+/).filter(Boolean);
-  const changed = instances !== app.instances || list.join() !== app.backends.join();
-  const total = instances + list.length;
+  const clusterChanged = [...chosen].sort().join() !== [...(app.cluster ?? [])].sort().join();
+  const scalingChanged = instances !== app.instances || list.join() !== app.backends.join();
+  const changed = clusterChanged || scalingChanged;
+  const total = instances + list.length + chosen.length;
 
   async function save() {
     setBusy(true);
     setError("");
     try {
-      const r = await api<{ release_id: number }>(`/apps/${encodeURIComponent(app.id)}/scaling`,
-        { method: "PUT", body: { instances, backends: list } });
-      onSaved(r.release_id);
+      let releaseId: number | null = null;
+      if (clusterChanged) {
+        const r = await api<{ release_id: number | null }>(`/apps/${encodeURIComponent(app.id)}/cluster?deploy=${scalingChanged ? "false" : "true"}`,
+          { method: "PUT", body: { servers: chosen } });
+        releaseId = r.release_id;
+      }
+      if (scalingChanged) {
+        releaseId = (await api<{ release_id: number }>(`/apps/${encodeURIComponent(app.id)}/scaling`,
+          { method: "PUT", body: { instances, backends: list } })).release_id;
+      }
+      if (releaseId) onSaved(releaseId);
     } catch (e) {
       setError((e as ApiError).detail);
     } finally {
@@ -49,6 +66,25 @@ function LoadBalancingCard({ app, onSaved }: { app: App; onSaved: (releaseId: nu
         <Label title={t("Instances on this server")} hint={t("Ports {ports}. One per CPU core is a good maximum; redeploys restart them one by one.", { ports: app.instance_ports.join(", ") })}>
           <Input type="number" min={1} max={16} value={instances} onChange={(e) => setInstances(Math.max(1, Math.min(16, Number(e.target.value) || 1)))} />
         </Label>
+        {servers && servers.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-zinc-500">{t("Servers of the cluster")}</div>
+            <p className="text-xs text-zinc-500">{t("Mas builds the same version on each server you tick, on every deploy, and adds the copies that answer to the load balancer.")}</p>
+            {servers.map((s) => {
+              const live = (app.cluster_backends ?? []).some((b) => s.address && b.startsWith(`${s.address}:`));
+              return (
+                <label key={s.id} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-white/[0.08]">
+                  <span className="flex items-center gap-2">
+                    <input type="checkbox" checked={chosen.includes(s.id)} onChange={(e) => setChosen(e.target.checked ? [...chosen, s.id] : chosen.filter((x) => x !== s.id))} />
+                    <span className="font-medium">{s.name}</span>
+                    <span className="mono text-xs text-zinc-500">{s.address}</span>
+                  </span>
+                  {s.error ? <Badge tone="red">{t("unreachable")}</Badge> : app.cluster?.includes(s.id) ? (live ? <Badge tone="emerald">{t("copy live")}</Badge> : <Badge tone="amber">{t("no copy")}</Badge>) : null}
+                </label>
+              );
+            })}
+          </div>
+        )}
         <Label title={t("Other servers (optional)")} hint={t("One host:port per line, for copies of this app you run elsewhere (private network). nginx skips a server that stops answering.")}>
           <Textarea rows={3} value={backends} onChange={(e) => setBackends(e.target.value)} placeholder="10.0.0.12:3000" />
         </Label>

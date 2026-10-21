@@ -147,7 +147,7 @@ User=@@USER@@
 Group=@@USER@@
 WorkingDirectory=@@CURRENT@@
 EnvironmentFile=-@@ENV_FILE@@
-Environment="PORT=@@PORT@@" "HOST=127.0.0.1" "HOSTNAME=127.0.0.1" "NODE_ENV=production" "PATH=@@PATH@@"
+Environment="PORT=@@PORT@@" "HOST=@@BIND@@" "HOSTNAME=@@BIND@@" "NODE_ENV=production" "PATH=@@PATH@@"
 # Fewer glibc malloc arenas: much less memory for Node (sharp, native modules) and Python threads.
 Environment="MALLOC_ARENA_MAX=2"
 ExecStart=@@EXEC@@
@@ -298,6 +298,7 @@ def systemd_quote(command: str) -> str:
     return f'/bin/sh -c "exec {escaped}"'
 
 
-def unit(app_id: str, repo: str, user: str, current: str, env_file: str, port: int, path: str, exec_start: str) -> str:
+def unit(app_id: str, repo: str, user: str, current: str, env_file: str, port: int, path: str, exec_start: str,
+         bind: str = "127.0.0.1") -> str:
     return fill(UNIT, app=app_id, repo=repo, user=user, current=current, env_file=env_file, port=port,
-                path=path, exec=exec_start)
+                path=path, exec=exec_start, bind=bind)

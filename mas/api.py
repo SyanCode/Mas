@@ -16,9 +16,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_cms, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, api_cluster, api_cms, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
+from mas.cluster import Cluster
 from mas.deploy import Deployer
 from mas.github import GitHubApp
 from mas.cms import CmsManager
@@ -129,6 +130,7 @@ def create_app(
     background: bool = True,
     web_dir: Path | None = None,
     ovh_opener=None,  # tests: fake OVH API
+    cluster_opener=None,  # tests: calls to the other Mas servers
 ) -> FastAPI:
     host = host or Host()
     config = config or load_config(host)
@@ -183,6 +185,8 @@ def create_app(
     stack_backups = StackBackups(stacks, keep=config.stacks_keep_backups)
     cms = CmsManager(db, github_client, deployer, Path(db.path).parent, supabase=supabase)
     site_stats = SiteStats(host, config, db, find_service=scanner.get)
+    cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \
+        Cluster(host, config, db, deployer)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -513,6 +517,8 @@ def create_app(
                           manager=supabase, appdb=appdb, client_ip=client_ip)
     app.state.appdb = appdb
     api_stacks.register(app, db=db, current_session=current_session, manager=stacks, backups=stack_backups)
+    api_cluster.register(app, db=db, current_session=current_session, cluster=cluster, deployer=deployer)
+    app.state.cluster = cluster
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,

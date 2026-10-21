@@ -117,6 +117,21 @@ CREATE TABLE IF NOT EXISTS invites (            -- one-time sign-up links for CM
     used_at TEXT,
     used_by TEXT
 );
+CREATE TABLE IF NOT EXISTS cluster_tokens (  -- join tokens: another Mas uses one to drive this server
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_used TEXT
+);
+CREATE TABLE IF NOT EXISTS cluster_servers ( -- the other Mas servers this one drives
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,                  -- https://mas.other.example (its dashboard)
+    token TEXT NOT NULL,                       -- its join token, encrypted (mas.envcrypt)
+    address TEXT,                              -- private address its app copies listen on
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS site_stats (      -- daily totals read from nginx access logs (no IP kept)
     app_id TEXT NOT NULL,
     day TEXT NOT NULL,                         -- YYYY-MM-DD, server time
@@ -143,12 +158,17 @@ MIGRATIONS = [
     ("apps", "stack TEXT"),        # mode "stack": JSON {template, options, ports} (mas.stacks)
     ("apps", "aliases TEXT"),      # JSON ["www.example.com"]: more names served like the domain
     ("apps", "replaces TEXT"),     # JSON {service_id, files}: nginx files handed over on the first deploy
+    ("apps", "cluster TEXT"),      # JSON [server id]: servers of the cluster running a copy of the app
+    ("apps", "cluster_backends TEXT"),  # JSON ["10.0.0.2:7101"]: those copies, after the last deploy
+    ("apps", "bind TEXT"),         # address the app listens on (copy of an app of another server)
+    ("apps", "replica_of TEXT"),   # copy driven by another Mas: its name
 ]
 ROLES = ("admin", "editor")
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
-              "current_release", "extra_ports", "backends", "stack", "aliases", "replaces"}
+              "current_release", "extra_ports", "backends", "stack", "aliases", "replaces", "cluster",
+              "cluster_backends", "bind", "replica_of"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
 
 
@@ -379,6 +399,53 @@ class Database:
             c.execute("DELETE FROM supabase WHERE id = ?", (instance_id,))
 
     # -- settings (key/value; secrets are stored encrypted by the caller) --
+
+    # -- cluster ---------------------------------------------------------------
+
+    def create_cluster_token(self, name: str, token_hash: str) -> int:
+        with self.tx() as c:
+            return c.execute("INSERT INTO cluster_tokens (name, token_hash, created_at) VALUES (?, ?, ?)",
+                             (name, token_hash, _now())).lastrowid
+
+    def use_cluster_token(self, token_hash: str) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM cluster_tokens WHERE token_hash = ?", (token_hash,)).fetchone()
+            if row:
+                c.execute("UPDATE cluster_tokens SET last_used = ? WHERE id = ?", (_now(), row["id"]))
+            return dict(row) if row else None
+
+    def list_cluster_tokens(self) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT id, name, created_at, last_used FROM cluster_tokens ORDER BY id")]
+
+    def delete_cluster_token(self, token_id: int) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM cluster_tokens WHERE id = ?", (token_id,))
+
+    def add_cluster_server(self, name: str, url: str, token: str, address: str | None) -> int:
+        with self.tx() as c:
+            return c.execute("INSERT INTO cluster_servers (name, url, token, address, created_at) VALUES (?, ?, ?, ?, ?)",
+                             (name, url, token, address, _now())).lastrowid
+
+    def update_cluster_server(self, server_id: int, **fields: Any) -> None:
+        if not fields or not set(fields) <= {"name", "address", "token"}:
+            raise ValueError("invalid server fields")
+        with self.tx() as c:
+            c.execute(f"UPDATE cluster_servers SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+                      (*fields.values(), server_id))
+
+    def list_cluster_servers(self) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM cluster_servers ORDER BY id")]
+
+    def get_cluster_server(self, server_id: int) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM cluster_servers WHERE id = ?", (server_id,)).fetchone()
+            return dict(row) if row else None
+
+    def delete_cluster_server(self, server_id: int) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM cluster_servers WHERE id = ?", (server_id,))
 
     def save_site_stats(self, app_id: str, days: list[dict]) -> None:
         with self.tx() as c:

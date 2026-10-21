@@ -215,6 +215,9 @@ export interface App {
   service_id: string | null;
   path: string | null;
   root_dir: string;
+  /** Servers of the cluster running a copy (ids), and the copies that answered at the last deploy. */
+  cluster?: number[];
+  cluster_backends?: string[];
   build_command: string | null;
   start_command: string | null;
   auto_deploy: boolean;

@@ -34,6 +34,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from mas import templates
 from mas.actions import ActionError, available_actions, run_action
@@ -323,6 +324,11 @@ class Deployer:
         self.resolver = resolver
         # Run after the clone, before the build, with (app, release dir, log): database migrations.
         self.before_build: list[Callable[[dict, str, "ReleaseLog"], None]] = []
+        # Copies on the other servers of the cluster (mas.cluster): spread(app, sha, log) starts building
+        # them and returns a function waiting for the "address:port" of those that answer.
+        self.spread: Callable[[dict, str, "ReleaseLog"], Callable[[], list[str]]] | None = None
+        # The source of a release deployed for another Mas (a copy): commit and clone token it gave.
+        self.sources: dict[int, Any] = {}
         # Other kinds of apps (mas.stacks): deploy(app, release, log) and remove(app, purge) -> notes.
         self.mode_handlers: dict[str, Callable[[dict, dict, "ReleaseLog"], None]] = {}
         self.remove_handlers: dict[str, Callable[[dict, bool], list[str]]] = {}
@@ -500,7 +506,7 @@ class Deployer:
         if app.get("start_command"):
             return templates.systemd_quote(app["start_command"])
         if app_type == ServiceType.NEXTJS:
-            return f"{current}/node_modules/.bin/next start -H 127.0.0.1 -p {app['port']}"
+            return f"{current}/node_modules/.bin/next start -H {app.get('bind') or '127.0.0.1'} -p {app['port']}"
         if app_type == ServiceType.NODE:
             # The start script itself: `npm start` keeps an npm process (~60 MB) around the app.
             scripts = self._package_scripts(release or current)
@@ -575,7 +581,7 @@ class Deployer:
             content = templates.unit(
                 app["id"], app["repo"], app_user(app["id"]), paths.current, env_file(app["id"]),
                 port, self._unit_path(app_type, paths.current),
-                self._exec_start(one, app_type, paths.current, workdir),
+                self._exec_start(one, app_type, paths.current, workdir), app.get("bind") or "127.0.0.1",
             )
             path = f"/etc/systemd/system/{unit}"
             if self.host.read_text(path) != content:
@@ -723,7 +729,8 @@ class Deployer:
 
     @staticmethod
     def _upstream_servers(app: dict) -> list[str]:
-        return [f"127.0.0.1:{p}" for _, p in app_instances(app)] + app_backends(app)
+        cluster = json.loads(app.get("cluster_backends") or "[]")
+        return [f"127.0.0.1:{p}" for _, p in app_instances(app)] + app_backends(app) + cluster
 
     def _prepare_domain(self, app: dict, app_type: ServiceType, paths: AppPaths, first: bool,
                         rlog: ReleaseLog) -> None:
@@ -794,7 +801,7 @@ class Deployer:
         timeout = self.config.healthcheck_timeout
         port = port or (app.get("port") if app_type in PROXY_TYPES else None)
         if port:
-            ok, detail = self.health_check(f"http://127.0.0.1:{port}/", None, timeout)
+            ok, detail = self.health_check(f"http://{app.get('bind') or '127.0.0.1'}:{port}/", None, timeout)
         elif app.get("domain"):
             ok, detail = self.health_check("http://127.0.0.1/", app["domain"], timeout)
         else:
@@ -833,7 +840,7 @@ class Deployer:
     # -- managed apps ------------------------------------------------------------
 
     def _managed(self, app: dict, release: dict, rlog: ReleaseLog) -> None:
-        gh = self.github()
+        gh = self.sources.pop(release["id"], None) or self.github()
         if gh is None:
             raise DeployError("GitHub App not configured (Settings → GitHub)")
         app_type = ServiceType(app["type"])
@@ -895,6 +902,9 @@ class Deployer:
 
         for hook in self.before_build:
             hook(app, rel, rlog)
+        # The copies on the other servers build at the same time as this one.
+        copies = self.spread(app, sha, rlog) if self.spread and json.loads(app.get("cluster") or "[]") \
+            and app_type in PROXY_TYPES else None
         rlog.step("Building")
         self._build(app, app_type, rel, user, {**env_vars, "HOME": self._r(paths.home)}, rlog)
         export = self._static_export(app, app_type, rel)
@@ -908,6 +918,10 @@ class Deployer:
         try:
             if app_type in PROXY_TYPES:
                 self._install_unit(app, app_type, paths, env_vars, rlog, workdir=rel)
+            backends = copies() if copies else []
+            if backends or app.get("cluster_backends"):
+                app = {**app, "cluster_backends": json.dumps(backends) if backends else None}
+                self.db.update_app(app["id"], cluster_backends=app["cluster_backends"])
             if app["domain"] and app.get("replaces"):
                 handed = self._hand_over(app, app_type, paths, rlog)
             elif app["domain"]:

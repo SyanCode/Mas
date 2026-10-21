@@ -659,3 +659,39 @@ def test_switching_an_app_to_static_removes_its_unit(env):
     assert ok, deployer.log_path("web", rid).read_text()
     assert not host.exists("/etc/systemd/system/mas-app-web.service")
     assert ["systemctl", "disable", "--now", "mas-app-web.service"] in host.executed
+
+
+def test_copies_on_other_servers_join_the_upstream(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    db.update_app("web", cluster="[1]")
+    asked = []
+    deployer.spread = lambda app, sha, rlog: asked.append(sha) or (lambda: ["10.0.0.2:7300"])
+    rid, ok = deploy_once(env, SHA1)
+    assert ok, deployer.log_path("web", rid).read_text()
+    assert asked == [SHA1]
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert "server 127.0.0.1:7100" in vhost and "server 10.0.0.2:7300" in vhost
+    assert json.loads(db.get_app("web")["cluster_backends"]) == ["10.0.0.2:7300"]
+    # the copy is gone: the next deploy leaves it out
+    deployer.spread = lambda app, sha, rlog: (lambda: [])
+    rid, ok = deploy_once(env, SHA2)
+    assert ok and "10.0.0.2" not in host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert db.get_app("web")["cluster_backends"] is None
+
+
+def test_a_copy_listens_on_the_private_address(env):
+    from mas.cluster import _GivenSource
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    db.update_app("web", domain=None, bind="10.0.0.2", replica_of="a", installation_id=None)
+    deployer.github = lambda: None  # B has no GitHub App: A gave the commit and a clone token
+    urls = []
+    deployer.health_check = lambda url, h, t: urls.append(url) or (True, "HTTP 200")
+    env["set_sha"](SHA1)
+    rid = db.create_release("web", "cluster", "a", SHA1)
+    deployer.sources[rid] = _GivenSource(SHA1, "new version", "Alice", "ghs_from_a")
+    assert deployer.run(rid), deployer.log_path("web", rid).read_text()
+    unit = host.read_text("/etc/systemd/system/mas-app-web.service")
+    assert '"HOST=10.0.0.2"' in unit and "next start -H 10.0.0.2 -p 7100" in unit
+    assert urls == ["http://10.0.0.2:7100/"]
+    clone_env = next(e for a, e in env["calls"] if a[:2] == ["git", "clone"])
+    assert base64.b64encode(b"x-access-token:ghs_from_a").decode() in clone_env["GIT_CONFIG_VALUE_0"]

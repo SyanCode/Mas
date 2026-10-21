@@ -110,6 +110,8 @@ def app_payload(app: dict, db: Database) -> dict:
     data["instance_ports"] = [p for _, p in app_instances(app)]
     data["backends"] = app_backends(app)
     data["aliases"] = json.loads(app.get("aliases") or "[]")
+    data["cluster"] = json.loads(app.get("cluster") or "[]")
+    data["cluster_backends"] = json.loads(app.get("cluster_backends") or "[]")
     data["replaces"] = json.loads(app["replaces"]) if app.get("replaces") else None
     data.pop("extra_ports", None)
     data["stack"] = json.loads(app["stack"]) if app.get("stack") else None  # template and options, no secret
