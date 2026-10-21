@@ -786,5 +786,14 @@
   "Install Mas on another server, create a join token there, then add it here.": "Instala Mas en otro servidor, crea allí un token de unión y añádelo aquí.",
   "Load balancing applies to Node.js, Next.js and Python apps: open an app, then its Load balancing card.": "El balanceo de carga se aplica a apps Node.js, Next.js y Python: abre una app y luego su tarjeta Balanceo de carga.",
   "Remove {name} from the cluster?": "¿Quitar {name} del clúster?",
-  "The copies of your apps on that server are removed, then nginx stops sending it requests at the next deploy.": "Las copias de tus apps en ese servidor se eliminan y nginx deja de enviarle peticiones en el próximo despliegue."
+  "The copies of your apps on that server are removed, then nginx stops sending it requests at the next deploy.": "Las copias de tus apps en ese servidor se eliminan y nginx deja de enviarle peticiones en el próximo despliegue.",
+  "outside Mas": "fuera de Mas",
+  "No app behind nginx yet: the map shows the Node.js, Next.js and Python apps that have a domain.": "Aún no hay apps detrás de nginx: el mapa muestra las apps Node.js, Next.js y Python que tienen dominio.",
+  "Cluster map": "Mapa del clúster",
+  "req/min": "pet./min",
+  "errors in 15 min": "errores en 15 min",
+  "this server": "este servidor",
+  "Requests of the last minute, per app and server, from the logs of nginx on this server; refreshed every 5 s. Hover a link for its errors and response time.": "Peticiones del último minuto, por app y servidor, según los registros de nginx en este servidor; se actualiza cada 5 s. Pasa sobre un enlace para ver sus errores y su tiempo de respuesta.",
+  "live": "en vivo",
+  "errors": "errores"
 }

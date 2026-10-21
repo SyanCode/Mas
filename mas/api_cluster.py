@@ -73,6 +73,11 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, cluster: 
     async def overview(_=Depends(current_session)) -> dict:
         return await asyncio.to_thread(cluster.overview)
 
+    @app.get("/api/cluster/traffic")
+    async def traffic(_=Depends(current_session)) -> dict:
+        """Requests per app and per backend, for the cluster map (refreshed every few seconds)."""
+        return await asyncio.to_thread(cluster.traffic)
+
     @app.put("/api/cluster/self")
     def configure(body: SelfBody, s=Depends(current_session)) -> dict:
         call(cluster.configure, body.name, body.address)

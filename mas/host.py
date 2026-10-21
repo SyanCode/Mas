@@ -95,6 +95,18 @@ class Host:
         except OSError:
             return None
 
+    def read_tail(self, path: str, max_bytes: int) -> bytes:
+        """The last ``max_bytes`` of a file (a log), from its first complete line."""
+        try:
+            with open(self.real(path), "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                size = fh.tell()
+                fh.seek(max(0, size - max_bytes))
+                data = fh.read(max_bytes)
+        except OSError:
+            return b""
+        return data.split(b"\n", 1)[1] if size > max_bytes and b"\n" in data else data
+
     def read_text(self, path: str, max_bytes: int = MAX_READ_BYTES) -> str | None:
         data = self.read_bytes(path, max_bytes)
         return None if data is None else data.decode("utf-8", errors="replace")

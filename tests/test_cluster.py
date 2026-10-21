@@ -118,3 +118,31 @@ def test_join_overview_and_a_copy(pair):
     # leaving: the copy goes away on B
     assert a.delete(f"/api/cluster/servers/{added.json()['id']}", headers=ah).status_code == 200
     assert pair["b_db"].get_app("web") is None and json.loads(db.get_app("web")["cluster"] or "[]") == []
+
+
+def test_traffic_per_backend(pair):
+    a, ah, db, host = pair["a"], pair["ah"], pair["a_db"], pair["a_host"]
+    db.add_cluster_server("b", "https://mas-b.example.com", "x", "10.0.0.2")
+    db.create_app("web", name="web", repo="acme/web", branch="main", installation_id=7, domain="web.example.com",
+                  type="nextjs", port=7100, mode="managed", cluster="[1]", cluster_backends='["10.0.0.2:7300"]')
+    now = time.time()
+    lines = [f"{now - 10:.3f} 127.0.0.1:7100 200 0.020", f"{now - 20:.3f} 10.0.0.2:7300 200 0.040",
+             f"{now - 30:.3f} 10.0.0.2:7300 502 0.001", f"{now - 300:.3f} 127.0.0.1:7100 200 0.010",
+             f"{now - 5:.3f} 10.0.0.2:7300, 127.0.0.1:7100 502, 200 0.300",  # retried here
+             f"{now - 4000:.3f} 127.0.0.1:7100 200 0.010", "garbage"]
+    host.write_text("/var/log/nginx/mas-app-web.upstream.log", "\n".join(lines) + "\n")
+    r = a.get("/api/cluster/traffic").json()
+    backends = {b["address"]: b for b in r["apps"][0]["backends"]}
+    local, copy = backends["127.0.0.1:7100"], backends["10.0.0.2:7300"]
+    assert local["server"] == "self" and local["requests_minute"] == 2 and local["requests_15min"] == 3
+    assert copy["server"] == 1 and copy["requests_minute"] == 2 and copy["errors_15min"] == 1
+    assert copy["avg_ms"] == 20 and local["configured"] and copy["configured"]
+    stranger = TestClient(pair["a_app"])  # no session: a join token does not open the dashboard routes
+    assert stranger.get("/api/cluster/traffic", headers={"Authorization": "Bearer masc_x"}).status_code == 401
+
+
+def test_read_tail(tmp_path):
+    from mas.host import Host
+    (tmp_path / "log").write_bytes(b"first line\n" + b"x" * 50 + b"\nlast line\n")
+    assert Host(tmp_path).read_tail("/log", 20) == b"last line\n"
+    assert Host(tmp_path).read_tail("/log", 10_000).startswith(b"first line")

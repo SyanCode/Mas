@@ -13,6 +13,9 @@ map $http_upgrade $mas_connection_upgrade {
     default upgrade;
     ''      close;
 }
+
+# Which backend answered each request of an app (the cluster map of Mas reads it).
+log_format mas_upstream '$msec $upstream_addr $upstream_status $request_time';
 """
 
 # Served while the app restarts (502/503/504 from the backend) and by placeholder vhosts.
@@ -33,6 +36,7 @@ PLACEHOLDER_BODY = """
 """ + STATUS_PAGE_LOCATION
 
 PROXY_BODY = """
+    access_log /var/log/nginx/mas-app-@@APP@@.upstream.log mas_upstream;
     error_page 502 503 504 =503 /__mas/status.html;
     location / {
         proxy_pass http://@@TARGET@@;@@NEXT_UPSTREAM@@
@@ -199,12 +203,12 @@ def upstream_block(app_id: str, servers: list[str]) -> str:
     return f"upstream {upstream_name(app_id)} {{\n    least_conn;\n{lines}}}\n\n"
 
 
-def proxy_body(port: int, pages_dir: str, upstream: str | None = None) -> str:
+def proxy_body(port: int, pages_dir: str, upstream: str | None = None, app_id: str = "app") -> str:
     # With an upstream, a request that hits a restarting or dead backend is retried on the next one.
     next_upstream = ("\n        proxy_next_upstream error timeout http_502 http_503 http_504;"
                      "\n        proxy_next_upstream_tries 3;") if upstream else ""
     return fill(PROXY_BODY, target=upstream or f"127.0.0.1:{port}", next_upstream=next_upstream,
-                pages=pages_dir, page="deploying")
+                pages=pages_dir, page="deploying", app=app_id)
 
 
 def supabase_body(port: int, pages_dir: str, studio_allow: list[str] = ()) -> str:

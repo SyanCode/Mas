@@ -621,7 +621,7 @@ class Deployer:
         if app_type in PROXY_TYPES:
             balanced = len(self._upstream_servers(app)) > 1
             return templates.proxy_body(app["port"], self.config.pages_dir,
-                                        templates.upstream_name(app["id"]) if balanced else None)
+                                        templates.upstream_name(app["id"]) if balanced else None, app["id"])
         if app_type == ServiceType.PHP:
             return templates.php_body(root, self._fpm_socket())
         return templates.static_body(root)

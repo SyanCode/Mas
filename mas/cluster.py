@@ -43,6 +43,8 @@ NAME_SETTING = "cluster_name"
 PRIVATE_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
                                                    "100.64.0.0/10", "fc00::/7")]
 BUILD_TIMEOUT = 1800
+WINDOW_SHORT, WINDOW_LONG = 60, 900  # seconds: requests of the last minute / quarter of an hour
+UPSTREAM_TAIL = 8 * 1024 * 1024      # read the end of the upstream log only
 
 
 class ClusterError(Exception):
@@ -220,6 +222,56 @@ class Cluster:
         with ThreadPoolExecutor(max_workers=8) as pool:
             peers = list(pool.map(probe, servers))
         return {"self": self.info(), "servers": peers, "tokens": self.db.list_cluster_tokens()}
+
+    # -- live traffic (the cluster map) -------------------------------------------------
+
+    def traffic(self, now: float | None = None) -> dict:
+        """Requests of the last minute and the last 15 minutes, per app and per backend, read from the
+        upstream logs nginx writes for every proxied app (mas_upstream format)."""
+        now = now or time.time()
+        peers = {s["address"]: s for s in self.db.list_cluster_servers() if s["address"]}
+        apps = []
+        for app in self.db.list_apps():
+            if app["mode"] != "managed" or ServiceType(app["type"]) not in PROXY_TYPES or not app.get("domain"):
+                continue
+            counts: dict[str, dict] = {}
+            data = self.host.read_tail(f"/var/log/nginx/mas-app-{app['id']}.upstream.log", UPSTREAM_TAIL)
+            for line in data.decode("utf-8", "replace").splitlines():
+                parts = line.split()
+                if len(parts) < 4 or len(parts) % 2:
+                    continue
+                try:
+                    age = now - float(parts[0])
+                except ValueError:
+                    continue
+                if age > WINDOW_LONG or age < -5:
+                    continue
+                # "msec 10.0.0.2:7101, 127.0.0.1:7100 502, 200 0.31": a retry; the last backend answered
+                tried = (len(parts) - 2) // 2
+                addr, status = parts[tried].rstrip(","), parts[2 * tried].rstrip(",")
+                c = counts.setdefault(addr, {"minute": 0, "quarter": 0, "errors": 0, "time": 0.0})
+                c["quarter"] += 1
+                c["minute"] += age <= WINDOW_SHORT
+                c["errors"] += status.startswith("5") or status == "-"
+                try:
+                    c["time"] += float(parts[-1])
+                except ValueError:
+                    pass
+            configured = self.deployer._upstream_servers(app)
+            backends = []
+            for addr in list(dict.fromkeys([*configured, *counts])):
+                if addr == "-":
+                    continue
+                host_part = addr.rsplit(":", 1)[0]
+                c = counts.get(addr, {"minute": 0, "quarter": 0, "errors": 0, "time": 0.0})
+                server = "self" if host_part in ("127.0.0.1", "localhost", self.address()) else \
+                    (peers[host_part]["id"] if host_part in peers else None)
+                backends.append({"address": addr, "server": server, "configured": addr in configured,
+                                 "requests_minute": c["minute"], "requests_15min": c["quarter"],
+                                 "errors_15min": c["errors"],
+                                 "avg_ms": round(c["time"] / c["quarter"] * 1000) if c["quarter"] else None})
+            apps.append({"id": app["id"], "name": app["name"], "domain": app["domain"], "backends": backends})
+        return {"at": now, "window_s": [WINDOW_SHORT, WINDOW_LONG], "apps": apps}
 
     # -- copies of an app (this server drives) ------------------------------------------
 

@@ -21,6 +21,91 @@ interface ServerInfo {
 interface Peer { id: number; name: string; url: string; address: string | null; info: ServerInfo | null; error: string | null; latency_ms: number | null }
 interface Overview { self: ServerInfo; servers: Peer[]; tokens: { id: number; name: string; created_at: string; last_used: string | null }[] }
 
+interface Traffic {
+  at: number;
+  apps: { id: string; name: string; domain: string; backends: { address: string; server: "self" | number | null; configured: boolean; requests_minute: number; requests_15min: number; errors_15min: number; avg_ms: number | null }[] }[];
+}
+
+/** Apps on the left, servers on the right: one link per app and server, as thick as its share of the
+ *  requests of the last minute, moving while requests flow, red when that server answers errors. */
+function ClusterMap({ data, traffic }: { data: Overview; traffic: Traffic | null }) {
+  const t = useT();
+  const servers = [
+    { key: "self", name: data.self.name, address: data.self.address, up: true, load: data.self.load[0], cpus: data.self.cpus },
+    ...data.servers.map((p) => ({ key: String(p.id), name: p.info?.name ?? p.name, address: p.address, up: !p.error, load: p.info?.load[0] ?? null, cpus: p.info?.cpus ?? null })),
+  ];
+  const external = Array.from(new Set((traffic?.apps ?? []).flatMap((a) => a.backends.filter((b) => b.server === null).map((b) => b.address.split(":")[0]))));
+  const right = [...servers, ...external.map((h) => ({ key: `ext:${h}`, name: t("outside Mas"), address: h, up: true, load: null, cpus: null }))];
+  const apps = traffic?.apps ?? [];
+  const W = 1160, rowH = 64, top = 24;
+  const H = Math.max(apps.length, right.length, 1) * rowH + top * 2;
+  const leftY = (i: number) => top + (i + 0.5) * ((H - 2 * top) / Math.max(apps.length, 1));
+  const rightY = (i: number) => top + (i + 0.5) * ((H - 2 * top) / Math.max(right.length, 1));
+  const keyOf = (b: Traffic["apps"][number]["backends"][number]) => (b.server === null ? `ext:${b.address.split(":")[0]}` : String(b.server));
+  const links = apps.flatMap((a, i) => {
+    const per = new Map<string, { minute: number; errors: number; quarter: number; ms: number[]; addrs: string[] }>();
+    for (const b of a.backends) {
+      const k = keyOf(b);
+      const cur = per.get(k) ?? { minute: 0, errors: 0, quarter: 0, ms: [], addrs: [] };
+      cur.minute += b.requests_minute; cur.errors += b.errors_15min; cur.quarter += b.requests_15min;
+      if (b.avg_ms !== null) cur.ms.push(b.avg_ms);
+      cur.addrs.push(b.address);
+      per.set(k, cur);
+    }
+    const total = Array.from(per.values()).reduce((n, v) => n + v.minute, 0);
+    return Array.from(per.entries()).map(([k, v]) => ({ app: a, i, j: right.findIndex((r) => r.key === k), share: total ? v.minute / total : 0, ...v }))
+      .filter((l) => l.j >= 0);
+  });
+  // links arriving at the same server: their labels are stacked instead of drawn on each other
+  const arriving = (l: (typeof links)[number]) => links.filter((o) => o.j === l.j);
+  if (!apps.length) return <p className="text-sm text-zinc-500">{t("No app behind nginx yet: the map shows the Node.js, Next.js and Python apps that have a domain.")}</p>;
+  return (
+    <div className="space-y-3">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={t("Cluster map")}>
+        <style>{`:root { --mas-map-halo: #fff } .dark { --mas-map-halo: #0a0b10 } @keyframes mas-flow { to { stroke-dashoffset: -24; } } .mas-flow { stroke-dasharray: 6 6; animation: mas-flow linear infinite; }`}</style>
+        {links.map((l) => {
+          const x1 = 230, y1 = leftY(l.i), x2 = W - 230, y2 = rightY(l.j);
+          const width = 1.5 + 6 * l.share;
+          const bad = l.quarter > 0 && l.errors / l.quarter > 0.05;
+          const mx = (x1 + x2) / 2;
+          const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+          // the label sits on the curve near the server (t = 0.8), where the links of one server spread out
+          const tt = 0.8, u = 1 - tt;
+          const lx = u ** 3 * x1 + 3 * u * u * tt * mx + 3 * u * tt * tt * mx + tt ** 3 * x2;
+          const ly = u ** 3 * y1 + 3 * u * u * tt * y1 + 3 * u * tt * tt * y2 + tt ** 3 * y2;
+          const label = `${l.app.name} → ${right[l.j].name} : ${l.minute} ${t("req/min")} (${Math.round(l.share * 100)} %), ${l.errors} ${t("errors in 15 min")}${l.ms.length ? `, ${Math.round(l.ms.reduce((a, b) => a + b, 0) / l.ms.length)} ms` : ""} · ${l.addrs.join(", ")}`;
+          return (
+            <g key={`${l.app.id}-${l.j}`}>
+              <title>{label}</title>
+              <path d={d} fill="none" strokeWidth={width + 8} stroke="transparent" />
+              <path d={d} fill="none" strokeWidth={width} strokeLinecap="round" className={bad ? "stroke-rose-500/40" : "stroke-indigo-500/25"} />
+              {l.minute > 0 && <path d={d} fill="none" strokeWidth={Math.max(1.5, width * 0.5)} strokeLinecap="round" className={`mas-flow ${bad ? "stroke-rose-400" : "stroke-indigo-300"}`} style={{ animationDuration: `${Math.max(0.4, 3 - Math.log10(l.minute + 1))}s` }} />}
+              <text x={lx} y={ly - 7 + (arriving(l).indexOf(l) - (arriving(l).length - 1) / 2) * 15} textAnchor="middle" className={`text-[11px] tabular-nums ${bad ? "fill-rose-500" : "fill-zinc-500"}`}
+                style={{ paintOrder: "stroke", stroke: "var(--mas-map-halo, #0a0b10)", strokeWidth: 4 }}>{l.minute ? `${Math.round(l.share * 100)} % · ${l.minute}/min` : bad ? t("errors") : "0/min"}</text>
+            </g>
+          );
+        })}
+        {apps.map((a, i) => (
+          <g key={a.id} transform={`translate(10 ${leftY(i) - 22})`}>
+            <rect width="220" height="44" rx="10" className="fill-white stroke-zinc-200 dark:fill-zinc-900 dark:stroke-white/10" />
+            <text x="14" y="19" className="fill-zinc-900 text-[13px] font-medium dark:fill-zinc-100">{a.name}</text>
+            <text x="14" y="34" className="fill-zinc-500 text-[11px]">{a.domain}</text>
+          </g>
+        ))}
+        {right.map((s, j) => (
+          <g key={s.key} transform={`translate(${W - 230} ${rightY(j) - 22})`}>
+            <rect width="220" height="44" rx="10" className={s.up ? "fill-white stroke-zinc-200 dark:fill-zinc-900 dark:stroke-white/10" : "fill-rose-500/10 stroke-rose-500/50"} />
+            <circle cx="16" cy="22" r="4" className={s.up ? "fill-emerald-500" : "fill-rose-500"} />
+            <text x="28" y="19" className="fill-zinc-900 text-[13px] font-medium dark:fill-zinc-100">{s.name}{s.key === "self" ? ` (${t("this server")})` : ""}</text>
+            <text x="28" y="34" className="fill-zinc-500 text-[11px]">{s.address ?? "—"}{s.load !== null ? ` · CPU ${s.load.toFixed(2)}/${s.cpus}` : ""}{!s.up ? ` · ${t("unreachable")}` : ""}</text>
+          </g>
+        ))}
+      </svg>
+      <p className="text-xs text-zinc-500">{t("Requests of the last minute, per app and server, from the logs of nginx on this server; refreshed every 5 s. Hover a link for its errors and response time.")}</p>
+    </div>
+  );
+}
+
 /** A share of a whole: the value in text, the bar for the eye. */
 function Meter({ label, used, total, unit }: { label: string; used: number; total: number; unit: string }) {
   const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
@@ -160,8 +245,15 @@ function Cluster() {
   const [error, setError] = useState("");
   const [leaving, setLeaving] = useState<Peer | null>(null);
   const [notice, setNotice] = useState("");
+  const [traffic, setTraffic] = useState<Traffic | null>(null);
   const load = useCallback(() => {
     api<Overview>("/cluster").then(setData).catch((e: ApiError) => setError(e.detail));
+  }, []);
+  useEffect(() => {
+    const read = () => api<Traffic>("/cluster/traffic").then(setTraffic).catch(() => {});
+    read();
+    const timer = setInterval(read, 5_000);
+    return () => clearInterval(timer);
   }, []);
   useEffect(() => {
     load();
@@ -186,6 +278,11 @@ function Cluster() {
       {!data && !error && <div className="glass shimmer h-64 rounded-2xl" />}
       {data && (
         <div className="grid gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-3">
+            <Card title={t("Cluster map")} actions={<Badge tone="emerald">{t("live")}</Badge>}>
+              <ClusterMap data={data} traffic={traffic} />
+            </Card>
+          </div>
           <div className="space-y-6 lg:col-span-2">
             <ThisServer info={data.self} onSaved={load} />
             {data.servers.length === 0 ? (

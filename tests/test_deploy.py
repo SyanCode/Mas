@@ -212,7 +212,7 @@ def test_load_balanced_instances_and_backends(env):
     assert not host.exists("/etc/systemd/system/mas-app-web.2.service")
     assert not host.exists("/etc/systemd/system/mas-app-web.3.service")
     vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
-    assert "upstream" not in vhost and "proxy_pass http://127.0.0.1:7100;" in vhost
+    assert "upstream mas_app" not in vhost and "proxy_pass http://127.0.0.1:7100;" in vhost
 
 
 def test_backends_are_validated():
