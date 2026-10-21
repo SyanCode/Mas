@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,16 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "/e2e/" in str(item.fspath).replace("\\", "/"):
                 item.add_marker(pytest.mark.skip(reason=reason))
+
+
+def pytest_runtest_logreport(report):
+    """On GitHub Actions, a failure becomes an annotation: its reason shows on the run's page."""
+    if report.failed and os.environ.get("GITHUB_ACTIONS") == "true":
+        text = str(report.longrepr)[-3500:]
+        text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        title = report.nodeid.replace(":", " ").replace(",", " ")
+        sys.__stdout__.write(f"\n::error title={title} ({report.when})::{text}\n")
+        sys.__stdout__.flush()
 
 
 @pytest.fixture
