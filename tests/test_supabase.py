@@ -184,6 +184,8 @@ def test_install_pipeline(manager):
     secrets = mgr.secrets(inst)
     assert f"ANON_KEY={secrets['ANON_KEY']}" in env and "POSTGRES_PASSWORD=your-super-secret" not in env
     assert "127.0.0.1:${KONG_HTTP_PORT}" in host.read_text(f"{mgr.dir}/docker-compose.yml")
+    ports = mgr.ports(inst)
+    assert f"API_GW_HTTP_PORT={ports['kong_http']}" in env  # Envoy listens where Mas waits for the API
     assert secrets["SERVICE_ROLE_KEY"] not in inst["secrets"]  # encrypted at rest
     ports = mgr.ports(inst)
     assert len(set(ports.values())) == 4 and all(7100 <= p <= 7999 for p in ports.values())
@@ -250,3 +252,21 @@ def test_connect_supabase_to_an_app(tmp_path):
     assert env["SUPABASE_SERVICE_ROLE_KEY"] == s["SERVICE_ROLE_KEY"]
     status = client.get("/api/supabase").json()
     assert status["instance"]["api_url"] == "https://db.example.com" and "secrets" not in status["instance"]
+
+
+def test_envoy_gateway_ports_are_bound_to_loopback():
+    compose = """services:
+  api-gw:
+    container_name: supabase-envoy
+    ports:
+      - ${API_GW_HTTP_PORT:-${KONG_HTTP_PORT:-8000}}:8000/tcp
+      - 9000:9000
+      - 127.0.0.1:9001:9001
+      - 9002
+      - target: 9003
+        published: 9003
+"""
+    ports = yaml.safe_load(apply_profile(compose, DEFAULT_COMPONENTS))["services"]["api-gw"]["ports"]
+    assert ports[:4] == ["127.0.0.1:${API_GW_HTTP_PORT:-${KONG_HTTP_PORT:-8000}}:8000/tcp", "127.0.0.1:9000:9000",
+                         "127.0.0.1:9001:9001", 9002]
+    assert ports[4]["host_ip"] == "127.0.0.1"

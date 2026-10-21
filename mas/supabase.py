@@ -97,6 +97,18 @@ def render_env(example: str, values: dict[str, str]) -> str:
 _PORT_RE = re.compile(r"""^(\s*-\s*["']?)(\$\{[A-Z0-9_]+\}:)""", re.M)
 
 
+def _loopback_port(port):
+    """``8000:8000`` / ``${A:-${B}}:8000`` → ``127.0.0.1:…``; long syntax gets ``host_ip``."""
+    if isinstance(port, dict):
+        if port.get("published") is not None:
+            port.setdefault("host_ip", "127.0.0.1")
+        return port
+    text = str(port)
+    if ":" not in text or re.match(r"^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:]*\]):", text):
+        return port  # container port only, or already bound to an address
+    return f"127.0.0.1:{text}"
+
+
 def bind_loopback(compose: str) -> str:
     """``- ${KONG_HTTP_PORT}:8000`` → ``- 127.0.0.1:${KONG_HTTP_PORT}:8000`` (Docker bypasses the firewall)."""
     return _PORT_RE.sub(r"\g<1>127.0.0.1:\g<2>", compose)
@@ -194,6 +206,9 @@ def apply_profile(compose: str, components: list[str]) -> str:
     if "supavisor" not in services and "db" in services:
         # No pooler: apps on this server reach Postgres directly (loopback only).
         services["db"].setdefault("ports", []).append("127.0.0.1:${POSTGRES_PORT}:5432")
+    for svc in services.values():
+        if isinstance(svc.get("ports"), list):
+            svc["ports"] = [_loopback_port(p) for p in svc["ports"]]
     if "kong" in services:
         _set_env(services["kong"], "KONG_NGINX_WORKER_PROCESSES", "1")
         _set_env(services["kong"], "KONG_MEM_CACHE_SIZE", "32m")
@@ -434,7 +449,8 @@ class SupabaseManager:
         public = f"https://{domain}" if domain else f"http://127.0.0.1:{kong_http}"
         values.update({
             "SITE_URL": public, "API_EXTERNAL_URL": public, "SUPABASE_PUBLIC_URL": public,
-            "KONG_HTTP_PORT": str(kong_http), "KONG_HTTPS_PORT": str(kong_https),
+            # Envoy (the default gateway since late 2026) reads API_GW_HTTP_PORT, Kong KONG_HTTP_PORT.
+            "API_GW_HTTP_PORT": str(kong_http), "KONG_HTTP_PORT": str(kong_http), "KONG_HTTPS_PORT": str(kong_https),
             "POSTGRES_PORT": str(postgres), "POOLER_PROXY_PORT_TRANSACTION": str(pooler),
             "STUDIO_DEFAULT_PROJECT": "Mas", "STUDIO_DEFAULT_ORGANIZATION": "Mas",
         })
