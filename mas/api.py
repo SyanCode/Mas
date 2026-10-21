@@ -16,12 +16,13 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_cms, api_deploy, api_dns, api_supabase, auth
+from mas import __version__, api_cms, api_deploy, api_dns, api_stacks, api_supabase, auth
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.deploy import Deployer
 from mas.github import GitHubApp
 from mas.cms import CmsManager
+from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
 from mas.config import Config, load_config
 from mas.db import Database
@@ -167,6 +168,7 @@ def create_app(
                         on_change=lambda: scanner.refresh())
     supabase = SupabaseManager(host, config, db, deployer)
     appdb = AppDatabases(host, config, db, supabase, deployer, github_client)
+    stacks = StackManager(host, config, db, deployer)
     cms = CmsManager(db, github_client, deployer, Path(db.path).parent, supabase=supabase)
 
     @asynccontextmanager
@@ -483,6 +485,8 @@ def create_app(
     api_supabase.register(app, host=host, db=db, current_session=current_session, deployer=deployer,
                           manager=supabase, appdb=appdb)
     app.state.appdb = appdb
+    api_stacks.register(app, db=db, current_session=current_session, manager=stacks)
+    app.state.stacks = stacks
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms)
 
     # -- dashboard ---------------------------------------------------------

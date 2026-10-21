@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
+import { StackCard } from "@/components/StackCard";
 import {
   Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner,
   StatusDot, Terminal, Textarea,
@@ -725,9 +726,11 @@ function AppView() {
           <div className="min-w-0">
             <h1 className="truncate text-[28px] font-semibold tracking-[-0.02em]">{app.id}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
-              <a href={`https://github.com/${app.repo}`} target="_blank" rel="noreferrer" className="hover:text-zinc-900 dark:hover:text-white">{app.repo}</a>
-              <span>·</span>
-              <Badge tone="sky">{app.type}</Badge>
+              {app.mode === "stack"
+                ? <><span>{t(app.name)}</span><span>·</span><Badge tone="emerald">{t("service")}</Badge></>
+                : <><a href={`https://github.com/${app.repo}`} target="_blank" rel="noreferrer" className="hover:text-zinc-900 dark:hover:text-white">{app.repo}</a>
+                  <span>·</span>
+                  <Badge tone="sky">{app.type}</Badge></>}
               {app.mode === "adopted" && <Badge tone="violet">{t("adopted")} · {app.path}</Badge>}
             </div>
           </div>
@@ -753,8 +756,17 @@ function AppView() {
         <div className="grid grid-cols-2 gap-6 md:grid-cols-5">
           <Field label={t("Status")}>{current ? <ReleaseBadge status="live" /> : building ? <ReleaseBadge status="building" /> : t("Not deployed")}</Field>
           <Field label={t("Domain")}>{app.domain ? <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="hover:underline">{app.domain}</a> : <span className="text-zinc-500">—</span>}</Field>
-          <Field label={t("Branch")}><code className="text-xs">{app.branch}</code></Field>
-          <Field label={t("Commit")}>{current ? <span title={current.message ?? ""}><code className="text-xs">{(current.sha ?? "").slice(0, 7)}</code> {current.message}</span> : "—"}</Field>
+          {app.mode === "stack" ? (
+            <>
+              <Field label={t("Service")}>{t(app.name)}</Field>
+              <Field label={t("Open ports")}>{Object.values(app.stack?.ports ?? {}).join(", ") || "—"}</Field>
+            </>
+          ) : (
+            <>
+              <Field label={t("Branch")}><code className="text-xs">{app.branch}</code></Field>
+              <Field label={t("Commit")}>{current ? <span title={current.message ?? ""}><code className="text-xs">{(current.sha ?? "").slice(0, 7)}</code> {current.message}</span> : "—"}</Field>
+            </>
+          )}
           <Field label={t("Deployed")}>{current ? `${timeAgo(current.created_at)}${current.actor ? ` ${t("by {who}", { who: current.actor })}` : ""}` : "—"}</Field>
         </div>
       </section>
@@ -801,7 +813,8 @@ function AppView() {
 
         <div className="space-y-6">
           {app.mode === "managed" && <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
-          <SettingsCard app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />
+          {app.mode === "stack" && <StackCard appId={app.id} onDeployed={(rid) => { setSelected(rid); load(); }} />}
+          {app.mode !== "stack" && <SettingsCard app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />}
           {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && (
             <LoadBalancingCard key={`${app.instances}-${app.backends.join()}`} app={app} onSaved={(rid) => { setSelected(rid); load(); }} />
           )}
@@ -827,7 +840,12 @@ function AppView() {
         open={confirmDelete}
         title={t("Remove {name}?", { name: app.id })}
         message={
-          app.mode === "adopted" ? t("Mas stops deploying this service; the service itself is not touched.") : (
+          app.mode === "adopted" ? t("Mas stops deploying this service; the service itself is not touched.") : app.mode === "stack" ? (
+            <span className="block space-y-2">
+              <span className="block">{t("Its containers are stopped and removed, and its address goes offline.")}</span>
+              <label className="flex items-center gap-2 text-rose-500"><input type="checkbox" checked={purge} onChange={(e) => setPurge(e.target.checked)} /> {t("Also delete its data (/srv/mas/stacks/{id})", { id: app.id })}</label>
+            </span>
+          ) : (
             <span className="block space-y-2">
               <span className="block">{t("The systemd unit and the nginx site are removed (backups are kept). The site goes offline.")}</span>
               <label className="flex items-center gap-2"><input type="checkbox" checked={purge} onChange={(e) => setPurge(e.target.checked)} /> {t("Also delete /srv/mas/apps/{id}", { id: app.id })}</label>

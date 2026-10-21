@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS apps (
     domain TEXT,
     type TEXT NOT NULL,
     port INTEGER,
-    mode TEXT NOT NULL DEFAULT 'managed',      -- managed | adopted
+    mode TEXT NOT NULL DEFAULT 'managed',      -- managed | adopted | stack (mas.stacks)
     service_id TEXT,                           -- adopted: detected service id
     path TEXT,                                 -- adopted: existing project folder
     root_dir TEXT NOT NULL DEFAULT '',         -- static/php: served sub-folder
@@ -129,12 +129,13 @@ MIGRATIONS = [
     ("users", "role TEXT NOT NULL DEFAULT 'admin'"),  # admin | editor (CMS only)
     ("apps", "extra_ports TEXT"),  # load balancing: JSON ports of instances 2..N on this server
     ("apps", "backends TEXT"),     # load balancing: JSON ["host:port"] of servers outside Mas
+    ("apps", "stack TEXT"),        # mode "stack": JSON {template, options, ports} (mas.stacks)
 ]
 ROLES = ("admin", "editor")
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
-              "current_release", "extra_ports", "backends"}
+              "current_release", "extra_ports", "backends", "stack"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
 
 

@@ -289,6 +289,9 @@ class Deployer:
         self.resolver = resolver
         # Run after the clone, before the build, with (app, release dir, log): database migrations.
         self.before_build: list[Callable[[dict, str, "ReleaseLog"], None]] = []
+        # Other kinds of apps (mas.stacks): deploy(app, release, log) and remove(app, purge) -> notes.
+        self.mode_handlers: dict[str, Callable[[dict, dict, "ReleaseLog"], None]] = {}
+        self.remove_handlers: dict[str, Callable[[dict, bool], list[str]]] = {}
         self.github = github
         self.find_service = find_service
         self.health_check = health_check
@@ -346,6 +349,8 @@ class Deployer:
                     self._rollback(app, release, rlog)
                 elif app["mode"] == "adopted":
                     self._adopted(app, release, rlog)
+                elif app["mode"] in self.mode_handlers:
+                    self.mode_handlers[app["mode"]](app, release, rlog)
                 else:
                     self._managed(app, release, rlog)
                 rlog.step(f"Release #{release_id} is live")
@@ -904,6 +909,9 @@ class Deployer:
                 self.host.run(["systemctl", "daemon-reload"])
                 done.append(f"removed {unit}")
             done += [f"removed {u}" for u in self._remove_extra_units(app_id, set(), None)]
+        if app["mode"] in self.remove_handlers:
+            done += self.remove_handlers[app["mode"]](app, purge_files)
+        if app["mode"] != "adopted":
             available, enabled = vhost_paths(app_id)
             if self.host.exists(available) or self.host.exists(enabled):
                 self.host.backup(available)
@@ -913,6 +921,7 @@ class Deployer:
                 if test is not None and test.ok:
                     self.host.run(["systemctl", "reload", "nginx"])
                 done.append(f"removed {available}")
+        if app["mode"] == "managed":
             self.host.remove(env_file(app_id))
             if purge_files:
                 self.host.remove(app_paths(self.config, app_id).base)

@@ -310,6 +310,34 @@ the memory actually used by each container.
 Restore a backup: `docker cp <file> supabase-db:/tmp/r.dump && docker exec supabase-db pg_restore
 -U postgres -d postgres --clean /tmp/r.dump`.
 
+### Ready-made services
+
+**Apps → Deploy a service** runs ready-made servers with Docker, no repository needed: pick one, fill
+a short form, Mas writes `/srv/mas/stacks/<name>/docker-compose.yml`, opens the ports, gets the
+certificate of its address and shows how to use it.
+
+| Service | What you get |
+|---|---|
+| **Minecraft server (Java)** | Paper, Vanilla, Fabric, Forge or Purpur; version, memory, game mode, allowed players, operators |
+| **Minecraft server (Bedrock)** | for phones, consoles and Windows (UDP 19132) |
+| **Mail server** | docker-mailserver: your `@yourdomain` mailboxes in any mail app (IMAP 993, SMTP 465/587), DKIM key created, the DNS records to add (A, MX, SPF, DKIM, DMARC) listed with their values, **Add a mailbox** in one click |
+| **Uptime Kuma**, **Vaultwarden**, **n8n**, **Gitea** | served on their own domain with HTTPS |
+| **Any Docker image** | an image, its web port on a domain and/or ports published as they are, its environment and a kept folder |
+
+- Web pages listen on `127.0.0.1` and nginx serves them with HTTPS. Ports meant for the outside
+  (25565, 25, 993…) are published by Docker on every interface, which opens them in the firewall;
+  Mas refuses a port another service already uses.
+- Passwords (first mailbox, Vaultwarden admin token) are generated and kept encrypted; the
+  service's page shows them on demand, with the address to connect to.
+- The service's page has **Start / Stop / Restart**, its logs, and its settings: saving them
+  redeploys it. **Redeploy** also pulls the latest image. Data stays in `/srv/mas/stacks/<name>/data`
+  across updates; removing the service keeps it unless you tick *also delete its data*.
+- For mail, ask your hosting provider for the reverse DNS (PTR) of the server and check that it does
+  not block outgoing port 25.
+
+New services are a template in `mas/stacks.py` (a compose file built from the form); after changing
+the catalog, run `python -m mas.stacks > web/lib/stackTexts.ts` so its texts get translated.
+
 ### CMS for your clients
 
 Host client sites with Mas and let each client edit their own content (texts, images, articles),

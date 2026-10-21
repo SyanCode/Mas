@@ -191,7 +191,7 @@ export interface App {
   domain: string | null;
   type: ServiceType;
   port: number | null;
-  mode: "managed" | "adopted";
+  mode: "managed" | "adopted" | "stack";
   service_id: string | null;
   path: string | null;
   root_dir: string;
@@ -202,10 +202,39 @@ export interface App {
   instances: number;
   instance_ports: number[];
   backends: string[];
+  /** Ready-made service (mode "stack"): its template, options and published ports. */
+  stack: { template: string; options: Record<string, unknown>; ports: Record<string, number> } | null;
   current_release: number | null;
   current: Release | null;
   last_release: Release | null;
   releases?: Release[];
+}
+
+export interface StackField {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "number" | "select" | "boolean";
+  default?: string | number | boolean;
+  options?: string[];
+  help?: string;
+  required?: boolean;
+  min?: number;
+  max?: number;
+}
+
+export interface StackTemplate {
+  id: string;
+  name: string;
+  category: "games" | "mail" | "web" | "other";
+  description: string;
+  fields: StackField[];
+  needs_domain: boolean;
+  domain_label: string;
+  web: boolean;
+  image: string;
+  ports: { name: string; container: number; protocol: string; label: string; fixed: boolean }[];
+  ram_mb: number;
+  actions: { id: string; label: string; fields: StackField[] }[];
 }
 
 export interface GitHubStatus {

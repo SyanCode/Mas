@@ -258,6 +258,8 @@ STATUS_PAGES = {
     "unavailable": dict(title="Not available yet", refresh="60", ring="off",
                         text="The first deployment of this site did not succeed. The owner has been notified in "
                              "the dashboard."),
+    "service": dict(title="Running", refresh="3600", ring="off",
+                    text="This address belongs to a service (mail, game server…) and has no website."),
 }
 
 

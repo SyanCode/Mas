@@ -107,6 +107,7 @@ def app_payload(app: dict, db: Database) -> dict:
     data["instance_ports"] = [p for _, p in app_instances(app)]
     data["backends"] = app_backends(app)
     data.pop("extra_ports", None)
+    data["stack"] = json.loads(app["stack"]) if app.get("stack") else None  # template and options, no secret
     releases = db.list_releases(app["id"], 1)
     data["last_release"] = releases[0] if releases else None
     data["current"] = db.get_release(app["current_release"]) if app["current_release"] else None
