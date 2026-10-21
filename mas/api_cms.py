@@ -47,6 +47,12 @@ class SaveBody(BaseModel):
     note: str = Field(default="", max_length=200)
 
 
+class NewEntryBody(BaseModel):
+    values: dict
+    slug: str | None = Field(default=None, max_length=80)  # address wanted, otherwise from the title
+    note: str = Field(default="", max_length=200)
+
+
 def register(app: FastAPI, *, db: Database, any_session: Callable, current_session: Callable,
              manager: CmsManager) -> None:
 
@@ -188,6 +194,14 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         db.audit(s.username, "cms-schema", True, service_id=app_id, detail=result["commit"][:7])
         return result
 
+    @app.post("/api/apps/{app_id}/cms/collections/{cid}/table")
+    async def create_table(app_id: str, cid: str, s=Depends(current_session)) -> dict:
+        if db.get_app(app_id) is None:
+            raise HTTPException(404, f"unknown app {app_id}")
+        result = await asyncio.to_thread(call, manager.create_table, app_id, cid)
+        db.audit(s.username, "cms-table", True, service_id=app_id, detail=cid)
+        return result
+
     # -- editing (editors and administrators) ------------------------------
 
     def site(s, app_id: str) -> dict:
@@ -230,6 +244,47 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         if not result["unchanged"]:
             db.audit(s.username, "cms-save", True, service_id=app_id,
                      detail=f"{page_id} → {result['commit'][:7]}")
+        return result
+
+    async def save_entry(s, app_id: str, cid: str, slug: str | None, values: dict, sha: str | None, note: str,
+                         new_slug: str | None = None) -> dict:
+        site(s, app_id)
+        what = f"{cid}/{slug or new_slug or 'new'}"
+        try:
+            result = await asyncio.to_thread(call, manager.save_entry, app_id, cid, slug, values, sha, s.user_id,
+                                             s.username, note, new_slug)
+        except HTTPException as exc:
+            db.audit(s.username, "cms-save", False, service_id=app_id, detail=f"{what}: {exc.detail}"[:500])
+            raise
+        if not result["unchanged"]:
+            db.audit(s.username, "cms-save", True, service_id=app_id,
+                     detail=f"{cid}/{result['slug']} → {(result['commit'] or 'supabase')[:8]}")
+        return result
+
+    @app.get("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}")
+    async def load_entry(app_id: str, cid: str, slug: str, s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        return await asyncio.to_thread(call, manager.load_entry, app_id, cid, slug)
+
+    @app.post("/api/cms/sites/{app_id}/collections/{cid}/entries")
+    async def create_entry(app_id: str, cid: str, body: NewEntryBody, s=Depends(any_session)) -> dict:
+        return await save_entry(s, app_id, cid, None, body.values, None, body.note, (body.slug or "").strip() or None)
+
+    @app.put("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}")
+    async def update_entry(app_id: str, cid: str, slug: str, body: SaveBody, s=Depends(any_session)) -> dict:
+        return await save_entry(s, app_id, cid, slug, body.values, body.sha, body.note)
+
+    @app.delete("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}")
+    async def delete_entry(app_id: str, cid: str, slug: str, sha: str = Query(max_length=64),
+                           s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        try:
+            result = await asyncio.to_thread(call, manager.delete_entry, app_id, cid, slug, sha, s.username)
+        except HTTPException as exc:
+            db.audit(s.username, "cms-delete", False, service_id=app_id, detail=f"{cid}/{slug}: {exc.detail}"[:500])
+            raise
+        db.audit(s.username, "cms-delete", True, service_id=app_id,
+                 detail=f"{cid}/{slug} → {(result['commit'] or 'supabase')[:8]}")
         return result
 
     @app.post("/api/cms/sites/{app_id}/uploads")

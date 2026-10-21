@@ -92,6 +92,29 @@ export interface CmsPage {
   sha: string | null;
 }
 
+export type CmsEntrySummary = { slug: string } & Record<string, unknown>;
+
+export interface CmsCollection {
+  id: string;
+  label: string;
+  description: string;
+  item_label: string;
+  storage: "git" | "supabase";
+  dir: string | null;
+  table: string | null;
+  fields: CmsField[];
+  title_field: string;
+  sort_field: string | null;
+  entries: CmsEntrySummary[];
+  error: string | null;
+}
+
+export interface CmsEntry {
+  slug: string;
+  values: Record<string, unknown>;
+  sha: string | null;
+}
+
 export interface CmsSite {
   id: string;
   name: string;

@@ -6,8 +6,8 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
 import {
-  Badge, Button, Card, ConfirmDialog, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner, StatusDot,
-  Terminal, Textarea,
+  Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner,
+  StatusDot, Terminal, Textarea,
 } from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type Release } from "@/lib/api";
 import { msg, tr, useT } from "@/lib/i18n";
@@ -192,12 +192,65 @@ function SupabaseCard({ app, onLinked }: { app: App; onLinked: (releaseId: numbe
   );
 }
 
+interface CmsCollectionInfo {
+  id: string;
+  label: string;
+  storage: "git" | "supabase";
+  dir: string | null;
+  table: string | null;
+  fields: number;
+  error: string | null;
+  sql?: string;
+  local?: boolean;
+  url?: string | null;
+}
+
+function SupabaseTable({ appId, collection, onDone }: { appId: string; collection: CmsCollectionInfo; onDone: () => void }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function create() {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/apps/${encodeURIComponent(appId)}/cms/collections/${encodeURIComponent(collection.id)}/table`, { method: "POST" });
+      onDone();
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-zinc-200/80 p-3 text-xs dark:border-white/[0.06]">
+      <div className="flex flex-wrap items-center gap-2">
+        {collection.error ? <Badge tone="amber">{t("to set up")}</Badge> : <Badge tone="emerald">{t("ready")}</Badge>}
+        <span className="text-zinc-500">{collection.url ?? "Supabase"}</span>
+      </div>
+      {collection.error && <p className="text-zinc-500">{collection.error}</p>}
+      {collection.local && (
+        <Button onClick={create} disabled={busy}>{busy ? <Spinner /> : null}{collection.error ? t("Create the table") : t("Update the table")}</Button>
+      )}
+      <ErrorText>{error}</ErrorText>
+      <details>
+        <summary className="cursor-pointer text-zinc-500">
+          {collection.local ? t("SQL run by Mas") : t("Run this SQL in the SQL editor of your Supabase project (again after adding fields)")}
+        </summary>
+        <div className="mt-2"><CopyCode text={collection.sql ?? ""} /></div>
+      </details>
+    </div>
+  );
+}
+
 interface CmsInfo {
   schema_file: string;
   ok: boolean;
   error: string | null;
   can_write: boolean | null;
   pages: { id: string; label: string; file: string; fields: number }[];
+  collections: CmsCollectionInfo[];
   editors: { id: number; username: string; allowed: boolean }[];
 }
 
@@ -208,6 +261,17 @@ const CMS_EXAMPLE = `{
       { "key": "title", "type": "text", "max": 80, "required": true },
       { "key": "intro", "type": "textarea", "max": 500 },
       { "key": "hero", "type": "image", "dir": "public/uploads", "url": "/uploads" }
+    ]
+  }],
+  "collections": [{
+    "id": "articles", "label": "Articles", "item_label": "Article",
+    "dir": "content/articles",
+    "fields": [
+      { "key": "title", "type": "text", "max": 120 },
+      { "key": "date", "type": "date", "required": true },
+      { "key": "cover", "type": "image", "dir": "public/uploads", "url": "/uploads" },
+      { "key": "excerpt", "type": "textarea", "max": 300 },
+      { "key": "body", "type": "markdown" }
     ]
   }]
 }`;
@@ -322,7 +386,7 @@ function CmsCard({ appId }: { appId: string }) {
   }
 
   return (
-    <Card title="CMS" actions={info?.ok ? <Badge tone="emerald">{t("{n} page(s)", { n: info.pages.length })}</Badge> : <Badge>{t("off")}</Badge>}>
+    <Card title="CMS" actions={info?.ok ? <Badge tone="emerald">{t("{n} page(s)", { n: info.pages.length })}{info.collections.length ? ` · ${t("{n} collection(s)", { n: info.collections.length })}` : ""}</Badge> : <Badge>{t("off")}</Badge>}>
       {!info ? <ErrorText>{error}</ErrorText> : (
         <div className="space-y-4 text-sm">
           {info.ok ? (
@@ -330,6 +394,15 @@ function CmsCard({ appId }: { appId: string }) {
               <ul className="space-y-1">
                 {info.pages.map((p) => (
                   <li key={p.id} className="flex justify-between gap-2"><span>{p.label}</span><code className="truncate text-xs text-zinc-500">{p.file}</code></li>
+                ))}
+                {info.collections.map((c) => (
+                  <li key={c.id} className="space-y-2">
+                    <div className="flex justify-between gap-2">
+                      <span>{c.label}</span>
+                      <code className="truncate text-xs text-zinc-500">{c.storage === "supabase" ? `Supabase · ${c.table}` : `${c.dir}/*.json`}</code>
+                    </div>
+                    {c.storage === "supabase" && <SupabaseTable appId={appId} collection={c} onDone={load} />}
+                  </li>
                 ))}
               </ul>
               {info.can_write === false && (

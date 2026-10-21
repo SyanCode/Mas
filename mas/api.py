@@ -165,7 +165,7 @@ def create_app(
     deployer = Deployer(host, config, db, github_client, find_service=scanner.get,
                         on_change=lambda: scanner.refresh())
     supabase = SupabaseManager(host, config, db, deployer)
-    cms = CmsManager(db, github_client, deployer, Path(db.path).parent)
+    cms = CmsManager(db, github_client, deployer, Path(db.path).parent, supabase=supabase)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

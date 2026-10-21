@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 import pytest
 import server
 from fastapi.testclient import TestClient
 
-from mas import auth
+from mas import auth, cms_supabase
 from mas.api import create_app
-from mas.cms import CmsError, apply_values, content_candidates, detect_image, infer_schema, parse_schema
+from mas.cms import (CmsError, apply_values, content_candidates, detect_image, infer_schema, parse_schema, slugify,
+                     sort_index)
 from mas.config import Config
 from mas.db import Database
+from mas.envcrypt import encrypt_env, load_fernet
 from mas.github import GitHubError
 from mas.host import FixtureHost
 
@@ -29,6 +32,16 @@ SCHEMA = {
             {"key": "hero", "type": "image"},
             {"key": "services", "type": "list", "max_items": 3,
              "fields": [{"key": "name", "type": "text", "required": True}, {"key": "price", "type": "number"}]},
+        ],
+    }],
+    "collections": [{
+        "id": "articles", "label": "Articles", "item_label": "Article", "dir": "content/articles",
+        "fields": [
+            {"key": "title", "type": "text", "max": 100},
+            {"key": "date", "type": "date"},
+            {"key": "cover", "type": "image"},
+            {"key": "excerpt", "type": "textarea", "max": 300},
+            {"key": "body", "type": "markdown"},
         ],
     }],
 }
@@ -56,12 +69,20 @@ class FakeGitHub:
         data = self.files.get(path)
         return (data, f"blob-{hash(data) & 0xffff}") if data is not None else (None, None)
 
+    def list_dir(self, installation_id, repo, path, ref):
+        return [{"name": p.rsplit("/", 1)[1], "path": p, "sha": self.read_file(0, repo, p, ref)[1]}
+                for p in self.files if "/" in p and p.rsplit("/", 1)[0] == path]
+
     def commit_files(self, installation_id, repo, branch, files, message, parent):
         if not self.write:
             raise GitHubError("GitHub API POST /git/blobs: HTTP 403 Resource not accessible by integration")
         if parent != self.sha:
             raise GitHubError("GitHub API PATCH refs: HTTP 422 Update is not a fast forward")
-        self.files.update(files)
+        for path, data in files.items():
+            if data is None:
+                self.files.pop(path)
+            else:
+                self.files[path] = data
         self.sha = f"c{len(self.commits) + 1}"
         self.commits.append((message, files))
         return self.sha
@@ -320,3 +341,294 @@ def test_admin_sees_schema_problems_and_permissions(env):
     assert client.delete(f"/api/users/{admin_id}", headers={"x-csrf-token": csrf}).status_code == 404
     assert client.delete(f"/api/users/{user['id']}", headers={"x-csrf-token": csrf}).status_code == 200
     assert db.app_editors("site") == []
+
+
+def test_collection_schema():
+    c = parse_schema(json.dumps(SCHEMA))["collections"][0]
+    assert c["title_field"] == "title" and c["sort_field"] == "date"
+    assert c["index_fields"] == ["title", "date", "cover", "excerpt"]  # markdown bodies stay out of the index
+    assert next(f for f in c["fields"] if f["key"] == "title")["required"]
+    assert parse_schema(json.dumps({"collections": SCHEMA["collections"]}))["pages"] == []
+    fields = [{"key": "title"}]
+    bad = [
+        {"collections": [{"id": "a", "dir": "../posts", "fields": fields}]},
+        {"collections": [{"id": "a", "dir": "posts", "fields": [{"key": "slug"}]}]},
+        {"collections": [{"id": "a", "dir": "posts", "fields": [{"key": "n", "type": "number"}]}]},  # no title
+        {"collections": [{"id": "a", "dir": "posts", "fields": fields, "index_fields": ["nope"]}]},
+        {"collections": [{"id": "a", "dir": "posts", "fields": fields},
+                         {"id": "b", "dir": "posts/x", "fields": fields}]},
+        {"pages": [{"id": "a", "file": "posts/a.json", "fields": fields}],
+         "collections": [{"id": "b", "dir": "posts", "fields": fields}]},
+        {"pages": [{"id": "a", "file": "a.json", "fields": fields}],
+         "collections": [{"id": "a", "dir": "posts", "fields": fields}]},
+    ]
+    for raw in bad:
+        with pytest.raises(CmsError):
+            parse_schema(json.dumps(raw))
+
+
+def test_slugs_and_order():
+    assert slugify("Été à Paris : 10 idées !") == "ete-a-paris-10-idees"
+    assert slugify("!!!") == "entry"
+    c = parse_schema(json.dumps(SCHEMA))["collections"][0]
+    entries = [{"slug": "b", "date": "2026-01-02"}, {"slug": "z"}, {"slug": "a", "date": "2026-01-02"},
+               {"slug": "c", "date": "2026-03-01"}]
+    assert [e["slug"] for e in sort_index(c, entries)] == ["c", "a", "b", "z"]
+
+
+def test_articles_add_edit_delete(env):
+    client, db, gh = env
+    user = make_editor(client, login(client), ["site"])
+    client.post("/api/logout", headers={"x-csrf-token": login(client)})
+    csrf = login(client, "client", user["password"])
+    h = {"x-csrf-token": csrf}
+    gh.files["content/articles/hand-written.json"] = b'{"title": "By hand", "date": "2025-12-01"}'
+
+    site = client.get("/api/cms/sites/site").json()
+    articles = site["collections"][0]
+    assert articles["id"] == "articles" and [e["slug"] for e in articles["entries"]] == ["hand-written"]
+    assert articles["entries"][0]["title"] == "By hand"  # indexed even without index.json
+
+    base = "/api/cms/sites/site/collections/articles/entries"
+    upload = client.post("/api/cms/sites/site/uploads?name=cover.png", content=PNG, headers=h).json()["value"]
+    first = {"title": "Été à Paris", "date": "2026-07-01", "cover": upload, "excerpt": "Short", "body": "# Hi"}
+    r = client.post(base, json={"values": first, "note": ""}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["slug"] == "ete-a-paris" and r.json()["release_id"] == 42
+    message, files = gh.commits[-1]
+    assert message.startswith("cms(articles): add Été à Paris") and "Edited by client" in message
+    assert any(p.startswith("public/uploads/cover-") for p in files)
+    saved = json.loads(gh.files["content/articles/ete-a-paris.json"])
+    assert saved["slug"] == "ete-a-paris" and saved["body"] == "# Hi" and saved["cover"].startswith("/uploads/cover-")
+
+    # same title → another address; chosen address; bad and taken addresses refused
+    again = client.post(base, json={"values": {**first, "cover": "", "date": "2026-01-01"}}, headers=h)
+    assert again.json()["slug"] == "ete-a-paris-2"
+    chosen = client.post(base, json={"values": {"title": "Later"}, "slug": "later-news"}, headers=h)
+    assert chosen.json()["slug"] == "later-news"
+    assert client.post(base, json={"values": {"title": "X"}, "slug": "Bad Slug"}, headers=h).status_code == 400
+    assert client.post(base, json={"values": {"title": "X"}, "slug": "later-news"}, headers=h).status_code == 400
+    assert client.post(base, json={"values": {"date": "2026-01-01"}}, headers=h).status_code == 400  # title required
+
+    index = json.loads(gh.files["content/articles/index.json"])
+    assert [e["slug"] for e in index] == ["ete-a-paris", "ete-a-paris-2", "hand-written", "later-news"]
+    assert "body" not in index[0] and index[0]["excerpt"] == "Short"
+
+    # edit: sha checked, the address stays, the index follows
+    entry = client.get(f"{base}/ete-a-paris").json()
+    assert entry["values"]["title"] == "Été à Paris"
+    edited = {**entry["values"], "title": "Summer", "date": "2025-01-01"}
+    r = client.put(f"{base}/ete-a-paris", json={"values": edited, "sha": entry["sha"]}, headers=h)
+    assert r.status_code == 200 and r.json()["slug"] == "ete-a-paris"
+    stale = client.put(f"{base}/ete-a-paris", json={"values": entry["values"], "sha": entry["sha"]}, headers=h)
+    assert stale.status_code == 409
+    index = json.loads(gh.files["content/articles/index.json"])
+    assert [e["slug"] for e in index] == ["ete-a-paris-2", "hand-written", "ete-a-paris", "later-news"]
+    assert index[2]["title"] == "Summer"
+
+    # delete
+    entry = client.get(f"{base}/later-news").json()
+    assert client.delete(f"{base}/later-news", params={"sha": "stale"}, headers=h).status_code == 409
+    r = client.delete(f"{base}/later-news", params={"sha": entry["sha"]}, headers=h)
+    assert r.status_code == 200, r.text
+    assert "content/articles/later-news.json" not in gh.files
+    assert "later-news" not in gh.files["content/articles/index.json"].decode()
+    assert client.get(f"{base}/later-news").status_code == 400
+    assert client.get(f"{base}/..%2Fhome").status_code in (400, 404)
+    assert any(e["action"] == "cms-delete" and e["ok"] for e in db.history(None, 50))
+
+    # confined to its sites and to the declared collections
+    other = client.post("/api/cms/sites/other/collections/articles/entries", json={"values": first}, headers=h)
+    assert other.status_code == 404
+    unknown = client.post("/api/cms/sites/site/collections/secrets/entries", json={"values": first}, headers=h)
+    assert unknown.status_code == 400
+
+
+def test_regenerating_pages_keeps_collections(env):
+    client, _, gh = env
+    csrf = login(client)
+    gh.files["content/articles/a.json"] = b'{"title": "A"}'
+    found = client.get("/api/apps/site/cms/candidates").json()
+    assert [f["path"] for f in found["files"]] == ["content/home.json"]  # entries are not pages
+    gen = client.post("/api/apps/site/cms/generate", json={"files": ["content/home.json"]},
+                      headers={"x-csrf-token": csrf}).json()
+    assert gen["schema"]["collections"] == SCHEMA["collections"]
+    info = client.get("/api/apps/site/cms").json()
+    assert info["collections"] == [{"id": "articles", "label": "Articles", "storage": "git", "dir": "content/articles",
+                                    "table": None, "fields": 5, "error": None}]
+
+
+class FakeSupabase:
+    """PostgREST and Storage in memory, enough for the CMS: one table, one bucket."""
+
+    def __init__(self, table: str = "news") -> None:
+        self.table = table
+        self.exists = True
+        self.rows: dict[str, dict] = {}
+        self.objects: dict[str, bytes] = {}
+        self.bucket = False
+        self.urls: list[str] = []
+        self.tick = 0
+
+    def __call__(self, method, url, headers, body):
+        parts = urlsplit(url)
+        path, query = parts.path, dict(parse_qsl(parts.query))
+        self.urls.append(url)
+        if headers.get("apikey") != "service-key":
+            return 401, b'{"message": "Invalid API key"}'
+        if path.startswith("/storage/v1/bucket"):
+            self.bucket = True
+            return 200, b"{}"
+        if path.startswith("/storage/v1/object/"):
+            key = unquote(path[len("/storage/v1/object/"):])
+            if method == "POST":
+                if not self.bucket:
+                    return 404, b'{"message": "Bucket not found"}'
+                self.objects[key] = body
+                return 200, b"{}"
+            return (200, self.objects[key]) if key in self.objects else (404, b"{}")
+        assert path == f"/rest/v1/{self.table}", path
+        if not self.exists:
+            missing = {"code": "PGRST205", "message": "Could not find the table in the schema cache"}
+            return 404, json.dumps(missing).encode()
+
+        def match(row):
+            return all(str(row.get(k)) == v[3:] for k, v in query.items() if v.startswith("eq."))
+        if method == "GET":
+            rows = sorted((r for r in self.rows.values() if match(r)), key=lambda r: r["slug"])
+            if query.get("order", "").startswith("date.desc"):
+                rows.sort(key=lambda r: r.get("date") or "", reverse=True)
+            cols = query["select"].split(",")
+            return 200, json.dumps([r if cols == ["*"] else {c: r.get(c) for c in cols} for r in rows]).encode()
+        data = json.loads(body) if body else None
+        self.tick += 1
+        if method == "POST":
+            if data["slug"] in self.rows:
+                return 409, b'{"code": "23505", "message": "duplicate key"}'
+            row = {**data, "created_at": f"t{self.tick}", "updated_at": f"t{self.tick}"}
+            self.rows[data["slug"]] = row
+            return 201, json.dumps([row]).encode()
+        found = [r for r in self.rows.values() if match(r)]
+        if method == "PATCH":
+            for r in found:
+                r.update(data, updated_at=f"t{self.tick}")
+            return 200, json.dumps(found).encode()
+        for r in found:
+            del self.rows[r["slug"]]
+        return 200, json.dumps(found).encode()
+
+
+SUPABASE_SCHEMA = {"collections": [{
+    "id": "news", "label": "News", "storage": "supabase",
+    "fields": [{"key": "title", "type": "text"}, {"key": "date", "type": "date"}, {"key": "cover", "type": "image"},
+               {"key": "body", "type": "markdown"}, {"key": "views", "type": "number", "integer": True}],
+}]}
+
+
+def test_supabase_collection_schema_and_sql():
+    c = parse_schema(json.dumps(SUPABASE_SCHEMA))["collections"][0]
+    assert c["storage"] == "supabase" and c["table"] == "news" and c["dir"] is None
+    sql = cms_supabase.table_sql(c)
+    assert "slug text primary key" in sql and "views bigint" in sql and "date date" in sql
+    assert "enable row level security" in sql and "for select to anon" in sql
+    for fields in ([{"key": "Title"}], [{"key": "title"}, {"key": "updated_at"}], [{"key": "my-title"}]):
+        with pytest.raises(CmsError):
+            parse_schema(json.dumps({"collections": [{"id": "n", "storage": "supabase", "fields": fields}]}))
+    with pytest.raises(CmsError):
+        parse_schema(json.dumps({"collections": [{"id": "n", "storage": "mysql", "dir": "x",
+                                                  "fields": [{"key": "t"}]}]}))
+
+
+def test_articles_in_supabase(env):
+    client, db, gh = env
+    gh.files["mas.cms.json"] = json.dumps(SUPABASE_SCHEMA).encode()
+    gh.sha = "c-supabase"
+    cms = client.app.state.cms
+    fake = FakeSupabase()
+    cms.supabase_opener = fake
+    fernet = load_fernet(cms.deployer.host, cms.deployer.config.secret_key_path)
+    db.update_app("site", env=encrypt_env(fernet, {"SUPABASE_URL": "https://db.example.com",
+                                                   "SUPABASE_SERVICE_ROLE_KEY": "service-key"}))
+    csrf = login(client)
+    h = {"x-csrf-token": csrf}
+
+    # the table is missing: the editor says so, the admin gets the SQL (external project: no button)
+    fake.exists = False
+    assert "does not exist yet" in client.get("/api/cms/sites/site").json()["collections"][0]["error"]
+    info = client.get("/api/apps/site/cms").json()["collections"][0]
+    assert info["storage"] == "supabase" and "create table if not exists public.news" in info["sql"]
+    assert info["local"] is False and info["url"] == "https://db.example.com"
+    assert client.post("/api/apps/site/cms/collections/news/table", headers=h).status_code == 400
+    fake.exists = True
+    assert client.get("/api/apps/site/cms").json()["collections"][0]["error"] is None
+
+    base = "/api/cms/sites/site/collections/news/entries"
+    upload = client.post("/api/cms/sites/site/uploads?name=cover.png", content=PNG, headers=h).json()["value"]
+    r = client.post(base, json={"values": {"title": "Été", "date": "2026-07-01", "cover": upload, "body": "# Hi"}},
+                    headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"slug": "ete", "commit": None, "unchanged": False, "release_id": None, "instant": True}
+    assert not gh.commits  # nothing in the repository, nothing to rebuild
+    assert all(u.startswith("https://db.example.com/") for u in fake.urls)
+    row = fake.rows["ete"]
+    assert row["body"] == "# Hi" and row["views"] is None
+    assert row["cover"].startswith("https://db.example.com/storage/v1/object/public/mas-cms/news/cover-")
+    assert fake.bucket and list(fake.objects) == ["mas-cms/" + row["cover"].rsplit("/mas-cms/", 1)[1]]
+    assert client.get("/api/cms/sites/site/image", params={"src": row["cover"]}).content == PNG
+
+    client.post(base, json={"values": {"title": "Été", "date": "2026-08-01"}}, headers=h)
+    listed = client.get("/api/cms/sites/site").json()["collections"][0]
+    assert [e["slug"] for e in listed["entries"]] == ["ete-2", "ete"] and "body" not in listed["entries"][0]
+
+    entry = client.get(f"{base}/ete").json()
+    assert entry["values"]["views"] is None and entry["sha"] == row["updated_at"]
+    r = client.put(f"{base}/ete", json={"values": {**entry["values"], "views": 3}, "sha": entry["sha"]}, headers=h)
+    assert r.status_code == 200 and fake.rows["ete"]["views"] == 3 and fake.rows["ete"]["cover"] == row["cover"]
+    stale = client.put(f"{base}/ete", json={"values": entry["values"], "sha": entry["sha"]}, headers=h)
+    assert stale.status_code == 409
+    fresh = client.get(f"{base}/ete").json()
+    same = client.put(f"{base}/ete", json={"values": fresh["values"], "sha": fresh["sha"]}, headers=h).json()
+    assert same["unchanged"] is True
+
+    assert client.delete(f"{base}/ete", params={"sha": entry["sha"]}, headers=h).status_code == 409
+    assert client.delete(f"{base}/ete", params={"sha": fresh["sha"]}, headers=h).status_code == 200
+    assert "ete" not in fake.rows
+    assert any(e["action"] == "cms-delete" and e["detail"].endswith("supabase") for e in db.history(None, 50))
+
+    # a wrong key is reported as such
+    db.update_app("site", env=encrypt_env(fernet, {"SUPABASE_URL": "https://db.example.com",
+                                                   "SUPABASE_SERVICE_ROLE_KEY": "wrong"}))
+    assert "service_role key" in client.get("/api/cms/sites/site").json()["collections"][0]["error"]
+    # no Supabase at all
+    db.update_app("site", env=None)
+    assert "deploy Supabase" in client.get("/api/cms/sites/site").json()["collections"][0]["error"]
+
+
+def test_supabase_of_this_server(env):
+    client, db, gh = env
+    gh.files["mas.cms.json"] = json.dumps(SUPABASE_SCHEMA).encode()
+    gh.sha = "c-local"
+    cms = client.app.state.cms
+    fake = FakeSupabase()
+    cms.supabase_opener = fake
+    fernet = load_fernet(cms.deployer.host, cms.deployer.config.secret_key_path)
+    db.save_supabase("supabase", status="running", dir="/srv/mas/supabase/supabase", domain="db.example.com",
+                     ports=json.dumps({"kong_http": 7100, "postgres": 7102}),
+                     secrets=encrypt_env(fernet, {"SERVICE_ROLE_KEY": "service-key"}))
+    h = {"x-csrf-token": login(client)}
+    # no variable on the app: the instance of this server, reached on its loopback port, links on its domain
+    info = client.get("/api/apps/site/cms").json()["collections"][0]
+    assert info["local"] is True and info["url"] == "https://db.example.com" and info["error"] is None
+    assert fake.urls[-1].startswith("http://127.0.0.1:7100/rest/v1/news?")
+    r = client.post("/api/cms/sites/site/collections/news/entries", json={"values": {"title": "Hello"}}, headers=h)
+    assert r.status_code == 200 and fake.rows["hello"]["title"] == "Hello"
+    # the table is created with psql in the database container
+    host = cms.deployer.host
+    host._commands["docker exec supabase-db psql *"] = {"returncode": 0, "output": "CREATE TABLE"}
+    r = client.post("/api/apps/site/cms/collections/news/table", headers=h)
+    assert r.status_code == 200, r.text
+    psql = next(argv for argv in host.executed if argv[:4] == ["docker", "exec", "supabase-db", "psql"])
+    assert "create table if not exists public.news" in psql[-1]
+    host._commands["docker exec supabase-db psql *"] = {"returncode": 1, "stderr": "ERROR: boom"}
+    r = client.post("/api/apps/site/cms/collections/news/table", headers=h)
+    assert r.status_code == 400 and "boom" in r.json()["detail"]

@@ -495,5 +495,19 @@
   "the site changed on GitHub meanwhile: reload and try again": "le site a changé sur GitHub entre-temps : rechargez et réessayez",
   "an uploaded image expired: upload it again": "une image envoyée a expiré : envoyez-la à nouveau",
   "only PNG, JPEG, GIF, WebP and AVIF images are accepted": "seules les images PNG, JPEG, GIF, WebP et AVIF sont acceptées",
-  "unknown site": "site inconnu"
+  "unknown site": "site inconnu",
+  "{n} collection(s)": "{n} collection(s)",
+  "Nothing here yet. Add the first one.": "Rien pour l'instant. Ajoutez le premier.",
+  "new": "nouveau",
+  "Back to the list": "Retour à la liste",
+  "Address": "Adresse",
+  "Leave empty to build it from the title. It cannot be changed once published.": "Laissez vide pour la créer à partir du titre. Elle ne peut plus changer une fois publiée.",
+  "Delete “{name}”?": "Supprimer « {name} » ?",
+  "It is removed from the site at the next publication. Your administrator can bring it back from the history.": "Il disparaît du site à la prochaine publication. Votre administrateur peut le récupérer depuis l'historique.",
+  "to set up": "à configurer",
+  "ready": "prêt",
+  "Create the table": "Créer la table",
+  "Update the table": "Mettre à jour la table",
+  "SQL run by Mas": "SQL exécuté par Mas",
+  "Run this SQL in the SQL editor of your Supabase project (again after adding fields)": "Exécutez ce SQL dans l'éditeur SQL de votre projet Supabase (à refaire après avoir ajouté des champs)"
 }

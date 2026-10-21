@@ -508,6 +508,17 @@ class SupabaseManager:
 
     # -- backups ---------------------------------------------------------------
 
+    def run_sql(self, sql: str) -> str:
+        """Run SQL as postgres in the database container (CMS tables)."""
+        inst = self.get()
+        if not inst or inst["status"] != "running":
+            raise SupabaseError("Supabase is not running")
+        res = self.host.run(["docker", "exec", DB_CONTAINER, "psql", "-U", "postgres", "-d", "postgres",
+                             "-v", "ON_ERROR_STOP=1", "-c", sql], timeout=60)
+        if res is None or not res.ok:
+            raise SupabaseError(f"psql failed: {(res.stderr if res else 'docker missing').strip()[-500:]}")
+        return res.stdout
+
     def backup(self) -> Path:
         inst = self.get()
         if not inst or inst["status"] != "running":

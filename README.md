@@ -338,6 +338,105 @@ Edited by <editor>`) on top of the version the editor opened: if someone pushed 
 editor is asked to reload instead of overwriting. Undo a change with `git revert` or roll back
 the deployment in Mas.
 
+#### Articles (and other collections)
+
+A page is one fixed file; a **collection** is a folder of entries the client adds, edits and
+deletes: blog articles, news, projects, recipes… Mas only manages the content. The site decides
+how it looks: the three latest on the home page, a page with all of them, one page per article.
+
+```json
+{
+  "pages": [ … ],
+  "collections": [{
+    "id": "articles", "label": "Articles", "item_label": "Article",
+    "dir": "content/articles",
+    "fields": [
+      { "key": "title", "type": "text", "max": 120 },
+      { "key": "date", "type": "date", "required": true },
+      { "key": "cover", "type": "image", "dir": "public/uploads", "url": "/uploads" },
+      { "key": "excerpt", "type": "textarea", "max": 300 },
+      { "key": "body", "type": "markdown" }
+    ]
+  }]
+}
+```
+
+Fields are the same as for pages. Optional settings: `title_field` (the name of each entry,
+default the first `text` field, always required), `sort_field` (default the first `date` field),
+`index_fields` (what goes in the index, default every field except `markdown` ones),
+`max_entries` (default 1000) and `description`.
+
+What Mas writes in the repository, in one commit per change:
+
+- `content/articles/<slug>.json`: one article, with its `slug`. The slug comes from the title
+  (`Été à Paris` → `ete-a-paris`, `-2` if it is taken) or is chosen by the client, and it never
+  changes afterwards, so links keep working.
+- `content/articles/index.json`: every article **newest first** (on `sort_field`), with its `slug`
+  and the `index_fields`, without the markdown body. Articles added by hand in the folder are
+  picked up the next time the client publishes.
+
+Your site reads them at build time, like any page:
+
+```js
+// Next.js / Astro / Vite: the home page shows the 3 latest, /blog shows them all
+import articles from "../content/articles/index.json";
+const latest = articles.slice(0, 3);          // [{ slug, title, date, cover, excerpt }, …]
+
+// /blog/[slug]: one page per article
+export function generateStaticParams() { return articles.map((a) => ({ slug: a.slug })); }
+const article = (await import(`../content/articles/${slug}.json`)).default; // { slug, title, body, … }
+```
+
+```php
+<?php // PHP: same files, no build step
+$articles = json_decode(file_get_contents(__DIR__ . "/content/articles/index.json"), true);
+foreach (array_slice($articles, 0, 3) as $a) { /* your markup */ }
+```
+
+A static site can `fetch("/content/articles/index.json")` if that folder is served. Render `body`
+with the markdown library of your choice. Commit an `index.json` holding `[]` with the schema, so
+the site builds before the first article is written.
+
+#### Articles in Supabase
+
+With `"storage": "supabase"`, a collection lives in a Supabase table instead of the repository: a
+change is online as soon as the client clicks **Publish**, with no commit and no rebuild, and the
+site can query it (filter, paginate, search).
+
+```json
+{ "id": "articles", "label": "Articles", "storage": "supabase", "table": "articles",
+  "fields": [ …same fields… ] }
+```
+
+- **Which Supabase**: the one in the app's environment (`SUPABASE_URL` and
+  `SUPABASE_SERVICE_ROLE_KEY`, set by **Connect Supabase** or by hand for a supabase.com project),
+  otherwise the Supabase deployed by Mas on this server. The service_role key never leaves Mas.
+- **The table** (`table`, default the collection id): one column per field (`text`, `date`,
+  `double precision` or `bigint`, `boolean`, `jsonb` for lists), plus `slug` (primary key),
+  `created_at` and `updated_at`. Row level security is on: anyone can read, only Mas writes. The
+  **CMS** card of the app shows the SQL and, for the Supabase of this server, a **Create the table**
+  button (run it again after adding fields: it only adds the missing columns). With storage
+  `supabase`, field keys are lowercase with `_` (they are column names).
+- **Images** go to the public Storage bucket `mas-cms` (created on the first upload), under the
+  collection id; the content keeps their full public URL.
+- Concurrent edits are caught with `updated_at`: an editor working on an old version is asked to
+  reload instead of overwriting.
+
+The site reads the table with its anon key, at runtime:
+
+```js
+import { createClient } from "@supabase/supabase-js";
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+
+// home page: the 3 latest
+const { data: latest } = await supabase.from("articles")
+  .select("slug, title, date, cover, excerpt").order("date", { ascending: false }).limit(3);
+// one article
+const { data: article } = await supabase.from("articles").select("*").eq("slug", slug).single();
+```
+
+Render those pages on request (or revalidate them), not only at build time, to see changes at once.
+
 ### Load balancing
 
 The **Load balancing** card of a Node.js, Next.js or Python app spreads its traffic:

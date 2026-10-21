@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Shell } from "@/components/Shell";
-import { Button, Card, ErrorText, Input, Label, Notice, PageHeader, ReleaseBadge, Select, Spinner } from "@/components/ui";
-import { api, ApiError, uploadFile, type CmsField, type CmsPage, type CmsSite, type ReleaseStatus } from "@/lib/api";
+import { Button, Card, ConfirmDialog, ErrorText, Input, Label, Notice, PageHeader, ReleaseBadge, Select, Spinner } from "@/components/ui";
+import { api, ApiError, uploadFile, type CmsCollection, type CmsEntry, type CmsField, type CmsPage, type CmsSite, type ReleaseStatus } from "@/lib/api";
 import { tr, useT } from "@/lib/i18n";
 
 type Values = Record<string, unknown>;
@@ -166,7 +166,7 @@ function FieldInput(props: InputProps) {
 }
 
 function emptyItem(fields: CmsField[]): Values {
-  return Object.fromEntries(fields.map((f) => [f.key, f.type === "boolean" ? false : f.type === "number" ? null : ""]));
+  return Object.fromEntries(fields.map((f) => [f.key, f.type === "boolean" ? false : f.type === "number" ? null : f.type === "list" ? [] : ""]));
 }
 
 function ListInput(props: InputProps) {
@@ -209,26 +209,167 @@ function ListInput(props: InputProps) {
   );
 }
 
+type Saved = { unchanged: boolean; instant?: boolean }; // instant: stored in Supabase, online without a rebuild
+type Run = (action: () => Promise<Saved>) => Promise<boolean>;
+
+interface OpenEntry {
+  slug: string | null; // null: not published yet
+  original: Values;
+  values: Values;
+  sha: string | null;
+  address: string;
+}
+
+function entryTitle(collection: CmsCollection, values: Values): string {
+  const title = values[collection.title_field];
+  return typeof title === "string" ? title : "";
+}
+
+function CollectionPanel({ appId, collection, busy, run, onDirty, previews, addPreview }: {
+  appId: string;
+  collection: CmsCollection;
+  busy: boolean;
+  run: Run;
+  onDirty: (dirty: boolean) => void;
+  previews: Previews;
+  addPreview: (key: string, url: string) => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState<OpenEntry | null>(null);
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState("");
+  const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const base = `/cms/sites/${encodeURIComponent(appId)}/collections/${encodeURIComponent(collection.id)}/entries`;
+  const dirty = !!open && (JSON.stringify(open.values) !== JSON.stringify(open.original) || open.address !== "");
+  useEffect(() => onDirty(dirty), [dirty, onDirty]);
+
+  function edit(slug: string) {
+    setError("");
+    setLoading(slug);
+    api<CmsEntry>(`${base}/${encodeURIComponent(slug)}`)
+      .then((e) => setOpen({ slug: e.slug, original: e.values, values: e.values, sha: e.sha, address: "" }))
+      .catch((e: ApiError) => setError(e.detail))
+      .finally(() => setLoading(""));
+  }
+
+  function create() {
+    const empty = emptyItem(collection.fields);
+    setError("");
+    setOpen({ slug: null, original: empty, values: empty, sha: null, address: "" });
+  }
+
+  function close() {
+    if (dirty && !window.confirm(t("Discard the changes on this page?"))) return;
+    setOpen(null);
+    setNote("");
+  }
+
+  async function publish() {
+    if (!open) return;
+    const ok = await run(() => open.slug === null
+      ? api<Saved>(base, { method: "POST", body: { values: open.values, slug: open.address.trim() || null, note } })
+      : api<Saved>(`${base}/${encodeURIComponent(open.slug)}`, { method: "PUT", body: { values: open.values, sha: open.sha, note } }));
+    if (ok) {
+      setOpen(null);
+      setNote("");
+    }
+  }
+
+  async function remove() {
+    if (!open?.slug) return;
+    setDeleting(false);
+    const ok = await run(() => api<Saved>(`${base}/${encodeURIComponent(open.slug!)}?sha=${encodeURIComponent(open.sha ?? "")}`, { method: "DELETE" }));
+    if (ok) setOpen(null);
+  }
+
+  if (!open) {
+    const sortKey = collection.sort_field;
+    return (
+      <Card title={collection.label} actions={<Button variant="primary" onClick={create} disabled={!!collection.error}>+ {t("Add")} {collection.item_label.toLowerCase()}</Button>}>
+        <div className="space-y-3">
+          {collection.description && <p className="text-sm text-zinc-500">{collection.description}</p>}
+          <ErrorText>{error || collection.error}</ErrorText>
+          {collection.entries.length === 0 ? (collection.error ? null :
+            <p className="py-6 text-center text-sm text-zinc-500">{t("Nothing here yet. Add the first one.")}</p>
+          ) : (
+            <ul className="divide-y divide-zinc-200/80 dark:divide-white/[0.06]">
+              {collection.entries.map((e) => (
+                <li key={e.slug}>
+                  <button onClick={() => edit(e.slug)} disabled={!!loading}
+                    className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left text-sm transition hover:bg-zinc-100 dark:hover:bg-white/[0.05]">
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{entryTitle(collection, e) || e.slug}</span>
+                      <span className="block truncate text-xs text-zinc-500">/{e.slug}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2 text-xs text-zinc-500">
+                      {sortKey && e[sortKey] != null && <span>{String(e[sortKey])}</span>}
+                      {loading === e.slug ? <Spinner /> : <span className="text-indigo-500">{t("Edit")} →</span>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Card>
+    );
+  }
+
+  const title = entryTitle(collection, open.values);
+  return (
+    <Card title={open.slug === null ? `${collection.item_label} · ${t("new")}` : title || open.slug}
+      actions={<Button variant="ghost" onClick={close}>← {t("Back to the list")}</Button>}>
+      <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); publish(); }}>
+        {collection.fields.map((f) => (
+          <FieldInput key={f.key} appId={appId} field={f} value={open.values[f.key]} previews={previews} addPreview={addPreview}
+            onChange={(v) => setOpen({ ...open, values: { ...open.values, [f.key]: v } })} />
+        ))}
+        {open.slug === null ? (
+          <Label title={t("Address")} hint={t("Leave empty to build it from the title. It cannot be changed once published.")}>
+            <Input value={open.address} maxLength={80} placeholder="mon-article" onChange={(e) => setOpen({ ...open, address: e.target.value.toLowerCase() })} />
+          </Label>
+        ) : (
+          <p className="text-xs text-zinc-500">{t("Address")}: <code>{open.slug}</code></p>
+        )}
+        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200/80 bg-white/90 p-3 backdrop-blur dark:border-white/[0.08] dark:bg-zinc-950/90">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={100} placeholder={t("What did you change? (optional)")} className="min-w-[12rem] flex-1" />
+          {open.slug !== null && <Button type="button" variant="ghost" disabled={busy} onClick={() => setDeleting(true)}>{t("Delete")}</Button>}
+          {dirty && open.slug !== null && <Button type="button" variant="ghost" onClick={() => setOpen({ ...open, values: open.original })}>{t("Discard")}</Button>}
+          <Button variant="glow" disabled={!dirty || busy}>{busy ? <Spinner /> : null}{t("Publish")}</Button>
+        </div>
+      </form>
+      <ConfirmDialog open={deleting} danger title={t("Delete “{name}”?", { name: title || open.slug || "" })}
+        message={t("It is removed from the site at the next publication. Your administrator can bring it back from the history.")}
+        confirmLabel={t("Delete")} onConfirm={remove} onCancel={() => setDeleting(false)} />
+    </Card>
+  );
+}
+
 type Publish = { phase: "saving" | "waiting" | ReleaseStatus; after: number; startedAt: number } | null;
+type SiteContent = CmsSite & { pages: CmsPage[]; collections: CmsCollection[] };
+type View = { kind: "page" | "collection"; id: string };
 
 function Editor() {
   const t = useT();
   const appId = useSearchParams().get("app") ?? "";
-  const [site, setSite] = useState<(CmsSite & { pages: CmsPage[] }) | null>(null);
-  const [pageId, setPageId] = useState<string | null>(null);
+  const [site, setSite] = useState<SiteContent | null>(null);
+  const [view, setView] = useState<View | null>(null);
   const [values, setValues] = useState<Record<string, Values>>({});
   const [previews, setPreviews] = useState<Previews>({});
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [publish, setPublish] = useState<Publish>(null);
+  const [entryDirty, setEntryDirty] = useState(false);
 
   const load = useCallback(() => {
     if (!appId) return;
-    api<CmsSite & { pages: CmsPage[] }>(`/cms/sites/${encodeURIComponent(appId)}`).then((s) => {
+    api<SiteContent>(`/cms/sites/${encodeURIComponent(appId)}`).then((s) => {
       setSite(s);
       setValues(Object.fromEntries(s.pages.map((p) => [p.id, p.values])));
-      setPageId((current) => (current && s.pages.some((p) => p.id === current) ? current : s.pages[0]?.id ?? null));
+      const views: View[] = [...s.pages.map((p) => ({ kind: "page" as const, id: p.id })), ...s.collections.map((c) => ({ kind: "collection" as const, id: c.id }))];
+      setView((current) => (current && views.some((v) => v.kind === current.kind && v.id === current.id) ? current : views[0] ?? null));
     }).catch((e: ApiError) => setError(e.detail));
   }, [appId]);
   useEffect(load, [load]);
@@ -247,9 +388,11 @@ function Editor() {
     return () => clearInterval(timer);
   }, [publish, appId]);
 
-  const page = site?.pages.find((p) => p.id === pageId) ?? null;
+  const page = view?.kind === "page" ? site?.pages.find((p) => p.id === view.id) ?? null : null;
+  const collection = view?.kind === "collection" ? site?.collections.find((c) => c.id === view.id) ?? null : null;
   const current = page ? values[page.id] ?? {} : {};
-  const dirty = !!page && JSON.stringify(current) !== JSON.stringify(page.values);
+  const pageDirty = !!page && JSON.stringify(current) !== JSON.stringify(page.values);
+  const dirty = pageDirty || (!!collection && entryDirty);
 
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => { if (dirty) e.preventDefault(); };
@@ -257,33 +400,42 @@ function Editor() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  async function save() {
-    if (!page || !site) return;
+  // Commits a change, then follows the deployment it triggers.
+  const run: Run = async (action) => {
+    if (!site) return false;
     setError("");
     setMsg("");
     const after = site.last_release?.id ?? 0;
     setPublish({ phase: "saving", after, startedAt: Date.now() });
     try {
-      const r = await api<{ unchanged: boolean }>(`/cms/sites/${encodeURIComponent(appId)}/pages/${encodeURIComponent(page.id)}`,
-        { method: "PUT", body: { values: current, sha: page.sha, note } });
-      setNote("");
+      const r = await action();
       if (r.unchanged) {
         setPublish(null);
         setMsg(t("Nothing changed."));
       } else {
-        setPublish({ phase: "waiting", after, startedAt: Date.now() });
+        setPublish({ phase: r.instant ? "live" : "waiting", after, startedAt: Date.now() });
       }
       load();
+      return true;
     } catch (e) {
       setPublish(null);
       setError((e as ApiError).detail);
+      return false;
     }
+  };
+
+  async function save() {
+    if (!page) return;
+    const ok = await run(() => api<Saved>(`/cms/sites/${encodeURIComponent(appId)}/pages/${encodeURIComponent(page.id)}`,
+      { method: "PUT", body: { values: current, sha: page.sha, note } }));
+    if (ok) setNote("");
   }
 
-  function switchPage(id: string) {
+  function switchView(next: View) {
     if (dirty && !window.confirm(t("Discard the changes on this page?"))) return;
     if (page) setValues({ ...values, [page.id]: page.values });
-    setPageId(id);
+    setEntryDirty(false);
+    setView(next);
   }
 
   if (!appId) return <ErrorText>{t("No site selected.")}</ErrorText>;
@@ -295,6 +447,10 @@ function Editor() {
 
   const busy = publish?.phase === "saving";
   const status = publish && publish.phase !== "saving" ? publish.phase : null;
+  const nav: (View & { label: string })[] = [
+    ...site.pages.map((p) => ({ kind: "page" as const, id: p.id, label: p.label })),
+    ...site.collections.map((c) => ({ kind: "collection" as const, id: c.id, label: c.label })),
+  ];
 
   return (
     <>
@@ -315,18 +471,23 @@ function Editor() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-4">
-        {site.pages.length > 1 && (
+        {nav.length > 1 && (
           <nav className="space-y-1 lg:col-span-1">
-            {site.pages.map((p) => (
-              <button key={p.id} onClick={() => switchPage(p.id)}
-                className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${p.id === pageId ? "bg-zinc-200 font-medium dark:bg-white/10" : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/[0.05]"}`}>
-                {p.label}
-              </button>
-            ))}
+            {nav.map((v) => {
+              const active = view?.kind === v.kind && view.id === v.id;
+              const count = v.kind === "collection" ? site.collections.find((c) => c.id === v.id)?.entries.length : null;
+              return (
+                <button key={`${v.kind}:${v.id}`} onClick={() => !active && switchView(v)}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${active ? "bg-zinc-200 font-medium dark:bg-white/10" : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/[0.05]"}`}>
+                  <span className="truncate">{v.label}</span>
+                  {count != null && <span className="text-xs text-zinc-500">{count}</span>}
+                </button>
+              );
+            })}
           </nav>
         )}
-        {page && (
-          <div className={site.pages.length > 1 ? "lg:col-span-3" : "lg:col-span-4"}>
+        <div className={nav.length > 1 ? "lg:col-span-3" : "lg:col-span-4"}>
+          {page && (
             <Card title={page.label}>
               <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); save(); }}>
                 {page.description && <p className="text-sm text-zinc-500">{page.description}</p>}
@@ -337,13 +498,17 @@ function Editor() {
                 ))}
                 <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200/80 bg-white/90 p-3 backdrop-blur dark:border-white/[0.08] dark:bg-zinc-950/90">
                   <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={100} placeholder={t("What did you change? (optional)")} className="min-w-[12rem] flex-1" />
-                  {dirty && <Button type="button" variant="ghost" onClick={() => setValues({ ...values, [page.id]: page.values })}>{t("Discard")}</Button>}
-                  <Button variant="glow" disabled={!dirty || busy}>{busy ? <Spinner /> : null}{t("Publish")}</Button>
+                  {pageDirty && <Button type="button" variant="ghost" onClick={() => setValues({ ...values, [page.id]: page.values })}>{t("Discard")}</Button>}
+                  <Button variant="glow" disabled={!pageDirty || busy}>{busy ? <Spinner /> : null}{t("Publish")}</Button>
                 </div>
               </form>
             </Card>
-          </div>
-        )}
+          )}
+          {collection && (
+            <CollectionPanel key={collection.id} appId={appId} collection={collection} busy={busy} run={run} onDirty={setEntryDirty}
+              previews={previews} addPreview={(k, url) => setPreviews((p) => ({ ...p, [k]: url }))} />
+          )}
+        </div>
       </div>
     </>
   );

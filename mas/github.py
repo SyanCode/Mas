@@ -135,6 +135,19 @@ class GitHubApp:
         data = self._as_installation(installation_id, f"/repos/{repo}/git/trees/{quote(ref, safe='')}?recursive=1")
         return [{"path": t["path"], "size": t.get("size", 0)} for t in data.get("tree", []) if t.get("type") == "blob"]
 
+    def list_dir(self, installation_id: int, repo: str, path: str, ref: str) -> list[dict]:
+        """Files directly in ``path`` at ``ref``: [{name, path, sha}], [] when the folder does not exist."""
+        try:
+            items = self._as_installation(installation_id,
+                                          f"/repos/{repo}/contents/{quote(path)}?ref={quote(ref, safe='')}")
+        except GitHubError as exc:
+            if "HTTP 404" in str(exc):
+                return []
+            raise
+        if not isinstance(items, list):
+            return []
+        return [{"name": i["name"], "path": i["path"], "sha": i["sha"]} for i in items if i.get("type") == "file"]
+
     def read_file(self, installation_id: int, repo: str, path: str, ref: str) -> tuple[bytes | None, str | None]:
         """(content, blob sha) of a file, (None, None) when it does not exist."""
         try:
@@ -150,12 +163,15 @@ class GitHubApp:
         blob = self._as_installation(installation_id, f"/repos/{repo}/git/blobs/{item['sha']}")  # > 1 MB
         return base64.b64decode(blob.get("content") or ""), item["sha"]
 
-    def commit_files(self, installation_id: int, repo: str, branch: str, files: dict[str, bytes],
+    def commit_files(self, installation_id: int, repo: str, branch: str, files: dict[str, bytes | None],
                      message: str, parent: str) -> str:
-        """One commit with every file on top of ``parent``; refused if the branch moved meanwhile."""
+        """One commit with every file on top of ``parent`` (None deletes it); refused if the branch moved meanwhile."""
         base_tree = self._as_installation(installation_id, f"/repos/{repo}/git/commits/{parent}")["tree"]["sha"]
         tree = []
         for path, content in files.items():
+            if content is None:
+                tree.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+                continue
             blob = self._as_installation(installation_id, f"/repos/{repo}/git/blobs", "POST",
                                          {"content": base64.b64encode(content).decode(), "encoding": "base64"})
             tree.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
