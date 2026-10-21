@@ -229,12 +229,14 @@ class RestartAll:
         return res is not None and res.stdout.strip() == "active"
 
     def _unit_fingerprint(self, unit: str) -> str:
-        res = self.host.run(["systemctl", "show", unit, "-p", "FragmentPath", "-p", "DropInPaths", "-p", "ExecStart",
+        """The unit files (and drop-ins) and the environment the unit starts with. Not ExecStart as
+        ``systemctl show`` prints it: it carries the pid and start time of the running process."""
+        res = self.host.run(["systemctl", "show", unit, "-p", "FragmentPath", "-p", "DropInPaths",
                              "-p", "Environment", "-p", "EnvironmentFiles", "-p", "WorkingDirectory", "-p", "User"])
         text = res.stdout if res is not None and res.ok else ""
         files = [line.split("=", 1)[1] for line in text.splitlines() if line.startswith(("FragmentPath=", "DropInPaths="))]
         contents = [self.host.read_text(p) or "" for f in files for p in f.split() if p]
-        return _digest([text, contents])
+        return _digest([sorted(text.splitlines()), contents])
 
     def _restart_unit(self, unit: str) -> tuple[str, str]:
         if not UNIT_RE.fullmatch(unit):

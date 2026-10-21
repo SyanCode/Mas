@@ -80,3 +80,25 @@ def test_a_changed_container_is_reported(tmp_path):
     host.docker_get = inspect
     status, detail = restart._restart_container("a" * 64)
     assert status == "changed" and "env" in detail
+
+
+def test_a_new_pid_is_not_a_change(tmp_path):
+    """systemctl show changes with every start (pid, start time): only the unit files count."""
+    host, _, restart = make(tmp_path)
+    starts = iter(range(100, 200))
+
+    def run(argv, timeout=None):
+        from mas.host import CommandResult
+        if argv[:2] == ["systemctl", "show"]:
+            out = "FragmentPath=/lib/systemd/system/mariadb.service\n"
+            if "ExecStart" in argv:  # what systemd prints: the running process, new at every start
+                out += f"ExecStart={{ path=/usr/sbin/mariadbd ; pid={next(starts)} ; start_time=[...] }}\n"
+            return CommandResult(0, out, "")
+        if argv[:2] == ["systemctl", "restart"]:
+            return CommandResult(0, "", "")
+        if argv[:2] == ["systemctl", "is-active"]:
+            return CommandResult(0, "active\n", "")
+        return None
+    host.run = run
+    host.write_text("/lib/systemd/system/mariadb.service", "[Service]\nExecStart=/usr/sbin/mariadbd\n")
+    assert restart._restart_unit("mariadb.service")[0] == "identical"
