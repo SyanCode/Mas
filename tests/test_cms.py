@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 
 from mas import auth, cms_supabase
 from mas.api import create_app
-from mas.cms import (CmsError, apply_values, content_candidates, detect_image, infer_schema, parse_schema, slugify,
-                     sort_index)
+from mas.cms import (CmsError, apply_values, content_candidates, detect_image, infer_schema, parse_schema,
+                     resolve_options, slugify, sort_index)
 from mas.config import Config
 from mas.db import Database
 from mas.envcrypt import encrypt_env, load_fernet
@@ -682,3 +682,45 @@ def test_json_schema_for_editors_matches_mas():
                 {"pages": [{"id": "x", "file": "../a.json", "fields": [{"key": "a"}]}]}):
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(bad, spec)
+
+
+CATEGORY_SCHEMA = {
+    "pages": [{"id": "categories", "file": "content/categories.json", "fields": [
+        {"key": "items", "type": "list", "fields": [{"key": "value", "type": "text", "required": True},
+                                                   {"key": "label", "type": "text"}]}]}],
+    "collections": [{"id": "works", "dir": "content/works", "fields": [
+        {"key": "title", "type": "text"},
+        {"key": "category", "type": "select", "required": True, "options": ["paintings"],
+         "options_from": {"page": "categories", "list": "items", "value": "value", "label": "label"}}]}],
+}
+
+
+def test_select_choices_come_from_a_page():
+    schema = parse_schema(json.dumps(CATEGORY_SCHEMA))
+    content = {"items": [{"value": "paintings", "label": "Paintings"}, {"value": "prints", "label": "Prints"},
+                         {"value": "  "}, {"value": "prints", "label": "dupe"}, {"value": "drawings"}]}
+    resolve_options(schema, lambda page: content if page["id"] == "categories" else None)
+    field = schema["collections"][0]["fields"][1]
+    assert field["options"] == [{"value": "paintings", "label": "Paintings"}, {"value": "prints", "label": "Prints"},
+                                {"value": "drawings", "label": "drawings"}]
+    merged, _, _ = apply_values(schema["collections"][0], {"title": "x", "category": "prints"}, {}, no_upload)
+    assert merged["category"] == "prints"  # a choice added on the page is accepted
+    with pytest.raises(CmsError):
+        apply_values(schema["collections"][0], {"title": "x", "category": "sculpture"}, {}, no_upload)
+
+    # nothing on the page yet (or unreadable): the static options stay
+    fresh = resolve_options(parse_schema(json.dumps(CATEGORY_SCHEMA)), lambda page: None)
+    assert fresh["collections"][0]["fields"][1]["options"] == [{"value": "paintings", "label": "paintings"}]
+
+
+def test_options_from_must_point_to_a_page_list():
+    for broken in ({"page": "nope", "list": "items", "value": "value"},
+                   {"page": "categories", "list": "items", "value": "missing"},
+                   {"page": "categories", "list": "items"}):
+        raw = json.loads(json.dumps(CATEGORY_SCHEMA))
+        raw["collections"][0]["fields"][1]["options_from"] = broken
+        with pytest.raises(CmsError):
+            parse_schema(json.dumps(raw))
+    raw = json.loads(json.dumps(CATEGORY_SCHEMA))
+    del raw["collections"][0]["fields"][1]["options"]  # options_from alone is enough
+    assert parse_schema(json.dumps(raw))["collections"][0]["fields"][1]["options"] == []

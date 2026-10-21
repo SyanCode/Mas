@@ -105,6 +105,18 @@
             ]
           }
         },
+        "options_from": {
+          "type": "object",
+          "description": "select: take the choices from a list of a page the client edits (a Categories page). The static options are used while that list is empty.",
+          "required": ["page", "list", "value"],
+          "properties": {
+            "page": { "$ref": "#/definitions/id", "description": "id of the page" },
+            "list": { "$ref": "#/definitions/id", "description": "key of a list field of that page" },
+            "value": { "$ref": "#/definitions/id", "description": "field of each item saved as the value" },
+            "label": { "$ref": "#/definitions/id", "description": "field of each item shown in the menu (default: value)" }
+          },
+          "additionalProperties": false
+        },
         "dir": { "$ref": "#/definitions/path", "description": "image: folder in the repository (public/uploads)." },
         "url": { "type": "string", "pattern": "^/[A-Za-z0-9._/-]*$", "description": "image: the same folder as the site serves it (/uploads)." },
         "max_kb": { "type": "integer", "minimum": 1, "maximum": 8192 },

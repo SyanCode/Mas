@@ -176,7 +176,7 @@ Every field takes `key` (required, unique in its page: letters, digits, `_`, `-`
 | `markdown` | string | `min`, `max` (default 20000) | markdown; render it with your own library |
 | `number` | number or `null` | `min`, `max`, `integer` | |
 | `boolean` | `true` / `false` | | |
-| `select` | string | `options`: `["a", "b"]` or `[{ "value": "a", "label": "A" }]` | one of the values |
+| `select` | string | `options`: `["a", "b"]` or `[{ "value": "a", "label": "A" }]`, or `options_from` (below) | one of the values |
 | `url` | string | | `https://…`, `http://…`, `/page`, `#anchor`, `mailto:`, `tel:` |
 | `email` | string | | an email address |
 | `date` | string | | `YYYY-MM-DD` |
@@ -188,6 +188,27 @@ An empty field is stored as `""`, `null` (number), `false` (boolean) or `[]` (li
 an optional key the client never filled stays absent, so the site may test for it. Lists hold
 objects of the other types: **no list inside a list**, and nested objects are not editable.
 Control characters are refused.
+
+### Choices the client can add to
+
+A `select` can take its choices from a list of a page, so the client adds a category without
+touching `mas.cms.json`:
+
+```json
+{ "id": "categories", "label": "Categories", "file": "content/categories.json", "fields": [
+  { "key": "items", "type": "list", "item_label": "Category", "fields": [
+    { "key": "value", "type": "text", "label": "Identifier", "required": true },
+    { "key": "label", "type": "text", "label": "Name shown" } ] } ] }
+```
+
+```json
+{ "key": "category", "type": "select", "required": true,
+  "options_from": { "page": "categories", "list": "items", "value": "value", "label": "label" } }
+```
+
+Mas reads the page on the published branch: a category saved there is offered at once. `options`
+can stay as a fallback, used while the list is empty. The site reads `content/categories.json`
+for the names.
 
 ### Images
 

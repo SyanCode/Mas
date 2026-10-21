@@ -96,8 +96,14 @@ def parse_field(raw: Any, where: str, nested: bool, r: Report) -> dict | None:
             if not isinstance(value, str):
                 r.error(f"{where}: options must be strings or {{value, label}}")
             values.append(value)
-        if not values:
-            r.error(f"{where}: a select needs options")
+        source = raw.get("options_from")
+        if source is not None:  # choices kept in a list of a page: any value of that list is accepted
+            keys = ("page", "list", "value")
+            if not isinstance(source, dict) or not all(isinstance(source.get(k), str) for k in keys):
+                r.error(f'{where}.options_from: {{"page": id, "list": key, "value": key, "label": key}}')
+            field["options_from"] = source
+        elif not values:
+            r.error(f"{where}: a select needs options (or options_from)")
         field["values"] = values
     elif ftype == "image":
         repo_path(raw.get("dir", "public/uploads"), f"{where}.dir", r)
@@ -222,7 +228,7 @@ def check_value(field: dict, value: Any, where: str, r: Report) -> None:
         r.error(f"{where}: must be a number")
     elif t == "boolean" and not isinstance(value, bool):
         r.error(f"{where}: must be true or false")
-    elif t == "select" and value not in field.get("values", []):
+    elif t == "select" and not field.get("options_from") and value not in field.get("values", []):
         r.error(f"{where}: {value!r} is not one of the options")
     elif t == "url" and not (isinstance(value, str) and LINK_RE.fullmatch(value)):
         r.error(f"{where}: {value!r} is not an accepted link (https://, /path, #anchor, mailto:, tel:)")

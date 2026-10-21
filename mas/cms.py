@@ -146,9 +146,20 @@ def _parse_field(raw: Any, where: str, nested: bool) -> dict:
             if not isinstance(value, str):
                 raise CmsError(f"{where}: options must be strings or {{value, label}}")
             options.append({"value": value, "label": str(label if label is not None else value)})
-        if not options:
-            raise CmsError(f"{where}: a select needs options")
-        field["options"] = options
+        source = raw.get("options_from")
+        if source is not None:
+            # Choices kept in a list of a page (a "Categories" page the client edits); checked by parse_schema.
+            if not isinstance(source, dict) or not all(isinstance(source.get(k), str) and KEY_RE.fullmatch(source[k])
+                                                       for k in ("page", "list", "value")):
+                raise CmsError(f'{where}.options_from: {{"page": id, "list": key, "value": key, "label": key}}')
+            label_key = source.get("label", source["value"])
+            if not isinstance(label_key, str) or not KEY_RE.fullmatch(label_key):
+                raise CmsError(f"{where}.options_from.label: invalid key")
+            field["options_from"] = {"page": source["page"], "list": source["list"], "value": source["value"],
+                                     "label": label_key}
+        elif not options:
+            raise CmsError(f"{where}: a select needs options (or options_from)")
+        field["options"] = options  # with options_from: used until the page lists something
     elif ftype == "image":
         field["dir"] = safe_repo_path(raw.get("dir", "public/uploads"), f"{where}.dir")
         url = raw.get("url", "/uploads")
@@ -258,6 +269,16 @@ def parse_schema(raw: bytes | str) -> dict:
             raise CmsError(f"collections[{i}]: invalid id {cid!r}")
         collections.append(_parse_collection(c, cid))
     _unique([p["id"] for p in pages] + [c["id"] for c in collections], "pages and collections")
+    for field, where in _selects_from(pages + collections):
+        src = field["options_from"]
+        page = next((p for p in pages if p["id"] == src["page"]), None)
+        lst = next((f for f in (page or {}).get("fields", []) if f["key"] == src["list"]), None)
+        if lst is None or lst["type"] != "list":
+            raise CmsError(f"{where}.options_from: no list {src['list']!r} in a page {src['page']!r}")
+        keys = {f["key"] for f in lst["fields"]}
+        if src["value"] not in keys or src["label"] not in keys:
+            raise CmsError(f"{where}.options_from: the items of {src['page']}.{src['list']} have no "
+                           f"{src['value']!r} / {src['label']!r} field")
     _unique([p["file"] for p in pages], "page files")
     _unique([c["table"] for c in collections if c["table"]], "collection tables")
     dirs = [c["dir"] for c in collections if c["dir"]]
@@ -267,6 +288,41 @@ def parse_schema(raw: bytes | str) -> dict:
         if inside or dirs.count(c["dir"]) > 1:
             raise CmsError(f"{c['id']}.dir: {c['dir']} must only hold the entries of this collection")
     return {"pages": pages, "collections": collections}
+
+
+def _selects_from(parts: list[dict]) -> list[tuple[dict, str]]:
+    """Select fields whose choices come from a page (``options_from``), with where they are."""
+    out = []
+    for part in parts:
+        for f in part["fields"]:
+            for sub in [f, *f.get("fields", [])]:
+                if sub.get("options_from"):
+                    out.append((sub, f"{part['id']}.{sub['key']}"))
+    return out
+
+
+def resolve_options(schema: dict, read_page: Callable[[dict], dict | None]) -> dict:
+    """Fill the choices of ``options_from`` selects from the current content of their page."""
+    cache: dict[str, dict | None] = {}
+    for field, _ in _selects_from(schema["pages"] + schema["collections"]):
+        src = field["options_from"]
+        page = next(p for p in schema["pages"] if p["id"] == src["page"])
+        if page["id"] not in cache:
+            try:
+                cache[page["id"]] = read_page(page)
+            except CmsError:
+                cache[page["id"]] = None
+        items = (cache[page["id"]] or {}).get(src["list"])
+        options, seen = [], set()
+        for item in items if isinstance(items, list) else []:
+            value = item.get(src["value"]) if isinstance(item, dict) else None
+            if isinstance(value, str) and value.strip() and value.strip() not in seen:
+                seen.add(value.strip())
+                label = item.get(src["label"])
+                options.append({"value": value.strip(), "label": str(label).strip() if label else value.strip()})
+        if options:
+            field["options"] = options
+    return schema
 
 
 def image_fields(schema: dict) -> list[dict]:
@@ -646,6 +702,15 @@ class CmsManager:
         if raw is None:
             raise CmsError(f"no {SCHEMA_FILE} at the root of {app['repo']}@{app['branch']}")
         schema = parse_schema(raw)
+
+        def read_page(page: dict) -> dict | None:
+            try:
+                content, _ = gh.read_file(app["installation_id"], app["repo"], page["file"], head)
+            except GitHubError as exc:
+                raise CmsError(str(exc)) from None
+            return self._decode(content, page["file"]) if content is not None else None
+
+        schema = resolve_options(schema, read_page)
         self._schemas[app_id] = (time.time() + 60, head, schema)
         return schema, head
 
