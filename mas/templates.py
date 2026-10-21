@@ -63,8 +63,19 @@ SUPABASE_BODY = """
         proxy_read_timeout 3600s;
         client_max_body_size 50m;
     }
+    # Studio (behind Envoy's basic auth): the local network and the allowed addresses only.
     location / {
-        return 404;
+@@ALLOW@@        deny all;
+        proxy_pass http://127.0.0.1:@@PORT@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $mas_connection_upgrade;
+        proxy_read_timeout 300s;
+        client_max_body_size 50m;
     }
 """ + STATUS_PAGE_LOCATION
 
@@ -191,8 +202,9 @@ def proxy_body(port: int, pages_dir: str, upstream: str | None = None) -> str:
                 pages=pages_dir, page="deploying")
 
 
-def supabase_body(port: int, pages_dir: str) -> str:
-    return fill(SUPABASE_BODY, port=port, pages=pages_dir, page="deploying")
+def supabase_body(port: int, pages_dir: str, studio_allow: list[str] = ()) -> str:
+    allow = "".join(f"        allow {net};\n" for net in studio_allow)
+    return fill(SUPABASE_BODY, port=port, pages=pages_dir, page="deploying", allow=allow)
 
 
 def placeholder_body(pages_dir: str, page: str) -> str:

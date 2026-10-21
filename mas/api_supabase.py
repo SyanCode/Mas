@@ -6,7 +6,7 @@ import asyncio
 import time
 from collections.abc import Callable
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -14,7 +14,10 @@ from mas.appdb import AppDatabases, AppDbError
 from mas.db import Database
 from mas.deploy import DOMAIN_RE, Deployer
 from mas.host import Host
-from mas.supabase import COMPONENTS, CORE_RAM, PRESETS, SupabaseError, SupabaseManager, estimate_ram, requirements
+from mas.supabase import (
+    COMPONENTS, CORE_RAM, LOCAL_NETWORKS, MAX_STUDIO_ACCESS, PRESETS, SupabaseError, SupabaseManager, estimate_ram,
+    requirements,
+)
 
 
 class InstallBody(BaseModel):
@@ -34,6 +37,10 @@ class ImportBody(BaseModel):
     replace: bool = False
 
 
+class StudioAccessBody(BaseModel):
+    networks: list[str] = Field(max_length=MAX_STUDIO_ACCESS, default_factory=list)
+
+
 class ComponentsBody(BaseModel):
     components: list[str] = Field(max_length=len(COMPONENTS))
 
@@ -46,7 +53,7 @@ def _check_components(names: list[str] | None) -> list[str] | None:
 
 
 def register(app: FastAPI, *, host: Host, db: Database, current_session: Callable, deployer: Deployer,
-             manager: SupabaseManager, appdb: AppDatabases) -> None:
+             manager: SupabaseManager, appdb: AppDatabases, client_ip: Callable[[Request], str]) -> None:
 
     def call(fn, *args, **kwargs):
         try:
@@ -64,6 +71,7 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
         out["api_url"] = manager.api_url(inst) if out["ports"] else None
         out["components"] = manager.components(inst)
         out["estimated_ram_mb"] = estimate_ram(out["components"])
+        out["studio_access"] = manager.studio_access(inst)
         return out
 
     catalog = {"core_ram_mb": CORE_RAM,
@@ -73,9 +81,10 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
                             "ram_mb": estimate_ram(p["components"])} for k, p in PRESETS.items()]}
 
     @app.get("/api/supabase")
-    async def status(_=Depends(current_session)) -> dict:
+    async def status(request: Request, _=Depends(current_session)) -> dict:
         reqs = await asyncio.to_thread(requirements, host)
-        return {"instance": public(manager.get()), "requirements": reqs, "catalog": catalog}
+        return {"instance": public(manager.get()), "requirements": reqs, "catalog": catalog,
+                "local_networks": LOCAL_NETWORKS, "your_ip": client_ip(request)}
 
     @app.post("/api/supabase")
     def install(body: InstallBody, s=Depends(current_session)) -> dict:
@@ -140,6 +149,12 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
         await asyncio.to_thread(call, manager.reconfigure, names)
         db.audit(s.username, "supabase-components", True, detail=", ".join(names) or "core only")
         return {"ok": True, "components": names, "estimated_ram_mb": estimate_ram(names)}
+
+    @app.put("/api/supabase/studio-access")
+    async def studio_access(body: StudioAccessBody, s=Depends(current_session)) -> dict:
+        networks = await asyncio.to_thread(call, manager.set_studio_access, body.networks)
+        db.audit(s.username, "supabase-studio-access", True, detail=", ".join(networks) or "local network only")
+        return {"ok": True, "networks": networks}
 
     @app.post("/api/supabase/studio/{action}")
     async def studio(action: str, s=Depends(current_session)) -> dict:

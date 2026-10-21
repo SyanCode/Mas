@@ -2,8 +2,9 @@
 
 One instance per server (the stack needs 2-4 GB of RAM). Every published
 port is bound to 127.0.0.1; only the public API (/rest, /auth, /realtime,
-/storage, /functions, /graphql) goes through nginx. Studio and pg-meta stay
-private: open them through an SSH tunnel to the Kong port.
+/storage, /functions, /graphql) goes through nginx. The rest of the domain
+(Studio, behind its basic auth) only answers the local network and the
+addresses allowed in the dashboard; the SSH tunnel to the gateway port works too.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import re
@@ -42,8 +44,38 @@ MIN_MEMORY_MB = 2048
 JWT_TTL = 10 * 365 * 86400
 
 
+# Always allowed to open Studio on the Supabase domain: private networks (the LAN). Loopback is left
+# out on purpose: behind a local reverse proxy or tunnel every visitor would come from 127.0.0.1.
+LOCAL_NETWORKS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10"]
+MAX_STUDIO_ACCESS = 50
+
+
 class SupabaseError(Exception):
     pass
+
+
+def normalize_networks(entries: list[str]) -> list[str]:
+    """``1.2.3.4`` / ``1.2.3.0/24`` / ``2a01::/64`` → canonical networks, deduplicated."""
+    out: list[str] = []
+    for entry in entries:
+        text = entry.strip()
+        if not text:
+            continue
+        try:
+            net = ipaddress.ip_network(text, strict=False)
+        except ValueError:
+            raise SupabaseError(f"not an IP address or network: {text}") from None
+        if net.num_addresses == 1:
+            value = str(net.network_address)
+        elif net.prefixlen == 0:
+            raise SupabaseError(f"{text} would open Studio to the whole internet")
+        else:
+            value = str(net)
+        if value not in out:
+            out.append(value)
+    if len(out) > MAX_STUDIO_ACCESS:
+        raise SupabaseError(f"at most {MAX_STUDIO_ACCESS} addresses")
+    return out
 
 
 def _b64url(data: bytes) -> str:
@@ -298,6 +330,42 @@ class SupabaseManager:
     def ports(self, inst: dict) -> dict[str, int]:
         return json.loads(inst["ports"] or "{}")
 
+    @staticmethod
+    def studio_access(inst: dict | None) -> list[str]:
+        """Addresses allowed to open Studio on the domain, besides LOCAL_NETWORKS."""
+        raw = (inst or {}).get("studio_access")
+        return json.loads(raw) if raw else []
+
+    def refresh_vhost(self) -> None:
+        """Rewrite the nginx site of the domain when this Mas renders it differently (after an update)."""
+        inst = self.get()
+        if not inst or not inst["domain"] or inst["status"] not in ("running", "stopped"):
+            return
+        rlog = ReleaseLog(self.data_dir / "logs" / "supabase" / "access.log")
+        try:
+            with self._lock:
+                self._install_vhost(inst["domain"], self.ports(inst)["kong_http"], rlog)
+        finally:
+            rlog.close()
+
+    def set_studio_access(self, entries: list[str]) -> list[str]:
+        inst = self.get()
+        if not inst or inst["status"] not in ("running", "stopped"):
+            raise SupabaseError("Supabase is not installed")
+        networks = normalize_networks(entries)
+        self.db.save_supabase(INSTANCE_ID, studio_access=json.dumps(networks))
+        if inst["domain"]:
+            rlog = ReleaseLog(self.data_dir / "logs" / "supabase" / "access.log")
+            try:
+                rlog.step(f"Studio access: local network + {', '.join(networks) or 'nothing else'}")
+                with self._lock:
+                    self._install_vhost(inst["domain"], self.ports(inst)["kong_http"], rlog)
+            except DeployError as exc:
+                raise SupabaseError(str(exc)) from None
+            finally:
+                rlog.close()
+        return networks
+
     def api_url(self, inst: dict) -> str:
         return f"https://{inst['domain']}" if inst["domain"] else f"http://127.0.0.1:{self.ports(inst)['kong_http']}"
 
@@ -327,6 +395,7 @@ class SupabaseManager:
             "service_role_key": s["SERVICE_ROLE_KEY"],
             "database_url": f"postgresql://postgres:{s['POSTGRES_PASSWORD']}@127.0.0.1:{ports.get('postgres')}/postgres",
             "studio": {"tunnel": f"ssh -L 8000:127.0.0.1:{kong} <you>@<server>", "url": "http://localhost:8000",
+                       "web": f"https://{inst['domain']}/" if inst["domain"] else None,
                        "username": s["DASHBOARD_USERNAME"], "password": s["DASHBOARD_PASSWORD"]},
         }
 
@@ -494,7 +563,8 @@ class SupabaseManager:
             self.deployer._nginx_apply(rlog, UPGRADE_MAP_PATH, templates.UPGRADE_MAP, None)
         self.deployer._ensure_pages()
         available, enabled = vhost_paths(INSTANCE_ID)
-        content = templates.vhost(INSTANCE_ID, domain, templates.supabase_body(port, self.config.pages_dir),
+        allow = LOCAL_NETWORKS + self.studio_access(self.get())
+        content = templates.vhost(INSTANCE_ID, domain, templates.supabase_body(port, self.config.pages_dir, allow),
                                   self.deployer._has_cert(domain))
         self.deployer._nginx_apply(rlog, available, content, enabled)
 

@@ -177,7 +177,6 @@
   "Postgres, Auth, Storage, Realtime and the REST API on your own server, connected to your apps in one click.": "Postgres, Auth, Storage, Realtime et l'API REST sur votre propre serveur, connectés à vos apps en un clic.",
   "Deploy Supabase": "Déployer Supabase",
   "Official docker stack, every port bound to 127.0.0.1": "Stack Docker officielle, chaque port lié à 127.0.0.1",
-  "Only the public API is published (HTTPS); Studio stays private (SSH tunnel)": "Seule l'API publique est exposée (HTTPS) ; Studio reste privé (tunnel SSH)",
   "Secrets generated and stored encrypted; daily backups kept 7 days": "Secrets générés et stockés chiffrés ; sauvegardes quotidiennes gardées 7 jours",
   "missing": "absent",
   "{n} GB RAM free": "{n} Go de RAM libres",
@@ -476,7 +475,6 @@
   "{n} min ago": "il y a {n} min",
   "{n} h ago": "il y a {n} h",
   "{n} d ago": "il y a {n} j",
-
   "administrators only": "réservé aux administrateurs",
   "not authenticated": "non connecté",
   "session expired": "session expirée",
@@ -671,5 +669,16 @@
   "For example /data": "Par exemple /data",
   "Environment": "Environnement",
   "KEY=value, one per line": "CLÉ=valeur, une par ligne",
-  "Published port": "Port publié"
+  "Published port": "Port publié",
+  "The API is published (HTTPS); Studio only answers the local network and the addresses you allow": "L'API est publiée (HTTPS) ; Studio ne répond qu'au réseau local et aux adresses que vous autorisez",
+  "Studio on {domain}": "Studio sur {domain}",
+  "The admin interface opens at": "L'interface d'administration s'ouvre sur",
+  "from the local network and from the addresses below; everybody else gets a 403. The API stays public.": "depuis le réseau local et depuis les adresses ci-dessous ; les autres reçoivent une erreur 403. L'API reste publique.",
+  "Always allowed (local network): {networks}": "Toujours autorisé (réseau local) : {networks}",
+  "Allowed IP addresses or networks, one per line": "Adresses IP ou réseaux autorisés, un par ligne",
+  "Studio access updated.": "Accès à Studio mis à jour.",
+  "Add my IP ({ip})": "Ajouter mon IP ({ip})",
+  "One IP or network per line, such as 203.0.113.7 or 198.51.100.0/24.": "Une IP ou un réseau par ligne, par exemple 203.0.113.7 ou 198.51.100.0/24.",
+  "Studio sign-in": "Connexion à Studio",
+  "From anywhere else, through an SSH tunnel:": "Depuis n'importe où ailleurs, par un tunnel SSH :"
 }

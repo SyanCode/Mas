@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
 import {
-  Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Notice, PageHeader, Spinner, StatusDot, Terminal,
+  Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Notice, PageHeader, Spinner, StatusDot, Terminal, Textarea,
 } from "@/components/ui";
 import { api, ApiError, timeAgo } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
@@ -18,6 +18,7 @@ interface Instance {
   created_at: string;
   ports: Record<string, number>;
   api_url: string | null;
+  studio_access: string[];
   components: string[];
   estimated_ram_mb: number;
 }
@@ -55,7 +56,7 @@ function ramOf(catalog: Catalog, value: string[]) {
 interface Requirements { docker: string | null; compose: string | null; memory_available_mb: number | null; memory_recommended_mb: number }
 interface Credentials {
   api_url: string; anon_key: string; service_role_key: string; database_url: string;
-  studio: { tunnel: string; url: string; username: string; password: string };
+  studio: { tunnel: string; url: string; web: string | null; username: string; password: string };
 }
 interface Backup { name: string; size: number; created_at: string }
 
@@ -166,12 +167,16 @@ function Databases() {
   const [components, setComponents] = useState<string[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [connectApp, setConnectApp] = useState<string | null>(null); // ?connect=<app>: connected once installed
+  const [access, setAccess] = useState("");  // Studio: allowed addresses, one per line
+  const [network, setNetwork] = useState<{ local: string[]; you: string } | null>(null);
   const onDomain = useCallback((c: DomainChoice | null) => setChoice(c), []);
   useEffect(() => { setConnectApp(new URLSearchParams(window.location.search).get("connect")); }, []);
 
   const load = useCallback(() => {
-    api<{ instance: Instance | null; requirements: Requirements; catalog: Catalog }>("/supabase").then((r) => {
+    api<{ instance: Instance | null; requirements: Requirements; catalog: Catalog; local_networks: string[]; your_ip: string }>("/supabase").then((r) => {
       setInst(r.instance);
+      setAccess((r.instance?.studio_access ?? []).join("\n"));
+      setNetwork({ local: r.local_networks, you: r.your_ip });
       setReqs(r.requirements);
       setCatalog(r.catalog);
       setComponents((prev) => r.instance ? r.instance.components : prev ?? suggested(r.catalog, r.requirements.memory_available_mb));
@@ -213,6 +218,8 @@ function Databases() {
   const changed = !!inst && !!components && [...components].sort().join() !== [...inst.components].sort().join();
   const studioUp = !!stats?.containers.some((c) => c.name.includes("studio"));
   const ready = !!reqs?.docker && !!reqs?.compose;
+  const accessList = access.split(/[\s,]+/).filter(Boolean);
+  const accessChanged = !!inst && accessList.join() !== inst.studio_access.join();
 
   return (
     <>
@@ -231,7 +238,7 @@ function Databases() {
               {connectApp && <Notice>{t("{app} will be connected to it automatically once it is installed.", { app: connectApp })}</Notice>}
               <ul className="space-y-2 text-sm text-zinc-500">
                 <li>• {t("Official docker stack, every port bound to 127.0.0.1")}</li>
-                <li>• {t("Only the public API is published (HTTPS); Studio stays private (SSH tunnel)")}</li>
+                <li>• {t("The API is published (HTTPS); Studio only answers the local network and the addresses you allow")}</li>
                 <li>• {t("Secrets generated and stored encrypted; daily backups kept 7 days")}</li>
               </ul>
               <div className="flex flex-wrap gap-2">
@@ -325,10 +332,35 @@ function Databases() {
               </Card>
             )}
 
-            {creds && (
-              <Card title={t("Studio (private)")}>
+            {inst.domain && (
+              <Card title={t("Studio on {domain}", { domain: inst.domain })}>
                 <div className="space-y-3 text-sm">
-                  <p className="text-zinc-500">{t("Studio is not exposed to the internet. From your computer:")}</p>
+                  <p className="text-zinc-500">
+                    {t("The admin interface opens at")}{" "}
+                    <a href={`https://${inst.domain}/`} target="_blank" rel="noreferrer" className="text-sky-500 hover:underline">https://{inst.domain}/</a>{" "}
+                    {t("from the local network and from the addresses below; everybody else gets a 403. The API stays public.")}
+                  </p>
+                  {network && <p className="text-xs text-zinc-500">{t("Always allowed (local network): {networks}", { networks: network.local.join(", ") })}</p>}
+                  <Textarea rows={4} value={access} onChange={(e) => setAccess(e.target.value)} placeholder={"203.0.113.7\n198.51.100.0/24"}
+                    aria-label={t("Allowed IP addresses or networks, one per line")} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="primary" disabled={!accessChanged || !!busy}
+                      onClick={() => run("access", () => api("/supabase/studio-access", { method: "PUT", body: { networks: accessList } }), t("Studio access updated."))}>
+                      {busy === "access" ? <Spinner /> : null}{t("Save")}
+                    </Button>
+                    {network && !accessList.includes(network.you) && (
+                      <Button variant="ghost" onClick={() => setAccess([...accessList, network.you].join("\n"))}>{t("Add my IP ({ip})", { ip: network.you })}</Button>
+                    )}
+                    <span className="text-xs text-zinc-500">{t("One IP or network per line, such as 203.0.113.7 or 198.51.100.0/24.")}</span>
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {creds && (
+              <Card title={inst.domain ? t("Studio sign-in") : t("Studio (private)")}>
+                <div className="space-y-3 text-sm">
+                  <p className="text-zinc-500">{inst.domain ? t("From anywhere else, through an SSH tunnel:") : t("Studio is not exposed to the internet. From your computer:")}</p>
                   <CopyCode text={creds.studio.tunnel} />
                   <p className="text-zinc-500">{t("then open {url} and sign in:", { url: creds.studio.url })}</p>
                   <div className="grid gap-3 sm:grid-cols-2">

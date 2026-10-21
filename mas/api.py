@@ -178,6 +178,11 @@ def create_app(
                       "WHERE status IN ('queued', 'building')")
             c.execute("UPDATE supabase SET status = 'failed', error = 'interrupted (Mas restarted)' "
                       "WHERE status = 'installing'")
+        if background:
+            try:  # an update may change how the Supabase site is rendered (Studio access)
+                await asyncio.to_thread(supabase.refresh_vhost)
+            except Exception:  # noqa: BLE001 - the dashboard must start anyway
+                log.exception("could not refresh the Supabase nginx site")
         task = asyncio.create_task(scan_loop()) if background else None
         yield
         if task:
@@ -485,7 +490,7 @@ def create_app(
     api_dns.register(app, host=host, config=config, db=db, current_session=current_session, deployer=deployer,
                      opener=ovh_opener)
     api_supabase.register(app, host=host, db=db, current_session=current_session, deployer=deployer,
-                          manager=supabase, appdb=appdb)
+                          manager=supabase, appdb=appdb, client_ip=client_ip)
     app.state.appdb = appdb
     api_stacks.register(app, db=db, current_session=current_session, manager=stacks)
     app.state.stacks = stacks

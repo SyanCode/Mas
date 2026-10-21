@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 MIGRATIONS = [
     ("supabase", "components TEXT"),  # JSON list of enabled optional components
+    ("supabase", "studio_access TEXT"),  # JSON list of IPs / networks allowed to open Studio (besides the LAN)
     ("users", "role TEXT NOT NULL DEFAULT 'admin'"),  # admin | editor (CMS only)
     ("apps", "extra_ports TEXT"),  # load balancing: JSON ports of instances 2..N on this server
     ("apps", "backends TEXT"),     # load balancing: JSON ["host:port"] of servers outside Mas
@@ -351,7 +352,8 @@ class Database:
         return dict(row) if row else None
 
     def save_supabase(self, instance_id: str, **fields: Any) -> None:
-        allowed = {"status", "domain", "dir", "ports", "secrets", "ref", "error", "last_backup", "components"}
+        allowed = {"status", "domain", "dir", "ports", "secrets", "ref", "error", "last_backup", "components",
+                   "studio_access"}
         if not set(fields) <= allowed:
             raise ValueError(f"invalid supabase fields: {set(fields) - allowed}")
         with self.tx() as c:

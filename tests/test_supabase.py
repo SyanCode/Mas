@@ -27,8 +27,11 @@ from mas.supabase import (
     SupabaseManager,
     apply_profile,
     bind_loopback,
+    LOCAL_NETWORKS,
+    SupabaseError,
     estimate_ram,
     generate_secrets,
+    normalize_networks,
     parse_mem,
     render_env,
 )
@@ -149,7 +152,12 @@ def test_parse_docker_memory():
 def test_only_the_public_api_is_proxied():
     body = templates.supabase_body(7100, "/srv/mas/pages")
     assert "location ~ ^/(rest|auth|realtime|storage|functions|graphql)/v1/" in body
-    assert "location / {\n        return 404;" in body  # Studio / pg-meta stay private
+    studio = body[body.index("location / {"):]
+    assert "deny all;" in studio and "allow" not in studio  # without addresses Studio answers nobody
+    body = templates.supabase_body(7100, "/srv/mas/pages", ["192.168.0.0/16", "203.0.113.7"])
+    studio = body[body.index("location / {"):]
+    assert studio.index("allow 192.168.0.0/16;") < studio.index("allow 203.0.113.7;") < studio.index("deny all;")
+    assert "proxy_pass http://127.0.0.1:7100;" in studio
 
 
 @pytest.fixture
@@ -286,3 +294,28 @@ def test_restart_marks_an_interrupted_install_failed(tmp_path):
         pass
     inst = db.get_supabase("supabase")
     assert inst["status"] == "failed" and "interrupted" in inst["error"]
+
+
+def test_normalize_networks():
+    assert normalize_networks([" 203.0.113.7 ", "203.0.113.7/32", "198.51.100.9/24", "2001:db8::1/64", ""]) == [
+        "203.0.113.7", "198.51.100.0/24", "2001:db8::/64"]
+    for bad in (["nope"], ["0.0.0.0/0"], ["::/0"], [f"10.0.{i}.1" for i in range(51)]):
+        with pytest.raises(SupabaseError):
+            normalize_networks(bad)
+
+
+def test_studio_access_rewrites_the_vhost(manager):
+    mgr, host, db = manager
+    db.save_supabase("supabase", status="running", dir=mgr.dir, domain="db.example.com",
+                     ports=json.dumps({"kong_http": 7100}))
+    assert mgr.set_studio_access(["203.0.113.7"]) == ["203.0.113.7"]
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-supabase.conf")
+    for net in [*LOCAL_NETWORKS, "203.0.113.7"]:
+        assert f"allow {net};" in vhost
+    assert "allow 127.0.0.1;" not in vhost  # a local reverse proxy would let everybody in
+    assert mgr.studio_access(mgr.get()) == ["203.0.113.7"]
+    mgr.set_studio_access([])
+    assert "203.0.113.7" not in host.read_text("/etc/nginx/sites-available/mas-app-supabase.conf")
+    host.write_text("/etc/nginx/sites-available/mas-app-supabase.conf", "old site from an older Mas")
+    mgr.refresh_vhost()  # at startup
+    assert "allow 192.168.0.0/16;" in host.read_text("/etc/nginx/sites-available/mas-app-supabase.conf")
