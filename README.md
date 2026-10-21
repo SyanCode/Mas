@@ -278,43 +278,47 @@ Restore a backup: `docker cp <file> supabase-db:/tmp/r.dump && docker exec supab
 
 ### CMS for your clients
 
-Host client sites with Mas and let each client edit their own content, without giving them access
-to the server or the code. The CMS is git-based: the repository declares what can be edited, the
-client fills a form in the dashboard, and Mas commits the change to the deployed branch, which
-redeploys the site.
+Host client sites with Mas and let each client edit their own content (texts, images, articles),
+without giving them access to the server or the code. The site keeps its design: the repository
+declares what can be edited in **`mas.cms.json`**, the client fills forms in the dashboard, and Mas
+writes the values, as a commit on the deployed branch (which redeploys the site) or, for collections
+stored in Supabase, as table rows online at once.
 
-1. Add `mas.cms.json` at the root of the repository. Each page is one JSON file your site reads at
-   build time (`import home from "./content/home.json"`, `fetch`, a static-site generator data
-   file…). The **CMS** card of the app can write it for you: it lists the JSON content files of
-   the repository (tooling files such as `package.json` or `tsconfig.json` are ignored), guesses a
-   field for each value (text, long text, markdown, image path, color, date, email, link, number,
-   yes/no, lists of objects), shows what it left out (nested objects, lists of plain values), and
-   commits the file once you have reviewed it. By hand, it looks like this:
+**→ The full reference is [docs/cms.md](docs/cms.md)**: pages, collections (articles, news…),
+field types, git or Supabase storage, how the site reads its content, and a checklist.
 
-   ```json
-   {
-     "pages": [{
-       "id": "home", "label": "Home page", "file": "content/home.json",
-       "fields": [
-         { "key": "title", "type": "text", "label": "Title", "max": 80, "required": true },
-         { "key": "intro", "type": "markdown", "max": 2000 },
-         { "key": "hero", "type": "image", "dir": "public/uploads", "url": "/uploads", "max_kb": 2048 },
-         { "key": "phone", "type": "text", "max": 20 },
-         { "key": "services", "type": "list", "item_label": "Service", "max_items": 8,
-           "fields": [
-             { "key": "name", "type": "text", "required": true },
-             { "key": "price", "type": "number", "min": 0 }
-           ] }
-       ]
-     }]
-   }
-   ```
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/SyanCode/Mas/main/schema/mas.cms.schema.json",
+  "pages": [{ "id": "home", "label": "Home page", "file": "content/home.json",
+              "fields": [{ "key": "title", "type": "text", "max": 80, "required": true },
+                         { "key": "hero", "type": "image" }] }],
+  "collections": [{ "id": "articles", "label": "Articles", "dir": "content/articles",
+                    "fields": [{ "key": "title" }, { "key": "date", "type": "date" },
+                               { "key": "body", "type": "markdown" }] }]
+}
+```
 
-   Field types: `text`, `textarea`, `markdown`, `number` (`min`, `max`, `integer`), `boolean`,
-   `select` (`options`), `url`, `email`, `date`, `color`, `image` (`dir` in the repository, `url`
-   as the site serves it, `max_kb`) and `list` (of the other types, `min_items`, `max_items`).
-   Every field takes `label`, `help`, `required` and `placeholder`.
-2. Give your client an account, in **Settings → People**, one of three ways:
+**Making a site Mas compatible.** With Claude Code, install the plugin of this repository once,
+then ask for it in plain words in the site's project:
+
+```
+/plugin marketplace add SyanCode/Mas
+/plugin install mas-cms@mas
+
+Rends ce site compatible Mas
+```
+
+Claude moves the editable content into JSON files, writes `mas.cms.json`, wires the site to it
+without touching its design and checks the result with the plugin's `check.py`. By hand: follow the
+[checklist](docs/cms.md#making-a-site-compatible-checklist), and start `mas.cms.json` with the
+`$schema` line above for completion in your editor. The **CMS** card of an app can also write
+`mas.cms.json` from the JSON files already in the repository.
+
+In **Apps → New app**, a repository with a valid `mas.cms.json` shows a **Mas compatible** badge (or
+*invalid mas.cms.json* with the reason when hovered). Then:
+
+1. Give your client an account, in **Settings → People**, one of three ways:
    - **Invitation link** (simplest): pick the sites, send the link. It works once, for 7 days,
      even when sign-up is closed; the client chooses a username and a password and lands on
      their site. Only a hash of the link is stored, and pending links can be revoked.
@@ -324,118 +328,20 @@ redeploys the site.
    - **New editor**: you choose the username, Mas generates a password shown once.
 
    **Sites** on each editor chooses which apps it may edit; the app page has the same switch in
-   its **CMS** card, which also checks the schema.
-3. The client signs in to the same dashboard and only sees **My sites** and **Account** (password,
+   its **CMS** card, which also checks the schema (and, for Supabase collections, creates the table).
+2. The client signs in to the same dashboard and only sees **My sites** and **Account** (password,
    2FA). Every other API route answers `403` for an editor.
 
 What keeps the site safe: the schema is always read from the repository (never from the browser);
-only the declared fields of the declared JSON files are written, and keys the schema does not know
-are kept untouched; values are checked server-side (length, type, allowed choices, links limited
-to `https://`, `/`, `mailto:` and `tel:`, no control characters); `.git/`, `.github/` and
-`mas.cms.json` itself cannot be targeted; images are checked by their content (PNG, JPEG, GIF,
-WebP, AVIF; no SVG) and get a fresh file name. Each save is a single commit (`cms(home): …
-Edited by <editor>`) on top of the version the editor opened: if someone pushed meanwhile, the
-editor is asked to reload instead of overwriting. Undo a change with `git revert` or roll back
-the deployment in Mas.
-
-#### Articles (and other collections)
-
-A page is one fixed file; a **collection** is a folder of entries the client adds, edits and
-deletes: blog articles, news, projects, recipes… Mas only manages the content. The site decides
-how it looks: the three latest on the home page, a page with all of them, one page per article.
-
-```json
-{
-  "pages": [ … ],
-  "collections": [{
-    "id": "articles", "label": "Articles", "item_label": "Article",
-    "dir": "content/articles",
-    "fields": [
-      { "key": "title", "type": "text", "max": 120 },
-      { "key": "date", "type": "date", "required": true },
-      { "key": "cover", "type": "image", "dir": "public/uploads", "url": "/uploads" },
-      { "key": "excerpt", "type": "textarea", "max": 300 },
-      { "key": "body", "type": "markdown" }
-    ]
-  }]
-}
-```
-
-Fields are the same as for pages. Optional settings: `title_field` (the name of each entry,
-default the first `text` field, always required), `sort_field` (default the first `date` field),
-`index_fields` (what goes in the index, default every field except `markdown` ones),
-`max_entries` (default 1000) and `description`.
-
-What Mas writes in the repository, in one commit per change:
-
-- `content/articles/<slug>.json`: one article, with its `slug`. The slug comes from the title
-  (`Été à Paris` → `ete-a-paris`, `-2` if it is taken) or is chosen by the client, and it never
-  changes afterwards, so links keep working.
-- `content/articles/index.json`: every article **newest first** (on `sort_field`), with its `slug`
-  and the `index_fields`, without the markdown body. Articles added by hand in the folder are
-  picked up the next time the client publishes.
-
-Your site reads them at build time, like any page:
-
-```js
-// Next.js / Astro / Vite: the home page shows the 3 latest, /blog shows them all
-import articles from "../content/articles/index.json";
-const latest = articles.slice(0, 3);          // [{ slug, title, date, cover, excerpt }, …]
-
-// /blog/[slug]: one page per article
-export function generateStaticParams() { return articles.map((a) => ({ slug: a.slug })); }
-const article = (await import(`../content/articles/${slug}.json`)).default; // { slug, title, body, … }
-```
-
-```php
-<?php // PHP: same files, no build step
-$articles = json_decode(file_get_contents(__DIR__ . "/content/articles/index.json"), true);
-foreach (array_slice($articles, 0, 3) as $a) { /* your markup */ }
-```
-
-A static site can `fetch("/content/articles/index.json")` if that folder is served. Render `body`
-with the markdown library of your choice. Commit an `index.json` holding `[]` with the schema, so
-the site builds before the first article is written.
-
-#### Articles in Supabase
-
-With `"storage": "supabase"`, a collection lives in a Supabase table instead of the repository: a
-change is online as soon as the client clicks **Publish**, with no commit and no rebuild, and the
-site can query it (filter, paginate, search).
-
-```json
-{ "id": "articles", "label": "Articles", "storage": "supabase", "table": "articles",
-  "fields": [ …same fields… ] }
-```
-
-- **Which Supabase**: the one in the app's environment (`SUPABASE_URL` and
-  `SUPABASE_SERVICE_ROLE_KEY`, set by **Connect Supabase** or by hand for a supabase.com project),
-  otherwise the Supabase deployed by Mas on this server. The service_role key never leaves Mas.
-- **The table** (`table`, default the collection id): one column per field (`text`, `date`,
-  `double precision` or `bigint`, `boolean`, `jsonb` for lists), plus `slug` (primary key),
-  `created_at` and `updated_at`. Row level security is on: anyone can read, only Mas writes. The
-  **CMS** card of the app shows the SQL and, for the Supabase of this server, a **Create the table**
-  button (run it again after adding fields: it only adds the missing columns). With storage
-  `supabase`, field keys are lowercase with `_` (they are column names).
-- **Images** go to the public Storage bucket `mas-cms` (created on the first upload), under the
-  collection id; the content keeps their full public URL.
-- Concurrent edits are caught with `updated_at`: an editor working on an old version is asked to
-  reload instead of overwriting.
-
-The site reads the table with its anon key, at runtime:
-
-```js
-import { createClient } from "@supabase/supabase-js";
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
-
-// home page: the 3 latest
-const { data: latest } = await supabase.from("articles")
-  .select("slug, title, date, cover, excerpt").order("date", { ascending: false }).limit(3);
-// one article
-const { data: article } = await supabase.from("articles").select("*").eq("slug", slug).single();
-```
-
-Render those pages on request (or revalidate them), not only at build time, to see changes at once.
+only the declared fields of the declared files (or tables) are written, and keys the schema does not
+know are kept untouched; values are checked server-side (length, type, allowed choices, links
+limited to `https://`, `/`, `#`, `mailto:` and `tel:`, no control characters); `.git/`, `.github/`
+and `mas.cms.json` itself cannot be targeted; images are checked by their content (PNG, JPEG, GIF,
+WebP, AVIF; no SVG) and get a fresh file name. Each save is a single commit (`cms(home): … Edited
+by <editor>`) on top of the version the editor opened: if someone changed it meanwhile, the editor
+is asked to reload instead of overwriting. Undo a change with `git revert` or roll back the
+deployment in Mas. Supabase collections are written with the service_role key, which never leaves
+Mas; the site reads them with its anon key (row level security: read only).
 
 ### Load balancing
 

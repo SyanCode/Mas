@@ -632,3 +632,53 @@ def test_supabase_of_this_server(env):
     host._commands["docker exec supabase-db psql *"] = {"returncode": 1, "stderr": "ERROR: boom"}
     r = client.post("/api/apps/site/cms/collections/news/table", headers=h)
     assert r.status_code == 400 and "boom" in r.json()["detail"]
+
+
+def test_repository_compatibility_badge(env):
+    client, _, _ = env
+    files = {"acme/blog": json.dumps(SCHEMA).encode(), "acme/news": json.dumps(SUPABASE_SCHEMA).encode(),
+             "acme/broken": b'{"pages": []}'}
+    reads = []
+
+    class Repos:
+        def read_file(self, installation_id, repo, path, ref):
+            reads.append(repo)
+            if repo == "acme/down":
+                raise GitHubError("GitHub API GET contents: HTTP 502")
+            assert path == "mas.cms.json" and ref == "main"
+            return (files[repo], "sha") if repo in files else (None, None)
+
+    client.app.state.cms.github = lambda: Repos()
+    h = {"x-csrf-token": login(client)}
+    names = ["acme/blog", "acme/news", "acme/broken", "acme/plain", "acme/down"]
+    body = {"repos": [{"full_name": n, "installation_id": 7, "default_branch": "main"} for n in names]}
+    r = client.post("/api/cms/compatibility", json=body, headers=h)
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert got["acme/blog"] == {"compatible": True, "pages": 1, "collections": 1, "storage": ["git"], "error": None}
+    assert got["acme/news"]["compatible"] and got["acme/news"]["storage"] == ["supabase"]
+    assert not got["acme/broken"]["compatible"] and "pages" in got["acme/broken"]["error"]
+    assert got["acme/plain"] == {"compatible": False, "pages": 0, "collections": 0, "storage": [], "error": None}
+    assert not got["acme/down"]["compatible"]
+    reads.clear()
+    client.post("/api/cms/compatibility", json=body, headers=h)
+    assert reads == ["acme/down"]  # answers are cached, failures are not
+    bad = {"repos": [{"full_name": "../etc", "installation_id": 7, "default_branch": "main"}]}
+    assert client.post("/api/cms/compatibility", json=bad, headers=h).status_code == 422
+
+
+def test_json_schema_for_editors_matches_mas():
+    """schema/mas.cms.schema.json (completion in the developer's editor) follows parse_schema."""
+    from pathlib import Path
+
+    from mas.cms import SCALAR_TYPES
+    spec = json.loads((Path(__file__).resolve().parent.parent / "schema" / "mas.cms.schema.json").read_text("utf-8"))
+    assert set(spec["definitions"]["field"]["properties"]["type"]["enum"]) == SCALAR_TYPES | {"list"}
+    jsonschema = pytest.importorskip("jsonschema")
+    for good in (SCHEMA, SUPABASE_SCHEMA, {"$schema": spec["$id"], **SCHEMA}):
+        jsonschema.validate(good, spec)
+    for bad in ({"pages": []}, {"collections": [{"id": "a", "fields": [{"key": "t"}]}]},
+                {"collections": [{"id": "a", "storage": "supabase", "fields": [{"key": "Title"}]}]},
+                {"pages": [{"id": "x", "file": "../a.json", "fields": [{"key": "a"}]}]}):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, spec)

@@ -254,7 +254,10 @@ interface CmsInfo {
   editors: { id: number; username: string; allowed: boolean }[];
 }
 
+const CMS_DOCS = "https://github.com/SyanCode/Mas/blob/main/docs/cms.md";
+
 const CMS_EXAMPLE = `{
+  "$schema": "https://raw.githubusercontent.com/SyanCode/Mas/main/schema/mas.cms.schema.json",
   "pages": [{
     "id": "home", "label": "Home page", "file": "content/home.json",
     "fields": [
@@ -423,6 +426,7 @@ function CmsCard({ appId }: { appId: string }) {
                 <summary className="cursor-pointer">{t("Or write it by hand")}</summary>
                 <pre className="mono mt-2 overflow-auto rounded-lg bg-black/40 p-3 text-[11px] leading-relaxed text-zinc-300">{CMS_EXAMPLE}</pre>
               </details>
+              <a href={CMS_DOCS} target="_blank" rel="noreferrer" className="inline-block text-xs text-indigo-500 hover:underline">{t("mas.cms.json reference")} ↗</a>
             </div>
           )}
           <div className="space-y-1.5 border-t border-zinc-200/80 pt-3 dark:border-white/[0.06]">

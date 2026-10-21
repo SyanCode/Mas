@@ -1,0 +1,119 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/SyanCode/Mas/main/schema/mas.cms.schema.json",
+  "title": "Mas CMS",
+  "description": "What the clients of this site can edit from the Mas CMS. Add \"$schema\" with this URL to mas.cms.json for completion and checks in your editor.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "pages": {
+      "description": "Fixed pages: one JSON file each, read by the site.",
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/definitions/page" }
+    },
+    "collections": {
+      "description": "Entries the client adds and deletes: articles, news, projects…",
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/definitions/collection" }
+    }
+  },
+  "anyOf": [
+    { "required": ["pages"], "properties": { "pages": { "minItems": 1 } } },
+    { "required": ["collections"], "properties": { "collections": { "minItems": 1 } } }
+  ],
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$" },
+    "path": {
+      "type": "string",
+      "description": "Relative path inside the repository (not .git/, .github/ or mas.cms.json).",
+      "pattern": "^(?!/)(?!\\.git/)(?!\\.github/)(?!.*(^|/)\\.\\.?(/|$)).+$"
+    },
+    "page": {
+      "type": "object",
+      "required": ["id", "file", "fields"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "label": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "file": { "allOf": [{ "$ref": "#/definitions/path" }, { "pattern": "\\.json$" }] },
+        "fields": { "$ref": "#/definitions/fields" }
+      },
+      "additionalProperties": false
+    },
+    "collection": {
+      "type": "object",
+      "required": ["id", "fields"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "label": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "item_label": { "type": "string", "maxLength": 60, "description": "Name of one entry: Article." },
+        "storage": {
+          "enum": ["git", "supabase"],
+          "default": "git",
+          "description": "git: <dir>/<slug>.json and <dir>/index.json in the repository (rebuilds the site). supabase: one row per entry in a table, online at once."
+        },
+        "dir": { "$ref": "#/definitions/path", "description": "Folder of the entries (storage git)." },
+        "table": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$", "description": "Table name (storage supabase), default the id." },
+        "title_field": { "type": "string", "description": "Text field naming each entry, default the first text field." },
+        "sort_field": { "type": "string", "description": "Newest first on this field, default the first date field." },
+        "index_fields": { "type": "array", "items": { "type": "string" }, "description": "Fields in the index, default all but markdown." },
+        "max_entries": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "fields": { "$ref": "#/definitions/fields" }
+      },
+      "if": { "properties": { "storage": { "const": "supabase" } }, "required": ["storage"] },
+      "then": {
+        "properties": {
+          "fields": { "items": { "properties": { "key": { "pattern": "^[a-z_][a-z0-9_]{0,62}$", "not": { "enum": ["slug", "created_at", "updated_at"] } } } } }
+        }
+      },
+      "else": { "required": ["dir"] },
+      "additionalProperties": false
+    },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": { "$ref": "#/definitions/field" }
+    },
+    "field": {
+      "type": "object",
+      "required": ["key"],
+      "properties": {
+        "key": { "$ref": "#/definitions/id" },
+        "type": {
+          "enum": ["text", "textarea", "markdown", "number", "boolean", "select", "url", "email", "date", "color", "image", "list"],
+          "default": "text"
+        },
+        "label": { "type": "string", "maxLength": 100 },
+        "help": { "type": "string", "maxLength": 300 },
+        "placeholder": { "type": "string", "maxLength": 200 },
+        "required": { "type": "boolean" },
+        "min": { "type": "number", "description": "text, textarea, markdown: characters. number: smallest value." },
+        "max": { "type": "number", "description": "text, textarea, markdown: characters (200, 2000, 20000 by default). number: largest value." },
+        "integer": { "type": "boolean", "description": "number: whole numbers only." },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "description": "select: the choices.",
+          "items": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "object", "required": ["value"], "properties": { "value": { "type": "string" }, "label": { "type": "string" } } }
+            ]
+          }
+        },
+        "dir": { "$ref": "#/definitions/path", "description": "image: folder in the repository (public/uploads)." },
+        "url": { "type": "string", "pattern": "^/[A-Za-z0-9._/-]*$", "description": "image: the same folder as the site serves it (/uploads)." },
+        "max_kb": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/field" }, "description": "list: fields of each item (no list inside a list)." },
+        "min_items": { "type": "integer", "minimum": 0 },
+        "max_items": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "item_label": { "type": "string", "maxLength": 60 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

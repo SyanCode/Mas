@@ -4,11 +4,23 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
-import { Button, Card, ErrorText, Input, PageHeader } from "@/components/ui";
-import { api, ApiError, SERVICE_TYPES, type App, type Repo } from "@/lib/api";
+import { Badge, Button, Card, ErrorText, Input, PageHeader } from "@/components/ui";
+import { api, ApiError, SERVICE_TYPES, type App, type CmsCompat, type Repo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
 const DEPLOYABLE = SERVICE_TYPES.filter((type) => type !== "unknown");
+function CompatBadge({ compat }: { compat?: CmsCompat }) {
+  const t = useT();
+  if (!compat || (!compat.compatible && !compat.error)) return null;
+  if (!compat.compatible) return <span title={compat.error ?? ""}><Badge tone="amber">{t("invalid mas.cms.json")}</Badge></span>;
+  const what = [
+    compat.pages ? t("{n} page(s)", { n: compat.pages }) : "",
+    compat.collections ? t("{n} collection(s)", { n: compat.collections }) : "",
+    compat.storage.includes("supabase") ? "Supabase" : "",
+  ].filter(Boolean).join(" · ");
+  return <span title={what}><Badge tone="emerald">{t("Mas compatible")}</Badge></span>;
+}
+
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24);
 
 function NewApp() {
@@ -31,6 +43,7 @@ function NewApp() {
   const [detecting, setDetecting] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [compat, setCompat] = useState<Record<string, CmsCompat>>({});
 
   useEffect(() => {
     api<Repo[]>("/github/repos").then(setRepos).catch((e: ApiError) => setError(e.detail));
@@ -59,6 +72,19 @@ function NewApp() {
     () => (repos ?? []).filter((r) => r.full_name.toLowerCase().includes(filter.toLowerCase())).slice(0, 50),
     [repos, filter],
   );
+
+  // Badge "Mas compatible" on the repositories shown (a valid mas.cms.json on their default branch).
+  useEffect(() => {
+    const missing = shown.filter((r) => !(r.full_name in compat));
+    if (!missing.length) return;
+    const timer = setTimeout(() => {
+      api<Record<string, CmsCompat>>("/cms/compatibility", {
+        method: "POST",
+        body: { repos: missing.map((r) => ({ full_name: r.full_name, installation_id: r.installation_id, default_branch: r.default_branch })) },
+      }).then((found) => setCompat((c) => ({ ...c, ...found }))).catch(() => {});
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [shown, compat]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -101,8 +127,8 @@ function NewApp() {
           {shown.map((r) => (
             <li key={r.full_name}>
               <button onClick={() => setRepo(r)} className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
-                <span className="font-medium">{r.full_name}</span>
-                <span className="text-xs text-zinc-500">{r.private ? t("private") : t("public")} · {r.default_branch}</span>
+                <span className="flex min-w-0 items-center gap-2"><span className="truncate font-medium">{r.full_name}</span><CompatBadge compat={compat[r.full_name]} /></span>
+                <span className="shrink-0 text-xs text-zinc-500">{r.private ? t("private") : t("public")} · {r.default_branch}</span>
               </button>
             </li>
           ))}
@@ -124,6 +150,12 @@ function NewApp() {
     <form onSubmit={submit} className="space-y-4">
       <button type="button" onClick={() => setRepo(null)} className="text-sm text-zinc-500 hover:underline">← {t("Repositories")}</button>
       <PageHeader eyebrow={t("New app")} title={repo.full_name} subtitle={t("Review the settings, then deploy.")} />
+      {compat[repo.full_name]?.compatible && (
+        <div className="glass flex items-center gap-3 rounded-xl px-4 py-3 text-sm">
+          <CompatBadge compat={compat[repo.full_name]} />
+          <span className="text-zinc-500">{t("This site is ready for the CMS: once deployed, give your client access from the CMS card of the app.")}</span>
+        </div>
+      )}
       <Card title={t("Basics")}>
         <div className="grid gap-3 text-sm sm:grid-cols-2">
           <label className="space-y-1">

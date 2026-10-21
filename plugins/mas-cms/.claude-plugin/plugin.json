@@ -1,0 +1,9 @@
+{
+  "name": "mas-cms",
+  "version": "1.0.0",
+  "description": "Make a website editable from the Mas CMS: content in JSON files or Supabase, mas.cms.json written and checked.",
+  "author": { "name": "SyanCode" },
+  "homepage": "https://github.com/SyanCode/Mas/blob/main/docs/cms.md",
+  "repository": "https://github.com/SyanCode/Mas",
+  "license": "MIT"
+}

@@ -47,6 +47,17 @@ class SaveBody(BaseModel):
     note: str = Field(default="", max_length=200)
 
 
+class RepoRef(BaseModel):
+    full_name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]*[A-Za-z0-9_-][A-Za-z0-9_.-]*$",
+                           max_length=200)
+    installation_id: int
+    default_branch: str = Field(min_length=1, max_length=255)
+
+
+class ReposBody(BaseModel):
+    repos: list[RepoRef] = Field(max_length=50)
+
+
 class NewEntryBody(BaseModel):
     values: dict
     slug: str | None = Field(default=None, max_length=80)  # address wanted, otherwise from the title
@@ -193,6 +204,11 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         result = await asyncio.to_thread(call, manager.write_schema, app_id, body.schema_, s.username)
         db.audit(s.username, "cms-schema", True, service_id=app_id, detail=result["commit"][:7])
         return result
+
+    @app.post("/api/cms/compatibility")
+    async def compatibility(body: ReposBody, _=Depends(current_session)) -> dict:
+        """Repositories with a valid mas.cms.json (badge in the repository list)."""
+        return await asyncio.to_thread(call, manager.compatibility, [r.model_dump() for r in body.repos])
 
     @app.post("/api/apps/{app_id}/cms/collections/{cid}/table")
     async def create_table(app_id: str, cid: str, s=Depends(current_session)) -> dict:

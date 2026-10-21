@@ -38,6 +38,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -49,6 +50,7 @@ from mas.supabase import SupabaseError
 log = logging.getLogger(__name__)
 
 SCHEMA_FILE = "mas.cms.json"
+SCHEMA_URL = "https://raw.githubusercontent.com/SyanCode/Mas/main/schema/mas.cms.schema.json"  # editor completion
 KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
 FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}$")
 URL_PREFIX_RE = re.compile(r"^/[A-Za-z0-9._/-]*$")
@@ -68,6 +70,7 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SLUG_MAX = 80
 MAX_UPLOAD_KB = 8192
 UPLOAD_TTL = 24 * 3600
+COMPAT_TTL = 600  # compatibility of a repository, cached 10 minutes
 FORBIDDEN_DIRS = (".git", ".github")
 IMAGE_MIME = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
               "avif": "image/avif"}
@@ -576,6 +579,7 @@ class CmsManager:
         self.staging = Path(data_dir) / "cms-uploads"
         self._locks: dict[str, threading.Lock] = {}
         self._schemas: dict[str, tuple[float, str, dict]] = {}
+        self._compat: dict[str, tuple[float, dict]] = {}
 
     def _store(self, app: dict) -> cms_supabase.SupabaseStore:
         """Supabase of the app: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in its environment, else this server's."""
@@ -980,6 +984,36 @@ class CmsManager:
                 f"{c['dir']}/{INDEX_FILE}": dump_json([e for e in index if e["slug"] != slug])}
             return self._commit(gh, app, changes, f"cms({cid})", "", f"delete {title}", username, head, [])
 
+    # -- compatibility (repository list) -----------------------------------------
+
+    def compatibility(self, repos: list[dict]) -> dict[str, dict]:
+        """Which repositories are ready for the CMS: a valid mas.cms.json on their default branch."""
+        gh = self.github()
+        if gh is None:
+            raise CmsError("GitHub is not connected (Settings → GitHub)")
+
+        def one(r: dict) -> tuple[str, dict]:
+            key = f"{r['full_name']}@{r['default_branch']}"
+            cached = self._compat.get(key)
+            if cached and cached[0] > time.time():
+                return r["full_name"], cached[1]
+            out: dict = {"compatible": False, "pages": 0, "collections": 0, "storage": [], "error": None}
+            try:
+                raw, _ = gh.read_file(r["installation_id"], r["full_name"], SCHEMA_FILE, r["default_branch"])
+                if raw is not None:
+                    schema = parse_schema(raw)
+                    out.update(compatible=True, pages=len(schema["pages"]), collections=len(schema["collections"]),
+                               storage=sorted({c["storage"] for c in schema["collections"]}))
+            except CmsError as exc:
+                out["error"] = str(exc)
+            except GitHubError:
+                return r["full_name"], out  # not cached: GitHub may answer next time
+            self._compat[key] = (time.time() + COMPAT_TTL, out)
+            return r["full_name"], out
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            return dict(pool.map(one, repos))
+
     # -- schema generation (administrators) ------------------------------------
 
     def candidates(self, app_id: str) -> dict:
@@ -1031,6 +1065,7 @@ class CmsManager:
         except GitHubError as exc:
             raise CmsError(str(exc)) from None
         schema, notes = infer_schema(contents, self._image_dirs(app))
+        schema = {"$schema": SCHEMA_URL, **schema}
         kept, _ = self._kept_collections(gh, app, head)
         if kept:
             schema["collections"] = kept

@@ -509,5 +509,9 @@
   "Create the table": "Tabelle anlegen",
   "Update the table": "Tabelle aktualisieren",
   "SQL run by Mas": "Von Mas ausgeführtes SQL",
-  "Run this SQL in the SQL editor of your Supabase project (again after adding fields)": "Führe dieses SQL im SQL-Editor deines Supabase-Projekts aus (nach dem Hinzufügen von Feldern erneut)"
+  "Run this SQL in the SQL editor of your Supabase project (again after adding fields)": "Führe dieses SQL im SQL-Editor deines Supabase-Projekts aus (nach dem Hinzufügen von Feldern erneut)",
+  "invalid mas.cms.json": "ungültige mas.cms.json",
+  "Mas compatible": "Mas-kompatibel",
+  "This site is ready for the CMS: once deployed, give your client access from the CMS card of the app.": "Diese Website ist bereit für das CMS: Gib deinem Kunden nach dem Deployment Zugriff über die CMS-Karte der App.",
+  "mas.cms.json reference": "Referenz zu mas.cms.json"
 }

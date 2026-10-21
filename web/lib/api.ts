@@ -92,6 +92,15 @@ export interface CmsPage {
   sha: string | null;
 }
 
+/** A repository with a valid mas.cms.json: its client can edit it from the CMS. */
+export interface CmsCompat {
+  compatible: boolean;
+  pages: number;
+  collections: number;
+  storage: ("git" | "supabase")[];
+  error: string | null;
+}
+
 export type CmsEntrySummary = { slug: string } & Record<string, unknown>;
 
 export interface CmsCollection {
