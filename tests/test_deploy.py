@@ -629,3 +629,33 @@ def test_a_failed_replacement_gives_the_site_back(env):
     assert not host.exists("/etc/nginx/sites-available/mas-app-docs.conf")  # no "unavailable" page either
     assert db.get_app("docs")["replaces"]  # the next deploy tries again
     assert "Restoring the previous site" in deployer.log_path("docs", rid).read_text()
+
+
+def test_a_node_app_with_nothing_to_start_stops_before_nginx(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    db.update_app("web", type="node")
+
+    def build_only(argv, cwd, env_vars):
+        if argv[:2] == ["git", "clone"]:
+            (Path(argv[-1]) / "package.json").write_text(json.dumps({"scripts": {"build": "node build.mjs"}}))
+
+    host.stream_hooks.append(build_only)
+    rid, ok = deploy_once(env, SHA1)
+    assert not ok and "set the type to static" in db.get_release(rid)["error"]
+
+
+def test_switching_an_app_to_static_removes_its_unit(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    deploy_once(env, SHA1)
+    assert host.exists("/etc/systemd/system/mas-app-web.service")
+    db.update_app("web", type="static", root_dir="")
+
+    def index(argv, cwd, env_vars):
+        if argv[:2] == ["git", "clone"]:
+            (Path(argv[-1]) / "index.html").write_text("<h1>hi</h1>")
+
+    host.stream_hooks.append(index)
+    rid, ok = deploy_once(env, SHA2)
+    assert ok, deployer.log_path("web", rid).read_text()
+    assert not host.exists("/etc/systemd/system/mas-app-web.service")
+    assert ["systemctl", "disable", "--now", "mas-app-web.service"] in host.executed

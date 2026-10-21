@@ -16,18 +16,24 @@ PYTHON_RUNNERS = {"gunicorn", "uvicorn", "hypercorn", "daphne", "waitress-serve"
 NODE_RUNNERS = {"node", "nodejs", "bun", "deno"}
 
 
-def _package_deps(host: Host, path: str) -> dict:
+def _package_json(host: Host, path: str) -> dict:
     try:
         pkg = json.loads(host.read_text(f"{path}/package.json") or "{}")
     except ValueError:
         return {}
-    if not isinstance(pkg, dict):
-        return {}
+    return pkg if isinstance(pkg, dict) else {}
+
+
+def package_deps(pkg: dict) -> dict:
     deps: dict = {}
     for key in ("dependencies", "devDependencies"):
         if isinstance(pkg.get(key), dict):
             deps.update(pkg[key])
     return deps
+
+
+def _package_deps(host: Host, path: str) -> dict:
+    return package_deps(_package_json(host, path))
 
 
 def _from_cmdline(cmdline: list[str]) -> ServiceType | None:
@@ -42,12 +48,20 @@ def _from_cmdline(cmdline: list[str]) -> ServiceType | None:
     return None
 
 
-def classify(files: set[str], package_deps: dict, *, fastcgi: bool = False) -> ServiceType | None:
-    """The file rules, on a set of names (a folder or a GitHub repository root)."""
+def classify(files: set[str], package_deps: dict, *, fastcgi: bool = False,
+             scripts: dict | None = None) -> ServiceType | None:
+    """The file rules, on a set of names (a folder or a GitHub repository root).
+
+    ``scripts`` (of package.json, when known): without a ``start`` script nor a server.js, nothing can run —
+    a package.json that only builds pages (``npm run build`` → dist/) is a static site."""
     if fastcgi or any(f.endswith(".php") for f in files) or "composer.json" in files:
         return ServiceType.PHP
     if "package.json" in files:
-        return ServiceType.NEXTJS if "next" in package_deps else ServiceType.NODE
+        if "next" in package_deps:
+            return ServiceType.NEXTJS
+        if scripts is not None and not scripts.get("start") and "server.js" not in files:
+            return ServiceType.STATIC
+        return ServiceType.NODE
     if "requirements.txt" in files or "pyproject.toml" in files:
         return ServiceType.PYTHON
     return None
@@ -65,6 +79,7 @@ def detect_type(
     files = set(host.listdir(path)) if path else set()
     deps = _package_deps(host, path) if "package.json" in files else {}
 
+    # No ``scripts`` here: a folder that runs (node index.js…) is a server even without a start script.
     found = classify(files, deps, fastcgi=fastcgi)
     if found:
         return found

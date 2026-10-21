@@ -508,6 +508,10 @@ class Deployer:
             if (isinstance(start, str) and start.strip() and not CONTROL_RE.search(start)
                     and not scripts.get("prestart") and not scripts.get("poststart")):
                 return templates.systemd_quote(start.strip())
+            if release and not start and not self.host.exists(f"{release}/server.js"):
+                raise DeployError("nothing to start: package.json has no start script (and there is no server.js). "
+                                  "A site that only builds pages is a static app: set the type to static and the "
+                                  "folder to serve (dist, build…) in the app settings")
             return f"{shutil.which('npm') or '/usr/bin/npm'} start"
         raise DeployError("a start command is required for python apps (e.g. .venv/bin/uvicorn main:app "
                           "--host 127.0.0.1 --port $PORT)")
@@ -520,6 +524,17 @@ class Deployer:
         if not self.host.exists(f"{rel}/out/index.html"):
             return None
         return {**app, "root_dir": "out"}
+
+    def _drop_units(self, app: dict, rlog: ReleaseLog) -> None:
+        """Units left by a former type (the app was node, it is static now): stopped and removed."""
+        paths = [unit_path(app["id"]), *self.host.glob(f"/etc/systemd/system/mas-app-{app['id']}.*.service")]
+        for path in [p for p in paths if self.host.exists(p)]:
+            unit = PurePosixPath(path).name
+            self.host.run(["systemctl", "disable", "--now", unit], timeout=120)
+            self.host.backup(path)
+            self.host.remove(path)
+            rlog.line(f"removed {unit} (nothing to run for a {app['type']} app)")
+            self.host.run(["systemctl", "daemon-reload"])
 
     def _stop_unit(self, app: dict, rlog: ReleaseLog) -> None:
         for unit, _ in app_instances(app):
@@ -918,6 +933,8 @@ class Deployer:
             rlog.line(f"{replaced} is replaced by this app; its files stay where they were")
         if export:
             self._stop_unit(app, rlog)
+        elif app_type not in PROXY_TYPES:
+            self._drop_units(app, rlog)
         if app["domain"] and self._ensure_certificate(app, rlog):  # retry if it failed while preparing
             self._install_vhost(app, app_type, paths, rlog)
         self._mark_live(app, release["id"], rel)

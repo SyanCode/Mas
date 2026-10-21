@@ -730,5 +730,6 @@
   "the folder {path} is left as it is": "la carpeta {path} se queda como está",
   "Deploy and replace the site": "Desplegar y sustituir el sitio",
   "A Mas app (deployed from GitHub, CMS) takes over its domains without interruption": "Una app de Mas (desplegada desde GitHub, con CMS) asume sus dominios sin interrupción",
-  "Replace with a Mas app": "Sustituir por una app de Mas"
+  "Replace with a Mas app": "Sustituir por una app de Mas",
+  "A site whose build only writes pages (dist/, build/…) is static.": "Un sitio cuyo build solo genera páginas (dist/, build/…) es de tipo static."
 }

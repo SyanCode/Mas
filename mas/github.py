@@ -221,14 +221,16 @@ class GitHubApp:
         listing = self._as_installation(installation_id, f"/repos/{repo}/contents?ref={ref_q}")
         names = {item["name"] for item in listing if isinstance(item, dict)}
         deps: dict = {}
+        scripts: dict | None = None
         if "package.json" in names:
             item = self._as_installation(installation_id, f"/repos/{repo}/contents/package.json?ref={ref_q}")
             try:
                 pkg = json.loads(base64.b64decode(item.get("content", "")))
                 deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+                scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
             except (ValueError, TypeError, AttributeError):
                 deps = {}
-        found = classify(names, deps)
+        found = classify(names, deps, scripts=scripts)
         if found:
             return found
         return ServiceType.STATIC if "index.html" in names or "public" in names else ServiceType.UNKNOWN

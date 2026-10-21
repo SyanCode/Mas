@@ -81,6 +81,7 @@ class AdoptService(BaseModel):
 
 class PatchApp(BaseModel):
     branch: str | None = Field(default=None, max_length=200)
+    type: ServiceType | None = None
     domain: str | None = Field(default=None, max_length=253)
     build_command: str | None = Field(default=None, max_length=1000)
     start_command: str | None = Field(default=None, max_length=1000)
@@ -421,6 +422,15 @@ def register(
         fields = {}
         for key in body.model_fields_set:
             value = getattr(body, key)
+            if key == "type":
+                if value is None or value == ServiceType.UNKNOWN:
+                    raise HTTPException(400, "choose a type")
+                if current["mode"] != "managed":
+                    raise HTTPException(400, "only the type of an app deployed by Mas can change")
+                fields["type"] = value.value
+                if value in PROXY_TYPES and not current["port"]:
+                    fields["port"] = allocate_port(host, config, db)
+                continue
             if isinstance(value, str):
                 value = value.strip() or None
             fields[key] = int(value) if key == "auto_deploy" else value

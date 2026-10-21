@@ -10,7 +10,7 @@ import {
   Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner,
   StatusDot, Terminal, Textarea,
 } from "@/components/ui";
-import { api, ApiError, timeAgo, type App, type Release } from "@/lib/api";
+import { api, ApiError, SERVICE_TYPES, timeAgo, type App, type Release } from "@/lib/api";
 import { msg, tr, useT } from "@/lib/i18n";
 
 const RUNNING = new Set(["queued", "building"]);
@@ -574,6 +574,8 @@ function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void })
   const [branch, setBranch] = useState(app.branch);
   const [buildCommand, setBuildCommand] = useState(app.build_command ?? "");
   const [startCommand, setStartCommand] = useState(app.start_command ?? "");
+  const [type, setType] = useState<string>(app.type);
+  const [rootDir, setRootDir] = useState(app.root_dir ?? "");
   const [autoDeploy, setAutoDeploy] = useState(app.auto_deploy);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
@@ -582,7 +584,11 @@ function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void })
     setMsg("");
     setError("");
     const body: Record<string, unknown> = { branch, build_command: buildCommand, auto_deploy: autoDeploy };
-    if (app.mode === "managed") body.start_command = startCommand;
+    if (app.mode === "managed") {
+      body.start_command = startCommand;
+      body.root_dir = rootDir;
+      if (type !== app.type) body.type = type;
+    }
     try {
       onSaved(await api<App>(`/apps/${encodeURIComponent(app.id)}`, { method: "PATCH", body }));
       setMsg(t("Saved. Redeploy to apply."));
@@ -597,7 +603,19 @@ function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void })
         <Label title={t("Production branch")}><Input value={branch} onChange={(e) => setBranch(e.target.value)} /></Label>
         <Label title={t("Build command")} hint={t("Empty: detected from the repository.")}><Input value={buildCommand} onChange={(e) => setBuildCommand(e.target.value)} placeholder="npm run build" className="mono text-xs" /></Label>
         {app.mode === "managed" && (
-          <Label title={t("Start command")}><Input value={startCommand} onChange={(e) => setStartCommand(e.target.value)} placeholder="next start / npm start" className="mono text-xs" /></Label>
+          <>
+            <Label title={t("Type")} hint={t("A site whose build only writes pages (dist/, build/…) is static.")}>
+              <select value={type} onChange={(e) => setType(e.target.value)} className="w-full rounded-md border border-zinc-300 bg-white px-2 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950">
+                {SERVICE_TYPES.filter((x) => x !== "unknown").map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </Label>
+            {(type === "static" || type === "php") && (
+              <Label title={t("Folder to serve (optional)")}><Input value={rootDir} onChange={(e) => setRootDir(e.target.value)} placeholder="public, dist, out…" className="mono text-xs" /></Label>
+            )}
+            {(type === "node" || type === "nextjs" || type === "python") && (
+              <Label title={t("Start command")}><Input value={startCommand} onChange={(e) => setStartCommand(e.target.value)} placeholder="next start / npm start" className="mono text-xs" /></Label>
+            )}
+          </>
         )}
         <label className="flex items-center justify-between gap-3 text-sm">
           <span>{t("Deploy on every push")}</span>

@@ -71,3 +71,13 @@ def test_read_git_packed_refs(tmp_path):
     info = read_git(h, "/repo")
     assert info.branch == "dev" and info.commit.sha == sha and info.commit.subject is None
     assert info.remote is None
+
+
+def test_a_repository_that_only_builds_pages_is_static():
+    from mas.detect_type import classify
+    files = {"package.json", "build.mjs", "src"}
+    assert classify(files, {}, scripts={"build": "node build.mjs"}) == T.STATIC
+    assert classify(files, {}, scripts={"build": "x", "start": "node server.mjs"}) == T.NODE
+    assert classify(files | {"server.js"}, {}, scripts={}) == T.NODE  # npm start runs node server.js
+    assert classify(files, {"next": "15"}, scripts={}) == T.NEXTJS
+    assert classify(files, {}) == T.NODE  # scripts unknown (a running folder): as before
