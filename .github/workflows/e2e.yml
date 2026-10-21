@@ -1,0 +1,36 @@
+name: E2E
+
+# Mas against a real Docker, Postgres and mail server (tests/e2e). The runner is a throwaway
+# Ubuntu machine with root and Docker: what the unit tests can only simulate runs for real here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Pull the images (outside the test timeouts)
+        run: |
+          for image in nginx:alpine louislam/uptime-kuma:1 postgres:15-alpine postgres:16-alpine \
+                       ghcr.io/docker-mailserver/docker-mailserver:latest; do
+            docker pull -q "$image" &
+          done
+          wait
+      - name: End-to-end tests
+        run: sudo -E env "PATH=$PATH" MAS_E2E=1 python -m pytest tests/e2e -v -rs --durations=10
