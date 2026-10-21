@@ -66,6 +66,7 @@ class Config:
     pages_dir: str = "/srv/mas/pages"  # status pages served by nginx (deploying, unavailable)
     supabase_dir: str = "/srv/mas/supabase"
     supabase_keep_backups: int = 7
+    stacks_keep_backups: int = 7  # backups kept per ready-made service
     keep_releases: int = 5
     letsencrypt_email: str | None = None
     port_min: int = 7100
@@ -130,7 +131,8 @@ def load_config(host: Host, path: str = CONFIG_PATH) -> Config:
 
     deploy = data.get("deploy", {})
     for key, typ in (("apps_dir", str), ("keep_releases", int), ("letsencrypt_email", str),
-                     ("port_min", int), ("port_max", int), ("healthcheck_timeout", int)):
+                     ("port_min", int), ("port_max", int), ("healthcheck_timeout", int),
+                     ("supabase_keep_backups", int), ("stacks_keep_backups", int)):
         if isinstance(deploy.get(key), typ):
             setattr(cfg, key, deploy[key])
     if isinstance(data.get("health", {}).get("public_ip"), str):

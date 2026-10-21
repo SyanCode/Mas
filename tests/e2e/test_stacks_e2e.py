@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from e2e_helpers import http_get, port_open, sh
 
+from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 
 def imap_login(user: str, password: str, timeout: float = 90) -> None:
@@ -61,6 +62,17 @@ def test_any_image_with_web_and_public_ports(env):
         env.deploy(stacks.update("e2e-nginx", {"env": "E2E=second"}, {}, "e2e"))
         assert stacks.exec(app, "app", ["printenv", "E2E"]).strip() == "second"
         assert "hello from mas e2e" in http_get(f"http://127.0.0.1:{app['port']}/")[1]
+
+        # backup (stopped then started again), a bad change, restore: the page is back
+        backups = StackBackups(stacks)
+        name = backups.backup("e2e-nginx")
+        assert "hello from mas e2e" in http_get("http://127.0.0.1:18089/")[1]  # running again
+        page.write_text("broken by mistake")
+        assert "broken by mistake" in http_get("http://127.0.0.1:18089/")[1]
+        backups.restore("e2e-nginx", name)
+        assert "hello from mas e2e" in http_get("http://127.0.0.1:18089/")[1]
+        aside = Path(stacks.dir("e2e-nginx"), "data.before-restore", "index.html")
+        assert aside.read_text() == "broken by mistake"
     finally:
         env.deployer.remove_app("e2e-nginx", purge_files=True)
     assert "mas-e2e-nginx" not in sh("docker", "ps", "-a", "--format", "{{.Names}}")

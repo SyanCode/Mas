@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from mas.db import Database
+from mas.stack_backups import BackupError, StackBackups
 from mas.stacks import TEMPLATES, StackError, StackManager
 
 
@@ -29,12 +30,13 @@ class ActionBody(BaseModel):
     values: dict = Field(default_factory=dict)
 
 
-def register(app: FastAPI, *, db: Database, current_session: Callable, manager: StackManager) -> None:
+def register(app: FastAPI, *, db: Database, current_session: Callable, manager: StackManager,
+             backups: StackBackups) -> None:
 
     def call(fn, *args):
         try:
             return fn(*args)
-        except StackError as exc:
+        except (StackError, BackupError) as exc:
             raise HTTPException(400, str(exc)) from None
 
     def stack_app(app_id: str) -> dict:
@@ -78,6 +80,24 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, manager: 
             raise
         db.audit(s.username, f"stack-{action}", True, service_id=app_id)
         return {"output": output}
+
+    # -- backups (before /stack/{op}, which would take "backups" for an action) --------
+
+    @app.get("/api/apps/{app_id}/stack/backups")
+    def list_backups(app_id: str, _=Depends(current_session)) -> dict:
+        stack_app(app_id)
+        return {"backups": backups.list(app_id), "job": backups.jobs.get(app_id), "folder": str(backups.dir(app_id)),
+                "keep": backups.keep}
+
+    @app.post("/api/apps/{app_id}/stack/backups")
+    def backup_now(app_id: str, s=Depends(current_session)) -> dict:
+        stack_app(app_id)
+        return {"job": call(backups.start, app_id, "backup", s.username)}
+
+    @app.post("/api/apps/{app_id}/stack/backups/{name}/restore")
+    def restore(app_id: str, name: str, s=Depends(current_session)) -> dict:
+        stack_app(app_id)
+        return {"job": call(backups.start, app_id, "restore", s.username, name)}
 
     @app.post("/api/apps/{app_id}/stack/{op}")
     async def control(app_id: str, op: str, s=Depends(current_session)) -> dict:

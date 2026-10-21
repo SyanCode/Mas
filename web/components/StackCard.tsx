@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { StackFields, type StackValues } from "@/components/StackFields";
-import { Button, Card, CopyCode, ErrorText, Input, Spinner } from "@/components/ui";
+import { Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Spinner } from "@/components/ui";
 import { api, ApiError, type StackTemplate } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -61,6 +61,71 @@ function Action({ appId, action }: { appId: string; action: StackTemplate["actio
         <Button onClick={run} disabled={busy}>{busy ? <Spinner /> : null}{t(action.label)}</Button>
       </div>
     </details>
+  );
+}
+
+interface Backups {
+  backups: { name: string; size: number; created_at: string }[];
+  job: { op: "backup" | "restore"; running: boolean; error: string | null; result: string | null } | null;
+  folder: string;
+  keep: number;
+}
+
+function BackupsCard({ appId }: { appId: string }) {
+  const t = useT();
+  const [data, setData] = useState<Backups | null>(null);
+  const [error, setError] = useState("");
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const load = useCallback(() => {
+    api<Backups>(`/apps/${encodeURIComponent(appId)}/stack/backups`).then(setData).catch((e: ApiError) => setError(e.detail));
+  }, [appId]);
+  useEffect(load, [load]);
+  const running = !!data?.job?.running;
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(load, 2000);
+    return () => clearInterval(timer);
+  }, [running, load]);
+
+  async function start(path: string) {
+    setError("");
+    setRestoring(null);
+    try {
+      await api(`/apps/${encodeURIComponent(appId)}/stack/backups${path}`, { method: "POST" });
+      load();
+    } catch (e) {
+      setError((e as ApiError).detail);
+    }
+  }
+
+  if (!data) return error ? <Card title={t("Backups")}><ErrorText>{error}</ErrorText></Card> : null;
+  const job = data.job;
+  return (
+    <Card title={t("Backups")} actions={<Button disabled={running} onClick={() => start("")}>{running && job?.op === "backup" ? <Spinner /> : null}{t("Back up now")}</Button>}>
+      <div className="space-y-3 text-sm">
+        <p className="text-xs text-zinc-500">{t("Every night between 3 and 5 a.m., the last {n} kept in {folder}. The service is stopped during the copy, a few seconds for most.", { n: data.keep, folder: data.folder })}</p>
+        {job?.running && <p className="flex items-center gap-2 text-zinc-500"><Spinner /> {job.op === "backup" ? t("Backing up…") : t("Restoring…")}</p>}
+        {job && !job.running && job.error && <ErrorText>{job.error}</ErrorText>}
+        {job && !job.running && !job.error && job.result && <p className="text-xs text-emerald-600 dark:text-emerald-400">✓ {job.op === "backup" ? t("Backup done.") : t("Restored. The previous data is kept in data.before-restore.")}</p>}
+        <ErrorText>{error}</ErrorText>
+        <ul className="space-y-1.5">
+          {data.backups.map((b) => (
+            <li key={b.name} className="flex items-center justify-between gap-2">
+              <span className="min-w-0">
+                <span className="block text-xs">{new Date(b.created_at).toLocaleString()}</span>
+                <span className="mono block text-[11px] text-zinc-500">{(b.size / 1048576).toFixed(1)} MB</span>
+              </span>
+              <Button variant="ghost" disabled={running} onClick={() => setRestoring(b.name)}>{t("Restore")}</Button>
+            </li>
+          ))}
+          {data.backups.length === 0 && <li className="text-xs text-zinc-500">{t("No backup yet.")}</li>}
+        </ul>
+      </div>
+      <ConfirmDialog open={!!restoring} danger title={t("Restore this backup?")}
+        message={t("The service is stopped, its data replaced by the backup, then started again. The current data is kept aside in data.before-restore.")}
+        confirmLabel={t("Restore")} onConfirm={() => restoring && start(`/${encodeURIComponent(restoring)}/restore`)}
+        onCancel={() => setRestoring(null)} />
+    </Card>
   );
 }
 
@@ -151,6 +216,8 @@ export function StackCard({ appId, onDeployed }: { appId: string; onDeployed: (r
       )}
 
       {info.template.actions.map((a) => <Action key={a.id} appId={appId} action={a} />)}
+
+      <BackupsCard appId={appId} />
 
       {(info.template.fields.length > 0 || editablePorts.length > 0) && (
         <details className="glass rounded-2xl p-5">

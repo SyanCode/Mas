@@ -22,6 +22,7 @@ from mas.appdb import AppDatabases
 from mas.deploy import Deployer
 from mas.github import GitHubApp
 from mas.cms import CmsManager
+from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
 from mas.config import Config, load_config
@@ -149,6 +150,10 @@ def create_app(
                 await asyncio.to_thread(supabase.auto_backup)
             except Exception:
                 log.exception("Supabase backup failed")
+            try:
+                await asyncio.to_thread(stack_backups.auto_backup)
+            except Exception:
+                log.exception("service backups failed")
             await asyncio.sleep(max(10, config.scan_interval))
 
     github_cache: dict = {}
@@ -169,6 +174,7 @@ def create_app(
     supabase = SupabaseManager(host, config, db, deployer)
     appdb = AppDatabases(host, config, db, supabase, deployer, github_client)
     stacks = StackManager(host, config, db, deployer)
+    stack_backups = StackBackups(stacks, keep=config.stacks_keep_backups)
     cms = CmsManager(db, github_client, deployer, Path(db.path).parent, supabase=supabase)
 
     @asynccontextmanager
@@ -492,8 +498,9 @@ def create_app(
     api_supabase.register(app, host=host, db=db, current_session=current_session, deployer=deployer,
                           manager=supabase, appdb=appdb, client_ip=client_ip)
     app.state.appdb = appdb
-    api_stacks.register(app, db=db, current_session=current_session, manager=stacks)
+    api_stacks.register(app, db=db, current_session=current_session, manager=stacks, backups=stack_backups)
     app.state.stacks = stacks
+    app.state.stack_backups = stack_backups
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms)
 
     # -- dashboard ---------------------------------------------------------

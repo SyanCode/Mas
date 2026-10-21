@@ -332,6 +332,12 @@ certificate of its address and shows how to use it.
 - The service's page has **Start / Stop / Restart**, its logs, and its settings: saving them
   redeploys it. **Redeploy** also pulls the latest image. Data stays in `/srv/mas/stacks/<name>/data`
   across updates; removing the service keeps it unless you tick *also delete its data*.
+- **Backups**: every night between 3 and 5 a.m. (server time), Mas stops the service, copies its
+  `data` folder to `/var/lib/mas/backups/stacks/<name>/<name>-<date>.tar.gz` and starts it again
+  (a Minecraft world or a mailbox copied while written could not be restored). The last 7 are kept
+  (`stacks_keep_backups` in `[deploy]`), and they outlive the service. **Back up now** and
+  **Restore** are on the service's page; a restore puts the current data aside in
+  `data.before-restore` first.
 - For mail, ask your hosting provider for the reverse DNS (PTR) of the server and check that it does
   not block outgoing port 25.
 

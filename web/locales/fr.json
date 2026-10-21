@@ -680,5 +680,14 @@
   "Add my IP ({ip})": "Ajouter mon IP ({ip})",
   "One IP or network per line, such as 203.0.113.7 or 198.51.100.0/24.": "Une IP ou un réseau par ligne, par exemple 203.0.113.7 ou 198.51.100.0/24.",
   "Studio sign-in": "Connexion à Studio",
-  "From anywhere else, through an SSH tunnel:": "Depuis n'importe où ailleurs, par un tunnel SSH :"
+  "From anywhere else, through an SSH tunnel:": "Depuis n'importe où ailleurs, par un tunnel SSH :",
+  "Back up now": "Sauvegarder maintenant",
+  "Every night between 3 and 5 a.m., the last {n} kept in {folder}. The service is stopped during the copy, a few seconds for most.": "Chaque nuit entre 3 h et 5 h, les {n} dernières gardées dans {folder}. Le service est arrêté pendant la copie, quelques secondes pour la plupart.",
+  "Backing up…": "Sauvegarde en cours…",
+  "Restoring…": "Restauration en cours…",
+  "Backup done.": "Sauvegarde terminée.",
+  "Restored. The previous data is kept in data.before-restore.": "Restauré. Les données précédentes sont gardées dans data.before-restore.",
+  "Restore": "Restaurer",
+  "Restore this backup?": "Restaurer cette sauvegarde ?",
+  "The service is stopped, its data replaced by the backup, then started again. The current data is kept aside in data.before-restore.": "Le service est arrêté, ses données remplacées par la sauvegarde, puis il redémarre. Les données actuelles sont mises de côté dans data.before-restore."
 }
