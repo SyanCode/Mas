@@ -64,6 +64,13 @@ MIGRATION_RE = re.compile(r"^(\d+)_([A-Za-z0-9_.-]+)\.sql$")
 SOURCE_URL_RE = re.compile(r"^postgres(ql)?://[^\s'\"`$\\]+$")
 TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}$")
 QUEUE_KEY = "supabase_connect_queue"
+# Objects of the dev database a "replace" import drops first (tables are dropped on their own).
+OTHER_OBJECTS_SQL = ("select 'view ' || viewname from pg_views where schemaname = 'public' "
+                     "union all select 'materialized view ' || matviewname from pg_matviews "
+                     "where schemaname = 'public' "
+                     "union all select 'sequence ' || sequencename from pg_sequences where schemaname = 'public' "
+                     "union all select 'type ' || t.typname from pg_type t join pg_namespace n "
+                     "on n.oid = t.typnamespace where n.nspname = 'public' and t.typtype in ('e', 'd')")
 MIGRATIONS_TABLE = ("create schema if not exists supabase_migrations; create table if not exists "
                     "supabase_migrations.schema_migrations (version text primary key, statements text[], name text);")
 
@@ -360,10 +367,19 @@ class AppDatabases:
                                  "drop them first")
             if clash:
                 self.supabase.run_sql(" ".join(f'drop table if exists public."{t}" cascade;' for t in clash))
+            if replace:  # what the dump creates besides tables: functions and views are replaced in place
+                drops = [f'drop {kind} if exists public."{name}" cascade;'
+                         for kind, _, name in (line.rpartition(" ") for line in
+                                               self._psql_source(url, OTHER_OBJECTS_SQL).splitlines())
+                         if kind in ("view", "materialized view", "sequence", "type") and TABLE_RE.fullmatch(name)]
+                if drops:
+                    self.supabase.run_sql(" ".join(drops))
             major = int(self._psql_source(url, "show server_version_num").strip() or "0") // 10000
             dump = ('pg_dump "$SRC" --schema=public --no-owner --no-privileges --no-publications '
                     '--no-subscriptions' + ("" if with_data else " --schema-only"))
             keep = "grep -v -E '^(CREATE SCHEMA public|COMMENT ON SCHEMA public|ALTER SCHEMA public)'"
+            if replace:
+                keep += " | sed -E 's/^CREATE (FUNCTION|PROCEDURE|VIEW) /CREATE OR REPLACE \\1 /'"
             load = (f"docker exec -i {DB_CONTAINER} psql -U postgres -d postgres -v ON_ERROR_STOP=1 "
                     "--single-transaction -q")
             if major <= 15:  # the pg_dump of the Supabase image is recent enough

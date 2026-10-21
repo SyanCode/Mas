@@ -204,8 +204,9 @@ def test_import_a_dev_database(env):
     host.stream_hooks.append(lambda argv, cwd, env: seen.append((argv, env or {})))
     host._commands["docker exec -e SRC supabase-db sh -c *pg_tables*"] = {"output": "posts\nprofiles\n"}
     host._commands["docker exec -e SRC supabase-db sh -c *server_version_num*"] = {"output": "170004\n"}
+    host._commands["docker exec -e SRC supabase-db sh -c *pg_views*"] = {"output": "type mood\nview recent\n"}
     host._commands["docker exec supabase-db psql * -qAt -c select tablename*"] = {"output": "posts\n"}
-    host._commands["docker exec supabase-db psql * -c drop table*"] = {"returncode": 0}
+    host._commands["docker exec supabase-db psql * -c drop *"] = {"returncode": 0}
     host._commands["docker exec supabase-db psql * -c notify*"] = {"returncode": 0}
     host._commands["bash -o pipefail -c *"] = {"returncode": 0}
 
@@ -224,6 +225,9 @@ def test_import_a_dev_database(env):
     assert all(url not in " ".join(argv) for argv, _ in seen)  # only in the environment
     assert all(env.get("SRC") == url for _, env in seen)
     assert any('drop table if exists public."posts" cascade' in " ".join(a) for a in host.executed)
+    assert any('drop type if exists public."mood" cascade; drop view if exists public."recent" cascade;'
+               in " ".join(a) for a in host.executed)
+    assert "CREATE OR REPLACE" in script  # functions of the dev database replace the ones already here
     history = db.history(None, 20)
     assert any(e["action"] == "supabase-import" and e["ok"] and "pooler.supabase.com" in e["detail"]
                and "s3cret" not in e["detail"] for e in history)

@@ -113,9 +113,11 @@ def dev_database(request):
     try:
         wait_ready(name)
         sh("docker", "exec", name, "psql", "-U", "postgres", "-c",
-           "create table posts (id serial primary key, title text not null); "
-           "insert into posts (title) values ('first'), ('second'); "
-           "create function post_count() returns bigint language sql as 'select count(*) from posts';")
+           "create type mood as enum ('happy', 'sad'); "
+           "create table posts (id serial primary key, title text not null, mood mood); "
+           "insert into posts (title, mood) values ('first', 'happy'), ('second', null); "
+           "create function post_count() returns bigint language sql as 'select count(*) from posts'; "
+           "create view happy_posts as select * from posts where mood = 'happy';")
         ip = sh("docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name).strip()
         yield f"postgresql://postgres:src@{ip}:5432/postgres"
     finally:
@@ -129,11 +131,13 @@ def test_import_a_dev_database(env, stack, dev_database):
     assert result["tables"] == ["posts"] and result["connected"]["variables"]  # copied, then linked
     assert psql("select string_agg(title, ',' order by id) from posts") == "first,second"
     assert psql("select post_count()") == "2"  # functions come along
+    assert psql("select title from happy_posts") == "first"  # views and types too
 
     with pytest.raises(AppDbError, match="already exist"):
         appdb.import_dev("shop", dev_database, True, False, "e2e")
     appdb.import_dev("shop", dev_database, False, True, "e2e")  # replace, structure only
     assert psql("select count(*) from posts") == "0"
+    assert psql("select post_count()") == "0" and psql("select count(*) from happy_posts") == "0"
     with pytest.raises(AppDbError, match="cannot read the dev database"):
         appdb.import_dev("shop", dev_database.replace(":src@", ":wrong@"), True, True, "e2e")
 

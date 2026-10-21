@@ -5,12 +5,28 @@ from __future__ import annotations
 import imaplib
 import smtplib
 import ssl
+import time
 from pathlib import Path
 
 import pytest
 from e2e_helpers import http_get, port_open, sh
 
 from mas.stacks import StackManager
+
+def imap_login(user: str, password: str, timeout: float = 90) -> None:
+    """Log in over IMAPS, retrying while Dovecot is still starting."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            imap = imaplib.IMAP4_SSL("127.0.0.1", 993, ssl_context=TLS, timeout=10)
+            break
+        except OSError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(3)
+    assert imap.login(user, password)[0] == "OK"
+    imap.logout()
+
 
 TLS = ssl.create_default_context()
 TLS.check_hostname = False
@@ -92,9 +108,7 @@ def test_mail_server(env, mail_certificate):
         assert dkim.startswith("v=DKIM1") and "p=" in dkim, dkim
 
         # the mailbox works: IMAP over TLS, then SMTP submission with STARTTLS
-        imap = imaplib.IMAP4_SSL("127.0.0.1", 993, ssl_context=TLS)
-        assert imap.login("contact@e2e.test", password)[0] == "OK"
-        imap.logout()
+        imap_login("contact@e2e.test", password)
         with smtplib.SMTP("127.0.0.1", 587, timeout=30) as smtp:
             smtp.starttls(context=TLS)
             smtp.login("contact@e2e.test", password)
@@ -102,17 +116,13 @@ def test_mail_server(env, mail_certificate):
         # "Add a mailbox" gives a working address
         output = stacks.action("e2e-mail", "add-mailbox", {"name": "sales"})
         new_password = output.rsplit("Password: ", 1)[1].strip()
-        imap = imaplib.IMAP4_SSL("127.0.0.1", 993, ssl_context=TLS)
-        assert imap.login("sales@e2e.test", new_password)[0] == "OK"
-        imap.logout()
+        imap_login("sales@e2e.test", new_password)
 
         # a second deployment does not recreate the mailbox nor the key
         before = sorted(Path(stacks.dir("e2e-mail"), "data", "config", "opendkim", "keys", "e2e.test").iterdir())
         env.deploy(env.deployer.enqueue("e2e-mail", "manual", "e2e"))
         after = sorted(Path(stacks.dir("e2e-mail"), "data", "config", "opendkim", "keys", "e2e.test").iterdir())
         assert [p.read_bytes() for p in before] == [p.read_bytes() for p in after]
-        imap = imaplib.IMAP4_SSL("127.0.0.1", 993, ssl_context=TLS)
-        assert imap.login("contact@e2e.test", password)[0] == "OK"
-        imap.logout()
+        imap_login("contact@e2e.test", password)
     finally:
         env.deployer.remove_app("e2e-mail", purge_files=True)

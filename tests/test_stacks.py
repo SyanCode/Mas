@@ -162,9 +162,11 @@ def test_mail_server_setup(env, tmp_path):
     calls: list[list[str]] = []
     stacks.exec = lambda a, service, args, retries=1: calls.append(args) or ""
     stacks.compose = lambda a, args, rlog=None, timeout=900: calls.append(["compose", *args]) or ""
+    stacks._wait = lambda a, rlog, timeout=180, healthy=False: calls.append(["wait", healthy])
     TEMPLATES["mail"].after(stacks, app, ctx, ReleaseLog(tmp_path / "m.log"))
     assert calls[0] == ["setup", "email", "add", "contact@example.com", ctx.secrets["mailbox_password"]]
     assert calls[1] == ["setup", "config", "dkim", "domain", "example.com"] and calls[2] == ["compose", "restart"]
+    assert calls[3] == ["wait", True]  # the deploy ends once the server is healthy (IMAP listening)
 
     host.makedirs("/srv/mas/stacks/mail/data/config/opendkim/keys/example.com")
     host.write_text("/srv/mas/stacks/mail/data/config/opendkim/keys/example.com/mail.txt",
@@ -172,7 +174,7 @@ def test_mail_server_setup(env, tmp_path):
     host.write_text("/srv/mas/stacks/mail/data/config/postfix-accounts.cf", "contact@example.com|{SHA512-CRYPT}x")
     calls.clear()
     TEMPLATES["mail"].after(stacks, app, ctx, ReleaseLog(tmp_path / "m2.log"))
-    assert calls == []  # already set up
+    assert calls == [["wait", True]]  # already set up: only waits for it
     info = client.get("/api/apps/mail/stack").json()
     records = {(r["type"], r["name"]): r["value"] for r in info["dns"]}
     assert records[("MX", "example.com")] == "10 mail.example.com"
