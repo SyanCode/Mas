@@ -119,7 +119,11 @@ MEMORY = ["1G", "2G", "3G", "4G", "6G", "8G"]
 
 def _minecraft(ctx: Ctx) -> dict:
     o = ctx.options
-    env = {"EULA": "TRUE", "TYPE": o["server_type"], "VERSION": o["version"] or "LATEST", "MEMORY": o["memory"],
+    # The heap starts small and grows up to the chosen memory; G1 gives unused memory back when the
+    # server is quiet (MEMORY alone reserves all of it at start, players or not).
+    env = {"EULA": "TRUE", "TYPE": o["server_type"], "VERSION": o["version"] or "LATEST",
+           "INIT_MEMORY": "512M", "MAX_MEMORY": o["memory"],
+           "JVM_XX_OPTS": "-XX:+UseG1GC -XX:G1PeriodicGCInterval=60000 -XX:+UseStringDeduplication",
            "DIFFICULTY": o["difficulty"], "MODE": o["mode"], "MAX_PLAYERS": str(o["max_players"]),
            "MOTD": o["motd"], "ONLINE_MODE": "TRUE" if o["online_mode"] else "FALSE"}
     if o.get("whitelist"):

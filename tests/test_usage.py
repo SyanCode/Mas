@@ -39,23 +39,30 @@ def test_everything_grouped_and_sorted(tmp_path, monkeypatch):
     group(host, f"docker-{'a' * 64}.scope", 300, 0)
     group(host, f"docker-{'b' * 64}.scope", 100, 0)
     host.write_text("/proc/meminfo", "MemTotal: 4096000 kB\nMemAvailable: 2048000 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n")
-    running = [{"Id": "a" * 64, "Names": ["/mas-mail-mail-1"], "Labels": {"com.docker.compose.project": "mas-mail"}},
+    group(host, f"docker-{'d' * 64}.scope", 4600, 0)
+    host.write_text(f"{SLICE}/docker-{'d' * 64}.scope/memory.stat", f"anon 1\ninactive_file {600 * 1048576}\n")
+    running = [{"Id": "d" * 64, "Names": ["/sxnpaf-mc-1"], "Image": "itzg/minecraft-server",
+                "Labels": {"com.docker.compose.project": "sxnpaf"}},
+               {"Id": "a" * 64, "Names": ["/mas-mail-mail-1"], "Labels": {"com.docker.compose.project": "mas-mail"}},
                {"Id": "b" * 64, "Names": ["/mas-supabase-db"], "Labels": {"com.docker.compose.project": "mas-supabase"}}]
     real = host.docker_get
-    host.docker_get = lambda path: running if path == "/containers/json" else real(path)
+    mc = {"Config": {"Env": ["EULA=TRUE", "MEMORY=4G"]}}
+    host.docker_get = lambda path: running if path == "/containers/json" else mc if "dddd" in path else real(path)
     scanner = Scanner(host, config, db)
     resources = Resources(host, config, db, deployer, Cluster(host, config, db, deployer))
     u = Usage(host, config, db, scanner, resources)
     first = u.overview()
     rows = {r["key"]: r for r in first["rows"]}
-    assert [r["key"] for r in first["rows"]][:2] == ["unit:mariadb.service", "app:site"]
+    assert [r["key"] for r in first["rows"]][:3] == ["project:sxnpaf", "unit:mariadb.service", "app:site"]
     assert rows["app:site"]["memory_mb"] == 350  # its two instances
     assert sorted(rows["app:site"]["parts"]) == ["mas-app-site.2.service", "mas-app-site.service"]
     assert rows["app:site"]["limit_mb"] == 512 and rows["app:site"]["instances"] == 2
     assert rows["unit:mariadb.service"]["limit_mb"] == 2048
     assert rows["app:mail"]["kind"] == "stack" and rows["app:mail"]["memory_mb"] == 300
     assert rows["unit:postgresql@15-main.service"]["memory_mb"] == 80
-    assert rows["supabase"]["memory_mb"] == 100 and rows["mas"]["memory_mb"] == 60
+    assert rows["supabase"]["memory_mb"] == 100
+    assert rows["project:sxnpaf"]["memory_mb"] == 4000  # without the file cache
+    assert rows["project:sxnpaf"]["advice"][0]["id"] == "minecraft-heap" and rows["mas"]["memory_mb"] == 60
     # CPU from the previous reading: mariadb used 0.5 s more
     group(host, "mariadb.service", 900, 505000)
     u._last["mariadb.service"] = (u._last["mariadb.service"][0] - 1.0, 5000)

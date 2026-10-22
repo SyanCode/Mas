@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
+import { MaintenanceCard } from "@/components/MaintenanceCard";
 import { StackCard } from "@/components/StackCard";
 import { TrafficStats } from "@/components/TrafficStats";
 import {
@@ -970,6 +971,7 @@ function AppView() {
 
         <div className="space-y-6">
           {app.mode === "managed" && <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
+          {app.domain && (app.mode === "managed" || app.mode === "stack") && <MaintenanceCard appId={app.id} />}
           {app.mode === "stack" && <StackCard appId={app.id} onDeployed={(rid) => { setSelected(rid); load(); }} />}
           {app.mode !== "stack" && <SettingsCard app={app} onSaved={(a) => setApp({ ...a, releases: app.releases })} />}
           {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && (

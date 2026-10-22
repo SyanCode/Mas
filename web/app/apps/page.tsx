@@ -106,7 +106,7 @@ function Apps() {
 
   return (
     <>
-      <PageHeader eyebrow={t("Deployments")} title={t("Apps")} subtitle={t("Push to GitHub, Mas builds and ships it. Atomic releases, instant rollback.")} actions={<div className="flex gap-2">{deployAllButton}{serviceButton}{newButton}</div>} />
+      <PageHeader eyebrow={t("Deployments")} title={t("Apps")} subtitle={t("Push to GitHub, Mas builds and ships it. Atomic releases, instant rollback.")} actions={<div className="flex flex-wrap gap-2"><Link href="/maintenance/" className="inline-flex h-9 items-center rounded-lg border border-zinc-300 px-3 text-sm hover:bg-zinc-100 dark:border-white/10 dark:hover:bg-white/[0.06]">{t("Maintenance")}</Link>{deployAllButton}{serviceButton}{newButton}</div>} />
       <ErrorText>{error}</ErrorText>
       <Notice>{notice}</Notice>
       <ConfirmDialog

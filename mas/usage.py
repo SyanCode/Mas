@@ -96,6 +96,11 @@ class Usage:
             if used is not None:
                 self._last[name] = (now, used)
             memory = self._number(f"{path}/memory.current")
+            if memory is not None:  # without the file cache the kernel takes back at once (like docker stats)
+                for line in (self.host.read_text(f"{path}/memory.stat") or "").splitlines():
+                    if line.startswith("inactive_file "):
+                        memory = max(0, memory - int(line.split()[1]))
+                        break
             limit = self._number(f"{path}/memory.max")  # "max" (no limit) is not a number
             out[name] = {"memory_mb": round(memory / 1048576, 1) if memory is not None else None,
                          "cpu_percent": cpu, "limit_mb": round(limit / 1048576) if limit else None}
@@ -135,9 +140,24 @@ class Usage:
             running = self.host.docker_get("/containers/json")
         except (OSError, ValueError):
             return {}
-        return {f"docker-{c['Id']}.scope": {"name": ((c.get("Names") or ["/" + c["Id"][:12]])[0]).lstrip("/"),
-                                             "project": (c.get("Labels") or {}).get("com.docker.compose.project")}
+        return {f"docker-{c['Id']}.scope": {"id": c["Id"], "name": ((c.get("Names") or ["/" + c["Id"][:12]])[0]).lstrip("/"),
+                                             "project": (c.get("Labels") or {}).get("com.docker.compose.project"),
+                                             "image": c.get("Image") or ""}
                 for c in running}
+
+    def _container_advice(self, info: dict) -> list[dict]:
+        """A Minecraft server (itzg image) started with MEMORY only reserves all of it, even empty."""
+        if not info["image"].startswith(("itzg/minecraft-server", "docker.io/itzg/minecraft-server")):
+            return []
+        try:
+            env = dict(e.partition("=")[::2] for e in (self.host.docker_get(f"/containers/{info['id']}/json")
+                                                       .get("Config") or {}).get("Env") or [])
+        except (OSError, ValueError):
+            return []
+        if env.get("MEMORY") and not env.get("INIT_MEMORY"):
+            return [{"id": "minecraft-heap", "level": "info", "params": {"name": info["name"], "memory": env["MEMORY"]},
+                     "set": None}]
+        return []
 
     def overview(self) -> dict:
         first = self._last_machine is None
@@ -184,6 +204,7 @@ class Usage:
                     target = row(f"container:{info['name']}", kind="containers", name=info["name"],
                                  service_id=svc.id if svc else None)
                 add(target, info["name"], reading)
+                target.setdefault("advice", []).extend(self._container_advice(info))
             elif name == "mas.service":
                 add(row("mas", kind="mas", name="Mas"), name, reading)
             elif name == "user.slice":

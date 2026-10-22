@@ -122,6 +122,7 @@ HTTP_SERVER = """server {
     client_max_body_size 20m;
     access_log /var/log/nginx/mas-app-@@APP@@.access.log;
     error_log /var/log/nginx/mas-app-@@APP@@.error.log;
+    include /etc/nginx/mas-maintenance/@@APP@@[.]conf;
 @@BODY@@}
 """
 
@@ -143,6 +144,7 @@ server {
     client_max_body_size 20m;
     access_log /var/log/nginx/mas-app-@@APP@@.access.log;
     error_log /var/log/nginx/mas-app-@@APP@@.error.log;
+    include /etc/nginx/mas-maintenance/@@APP@@[.]conf;
 @@BODY@@}
 """
 

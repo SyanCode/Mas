@@ -197,3 +197,19 @@ def test_stats_of_a_service_and_restart_all_plan(env):
     assert plan["running"] is False and any(i["key"] == "unit:mariadb.service" for i in plan["plan"])
     assert client.post("/api/restart-all", json={"skip": []}).status_code in (401, 403)  # CSRF needed
     assert csrf
+
+
+def test_maintenance_page_import_and_preview(env):
+    client, db, _, host = env
+    csrf = login(client)
+    r = client.post("/api/maintenance/pages/import?name=Travaux", content=b"<html><head></head><body>Back soon</body></html>",
+                    headers={"X-CSRF-Token": csrf, "Content-Type": "text/html"})
+    assert r.status_code == 200, r.text
+    page = r.json()["id"]
+    overview = client.get("/api/maintenance").json()
+    assert {p["id"] for p in overview["pages"]} >= {"default", page} and "your_ip" in overview
+    client.cookies.clear()  # the preview needs no session: these files are public
+    preview = client.get(f"/api/maintenance/pages/{page}/files/index.html")
+    assert preview.status_code == 200 and f'<base href="/api/maintenance/pages/{page}/files/">' in preview.text
+    assert "sandbox" in preview.headers["content-security-policy"]
+    assert client.get(f"/api/maintenance/pages/{page}/files/../../x").status_code in (400, 404)

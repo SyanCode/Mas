@@ -193,6 +193,14 @@ class Host:
         os.chmod(tmp, mode)
         os.replace(tmp, real)
 
+    def write_bytes(self, path: str, content: bytes, mode: int = 0o644) -> None:
+        real = self.real(path)
+        real.parent.mkdir(parents=True, exist_ok=True)
+        tmp = real.with_name(f".{real.name}.mas-tmp")
+        tmp.write_bytes(content)
+        os.chmod(tmp, mode)
+        os.replace(tmp, real)
+
     def backup(self, path: str) -> str | None:
         """Copy ``path`` to ``<path>.mas-bak-<timestamp>`` before it is changed."""
         real = self.real(path)

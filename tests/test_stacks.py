@@ -135,7 +135,8 @@ def test_minecraft_server(env):
     rid = r.json()["release_id"]
     assert deployer.run(rid), deployer.log_path("mc", rid).read_text()
     compose = yaml.safe_load(host.read_text("/srv/mas/stacks/mc/docker-compose.yml"))
-    assert compose["services"]["minecraft"]["environment"]["MEMORY"] == "4G"
+    env = compose["services"]["minecraft"]["environment"]
+    assert env["MAX_MEMORY"] == "4G" and env["INIT_MEMORY"] == "512M" and "MEMORY" not in env  # grows when needed
     assert db.get_app("mc")["current_release"] == rid
     info = client.get("/api/apps/mc/stack").json()
     assert info["template"]["id"] == "minecraft" and info["rows"][0]["label"] == "Server address"

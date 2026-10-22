@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_cluster, api_cms, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, api_cluster, api_cms, api_maintenance, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -28,6 +28,7 @@ from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas.sitestats import SiteStats, service_target
 from mas.usage import Usage
+from mas.maintenance import Maintenance
 from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
@@ -183,6 +184,10 @@ def create_app(
                 await asyncio.to_thread(cluster.watch)
             except Exception:
                 log.exception("cluster watch failed")
+            try:  # maintenances whose end time is reached
+                await asyncio.to_thread(maintenance.tick)
+            except Exception:
+                log.exception("maintenance tick failed")
             try:  # instances follow the traffic, idle apps fall asleep
                 await asyncio.to_thread(resources.tick)
             except Exception:
@@ -228,6 +233,7 @@ def create_app(
     resources = Resources(host, config, db, deployer, cluster)
     restart_all = RestartAll(host, config, db, deployer, scanner)
     usage = Usage(host, config, db, scanner, resources)
+    maintenance = Maintenance(host, config, db, deployer)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -612,6 +618,7 @@ def create_app(
     api_cluster.register(app, db=db, current_session=current_session, cluster=cluster, deployer=deployer)
     app.state.cluster = cluster
     api_resources.register(app, db=db, current_session=current_session, deployer=deployer, resources=resources)
+    api_maintenance.register(app, db=db, current_session=current_session, maintenance=maintenance, client_ip=client_ip)
     app.state.resources = resources
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
