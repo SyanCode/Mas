@@ -28,6 +28,7 @@ from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas.sitestats import SiteStats, service_target
 from mas.usage import Usage
+from mas import removesite
 from mas.maintenance import Maintenance
 from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
@@ -104,6 +105,10 @@ class CodeBody(BaseModel):
 class DisableTotpBody(BaseModel):
     password: str = Field(max_length=1024)
     code: str = Field(max_length=16)
+
+
+class RemoveSiteBody(BaseModel):
+    delete_certificate: bool = False
 
 
 class RestartAllBody(BaseModel):
@@ -514,6 +519,28 @@ def create_app(
             return restart_all.start(s.username, set(body.skip))
         except RestartError as exc:
             raise HTTPException(409, str(exc)) from None
+
+    @app.get("/api/services/{service_id}/remove-site")
+    def remove_site_check(service_id: str, _: SessionInfo = Depends(current_session)) -> dict:
+        """Whether the nginx site of this service can be removed, and which certificates would go with it."""
+        svc = find_service(service_id)
+        try:
+            files = removesite.check(host, svc)
+        except removesite.RemoveError as exc:
+            return {"possible": False, "reason": str(exc)}
+        return {"possible": True, "files": files, "certificates": removesite.certificates(host, files)}
+
+    @app.post("/api/services/{service_id}/remove-site")
+    async def remove_site(service_id: str, body: RemoveSiteBody, s: SessionInfo = Depends(current_session)) -> dict:
+        svc = find_service(service_id)
+        try:
+            done = await asyncio.to_thread(removesite.remove, host, svc, body.delete_certificate)
+        except removesite.RemoveError as exc:
+            db.audit(s.username, "site-remove", False, service_id, detail=str(exc)[:500])
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "site-remove", True, service_id, detail="; ".join(done)[:500])
+        await asyncio.to_thread(scanner.refresh)
+        return {"done": done}
 
     @app.patch("/api/services/{service_id}")
     def patch_service(service_id: str, body: PatchService, s: SessionInfo = Depends(current_session)) -> dict:

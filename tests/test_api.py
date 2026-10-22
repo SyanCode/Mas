@@ -213,3 +213,18 @@ def test_maintenance_page_import_and_preview(env):
     assert preview.status_code == 200 and f'<base href="/api/maintenance/pages/{page}/files/">' in preview.text
     assert "sandbox" in preview.headers["content-security-policy"]
     assert client.get(f"/api/maintenance/pages/{page}/files/../../x").status_code in (400, 404)
+
+
+def test_remove_the_site_of_a_stopped_service(env):
+    client, db, _, host = env
+    csrf = login(client)
+    assert client.get("/api/services/shop.example.com/remove-site").json()["possible"] is True
+    running = client.get("/api/services/api.example.com/remove-site").json()
+    assert running["possible"] is False and "stop it first" in running["reason"]
+    host._commands = {**host._commands, "nginx -t": {"output": ""}, "systemctl reload nginx": {"output": ""}}
+    files = client.get("/api/services/shop.example.com").json()["nginx_files"]
+    r = client.post("/api/services/shop.example.com/remove-site", json={"delete_certificate": False},
+                    headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 200, r.text
+    assert all(not host.exists(f) for f in files)
+    assert client.get("/api/services/shop.example.com").status_code == 404

@@ -920,5 +920,9 @@
   "Ends {date}.": "Termina el {date}.",
   "You keep seeing the real site from this address ({ip}).": "Sigues viendo el sitio real desde esta dirección ({ip}).",
   "Pages, allowed addresses, end time →": "Páginas, direcciones permitidas, hora de fin →",
-  "{name} reserves its {memory} at start, players or not: replace MEMORY with INIT_MEMORY=512M and MAX_MEMORY={memory}, plus JVM_XX_OPTS=-XX:G1PeriodicGCInterval=60000 so the memory goes back to the server when it is empty (Minecraft servers of Mas do it from their next redeploy).": "{name} reserva sus {memory} desde el arranque, con o sin jugadores: sustituye MEMORY por INIT_MEMORY=512M y MAX_MEMORY={memory}, más JVM_XX_OPTS=-XX:G1PeriodicGCInterval=60000 para que la memoria vuelva al servidor cuando está vacío (los servidores Minecraft de Mas lo hacen desde su próximo redespliegue)."
+  "{name} reserves its {memory} at start, players or not: replace MEMORY with INIT_MEMORY=512M and MAX_MEMORY={memory}, plus JVM_XX_OPTS=-XX:G1PeriodicGCInterval=60000 so the memory goes back to the server when it is empty (Minecraft servers of Mas do it from their next redeploy).": "{name} reserva sus {memory} desde el arranque, con o sin jugadores: sustituye MEMORY por INIT_MEMORY=512M y MAX_MEMORY={memory}, más JVM_XX_OPTS=-XX:G1PeriodicGCInterval=60000 para que la memoria vuelva al servidor cuando está vacío (los servidores Minecraft de Mas lo hacen desde su próximo redespliegue).",
+  "Remove the site": "Eliminar el sitio",
+  "Remove the site?": "¿Eliminar el sitio?",
+  "Nothing runs behind it any more. nginx stops serving it: a link in sites-enabled is removed (its file stays in sites-available), another file is moved to /etc/nginx/mas-removed. If nginx -t refuses, everything is put back.": "Ya no hay nada detrás. nginx deja de servirlo: se quita un enlace en sites-enabled (su archivo sigue en sites-available), otro archivo se mueve a /etc/nginx/mas-removed. Si nginx -t lo rechaza, todo vuelve a su sitio.",
+  "Also delete its certificate ({names}), no other site uses it": "Eliminar también su certificado ({names}), ningún otro sitio lo usa"
 }

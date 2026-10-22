@@ -920,5 +920,9 @@
   "Ends {date}.": "Fin le {date}.",
   "You keep seeing the real site from this address ({ip}).": "Vous continuez de voir le vrai site depuis cette adresse ({ip}).",
   "Pages, allowed addresses, end time →": "Pages, adresses autorisées, heure de fin →",
-  "{name} reserves its {memory} at start, players or not: replace MEMORY with INIT_MEMORY=512M and MAX_MEMORY={memory}, plus JVM_XX_OPTS=-XX:G1PeriodicGCInterval=60000 so the memory goes back to the server when it is empty (Minecraft servers of Mas do it from their next redeploy).": "{name} réserve ses {memory} dès le démarrage, joueurs ou pas : remplacez MEMORY par INIT_MEMORY=512M et MAX_MEMORY={memory}, plus JVM_XX_OPTS=-XX:G1PeriodicGCInterval=60000 pour que la mémoire revienne au serveur quand il est vide (les serveurs Minecraft de Mas le font dès leur prochain redéploiement)."
+  "{name} reserves its {memory} at start, players or not: replace MEMORY with INIT_MEMORY=512M and MAX_MEMORY={memory}, plus JVM_XX_OPTS=-XX:G1PeriodicGCInterval=60000 so the memory goes back to the server when it is empty (Minecraft servers of Mas do it from their next redeploy).": "{name} réserve ses {memory} dès le démarrage, joueurs ou pas : remplacez MEMORY par INIT_MEMORY=512M et MAX_MEMORY={memory}, plus JVM_XX_OPTS=-XX:G1PeriodicGCInterval=60000 pour que la mémoire revienne au serveur quand il est vide (les serveurs Minecraft de Mas le font dès leur prochain redéploiement).",
+  "Remove the site": "Supprimer le site",
+  "Remove the site?": "Supprimer le site ?",
+  "Nothing runs behind it any more. nginx stops serving it: a link in sites-enabled is removed (its file stays in sites-available), another file is moved to /etc/nginx/mas-removed. If nginx -t refuses, everything is put back.": "Plus rien ne tourne derrière. nginx arrête de le servir : un lien dans sites-enabled est retiré (son fichier reste dans sites-available), un autre fichier est déplacé dans /etc/nginx/mas-removed. Si nginx -t refuse, tout est remis en place.",
+  "Also delete its certificate ({names}), no other site uses it": "Supprimer aussi son certificat ({names}), aucun autre site ne l'utilise"
 }

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { RemoveSite } from "@/components/RemoveSite";
 import { Shell } from "@/components/Shell";
 import { TrafficStats } from "@/components/TrafficStats";
 import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, StatusDot } from "@/components/ui";
@@ -321,6 +322,7 @@ function ServiceDetail() {
               {t("Replace with a Mas app")}
             </Link>
           )}
+          {!svc.app && !rt?.app && svc.status !== "running" && svc.nginx_files.length > 0 && <RemoveSite serviceId={svc.id} />}
           {svc.actions.length === 0 && <span className="text-sm text-zinc-500">{t("No action available for this manager.")}</span>}
           {svc.actions.filter((a) => !BOOT_ACTIONS.includes(a)).map((a) => (
             <Button
