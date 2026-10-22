@@ -1,9 +1,12 @@
 <div align="center">
 
+**English** · [Français](README.fr.md) · [Español](README.es.md) · [Deutsch](README.de.md)
+
 # Mas
 
 **Your server, mapped and deployed.**
-Self-hosted dashboard that adopts what already runs on your Debian + nginx box, then deploys from GitHub on every push.
+Self-hosted dashboard that adopts what already runs on your Debian + nginx box, deploys from GitHub on every push,
+runs ready-made services and spreads your apps over several servers.
 
 ![status: beta](https://img.shields.io/badge/status-beta-8b5cf6)
 ![license: MIT](https://img.shields.io/badge/license-MIT-0ea5e9)
@@ -22,7 +25,33 @@ which user and from which git repository. Nothing gets reinstalled or broken.
 You then manage those services from the `mas` CLI or from a web dashboard protected by a
 password and two-factor authentication, keep an eye on certificates and nginx, link domains
 from your registrar (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun) and deploy
-projects from GitHub on every push, Vercel-style, on the same machine.
+projects from GitHub on every push, Vercel-style, on the same machine. When one server is not
+enough, other servers join as agents and run copies of your apps behind the same load balancer.
+
+## At a glance
+
+| | |
+|---|---|
+| 🔎 **Discovery** | nginx vhosts, ports, `/proc`, systemd, PM2 and Docker read into one list of services: domain, user, folder, git repository. Read-only, no AI. |
+| 🚀 **Deploy from GitHub** | Atomic releases on every push, generated systemd unit and nginx vhost, Let's Encrypt, health check, automatic rollback, live build logs. |
+| 🌐 **Domains** | DNS records created at OVH, Cloudflare, Gandi, Hetzner, DigitalOcean or Porkbun, then HTTPS. |
+| 🗄️ **Supabase** | The official stack self-hosted in one click, apps connected from their repository, migrations at deploy. |
+| 📦 **Ready-made services** | Mail server, Minecraft, Uptime Kuma, Vaultwarden, n8n, Gitea or any Docker image, with nightly backups. |
+| ✏️ **CMS** | Your clients edit the texts, images and articles of their site; every save is a commit and a deploy. |
+| 📊 **Traffic** | Requests, page views and visitors per day for every site, from the nginx logs, without cookies. |
+| 🧠 **Resources** | Memory and CPU of everything on one page; memory limits, sleep when idle, instances that follow the traffic, advice applied in one click. |
+| 🛠️ **Operations** | Health checks with fixes, restart every service identical, maintenance pages, redeploy everything. |
+| 🖧 **Cluster** | Agents without a dashboard, copies of apps on several servers, live map, automatic failover, promotion. |
+
+## Contents
+
+- [Why another one?](#why-another-one) · [Installation](#installation) · [CLI](#cli) · [Dashboard](#dashboard)
+- [Deploying from GitHub](#deploying-from-github) · [Domains](#domains-ovh-cloudflare-gandi-hetzner-digitalocean-porkbun) ·
+  [Supabase](#self-hosted-supabase) · [Ready-made services](#ready-made-services) · [CMS](#cms-for-your-clients)
+- [Running the server](#running-the-server): [resources](#resources), [traffic](#traffic-statistics),
+  [maintenance](#maintenance-mode), [restart everything](#restart-everything-identical), [health checks](#health-checks)
+- [Several servers](#several-servers-cluster) · [How detection works](#how-detection-works) ·
+  [Security model](#security-model) · [Development](#development) · [Roadmap](#roadmap)
 
 > [!WARNING]
 > **Beta.** Mas runs as root and edits nginx, systemd and DNS. Every change is backed up and
@@ -44,6 +73,7 @@ Mas starts from the other end:
 | Runtimes                | Docker only                  | PHP-FPM, systemd, PM2, Docker, static |
 | Existing apps           | Re-deploy them               | Detected and adopted in place         |
 | Detection               | n/a                          | Deterministic parsing, no AI          |
+| Idle apps               | Always running               | Can sleep and wake on the next visit  |
 
 Every detection is deterministic: config file parsing, `/proc`, `ss`, `systemctl`, `pm2 jlist`
 and the Docker socket. No AI model is involved anywhere, and discovery needs no external API
@@ -130,30 +160,20 @@ English text is the key (`t("Deploy Supabase")`), translations live in `web/loca
 and `tests/test_i18n.py` fails if a text has no translation. Adding a language is one JSON file
 plus one line in `web/lib/i18n.tsx`.
 
-- Services list: status dot, domains (links), type, manager, port, SSL expiry (orange under
-  14 days), GitHub repository; filters (with/without domain, issues) and search.
-- Service page: details, logs (refresh / auto-refresh), actions with confirmation for stop and
-  restart, action history, display name, notes, manual type label.
-- Settings: enable / replace / disable 2FA with a QR code, change password.
-- Light and dark theme (follows the system by default).
+| Page | What it shows |
+|---|---|
+| **Overview** | every detected service: status, domains, type, manager, port, SSL expiry (orange under 14 days), GitHub repository, the Mas app it belongs to; filters and search; **Restart everything**, **Reload nginx** |
+| **Service** | details, live memory / CPU / uptime / ports and links, logs, actions (with confirmation), traffic of its site, history, display name and notes, **Replace with a Mas app** |
+| **Apps** | apps deployed from GitHub and services of the catalog; **Redeploy all**, **Maintenance** |
+| **App** | deployments with live build logs, rollback, domain, traffic, resources, load balancing, maintenance, database, CMS, environment variables |
+| **Databases** | the self-hosted Supabase: parts, memory per container, Studio access, backups |
+| **Resources** | memory and CPU of everything on the server, limits, sleep, instances, advice |
+| **Servers** | the cluster: this server, the other ones, join tokens, live map of the requests |
+| **Health** | certificate, certbot, nginx and DNS checks, with the fixes |
+| **Activity** | the audit log: who did what, when, with what result |
+| **Settings** | 2FA, password, GitHub App, DNS providers, people (CMS editors and invitations) |
 
-## Health checks
-
-`mas doctor` (CLI) and the **Health** page check, read-only:
-
-| Check | Why it matters |
-|-------|----------------|
-| Broken certbot lineage (`live/*/cert.pem` not a symlink), renewal config without files | certbot skips or fails on it at every run |
-| Expired / expiring certificates | renewal is failing somewhere |
-| Certificates used by no enabled vhost | leftovers that make `certbot renew` fail |
-| `standalone` renewals with `systemctl stop nginx` hooks | every renewal takes all sites down, and may leave nginx stopped |
-| Missing webroot, inactive `certbot.timer` | renewals cannot succeed |
-| nginx running outside systemd | `systemctl reload` does nothing, restarts fail with "address already in use" |
-| vhost pointing to a missing certificate, `nginx -t` failing | the next reload breaks every site |
-| Domains not resolving, or resolving to another server | site moved elsewhere: its vhost/certificate here are dead weight |
-
-Each problem comes with an explanation and, when safe, the command that fixes it. Mas never
-applies these fixes by itself.
+Light and dark theme (follows the system by default).
 
 ## Deploying from GitHub
 
@@ -244,7 +264,8 @@ REST, Realtime, Storage, Studio) on the server:
 - every published port is bound to `127.0.0.1` (Docker would otherwise bypass the firewall);
 - only the public API (`/rest`, `/auth`, `/realtime`, `/storage`, `/functions`, `/graphql`) is
   published through nginx, on the domain you pick (DNS record created like for apps), with HTTPS;
-- **Studio and pg-meta stay private**: Mas shows the SSH tunnel command and the Studio login;
+- **Studio stays private**: on the Supabase domain it only answers the local network and the
+  addresses you allow (Databases page), behind its login; otherwise through the SSH tunnel Mas shows;
 - secrets (Postgres password, JWT secret, `anon` / `service_role` keys) are generated by Mas and
   stored encrypted;
 - a `pg_dump` runs every day, the last 7 are kept in `/var/lib/mas/backups/supabase`.
@@ -338,6 +359,8 @@ certificate of its address and shows how to use it.
   (`stacks_keep_backups` in `[deploy]`), and they outlive the service. **Back up now** and
   **Restore** are on the service's page; a restore puts the current data aside in
   `data.before-restore` first.
+- Minecraft servers start with a 512 MB heap that grows up to the memory you chose, and give it back
+  when nobody plays.
 - For mail, ask your hosting provider for the reverse DNS (PTR) of the server and check that it does
   not block outgoing port 25.
 
@@ -419,6 +442,8 @@ The **Load balancing** card of a Node.js, Next.js or Python app spreads its traf
   `mas-app-<id>.2.service`…, each on its own loopback port) to use every CPU core. A redeploy
   restarts them one at a time and checks each one before the next, so the site never goes down;
   if an instance does not come back, the release is rolled back.
+- **Servers of the cluster**: copies built by Mas on the agents you tick (see
+  [Several servers](#several-servers-cluster)).
 - **Other servers**: `host:port` of copies of the app you run elsewhere, typically over a
   private network. They are added to the same pool.
 
@@ -435,6 +460,19 @@ vhost) and gets its certificate **before** the build, so visitors never land on 
 vhost (the `421 Misdirected Request` you would otherwise get over HTTP/2). The real site replaces
 it once the health check passes; if the first deployment fails, a “not available yet” page stays.
 Proxied apps also show the page during the second or two of a restart instead of a 502.
+
+### Replacing a detected site with an app
+
+A site Mas detected (a PHP folder, a static site, a PM2 app…) can be replaced by a Mas app built from
+its repository, **without interruption**: the app is built and checked next to the old site, then
+the old nginx files leave and the app's vhost arrives in the same reload. If the first deployment
+fails, the old site stays as it was. The service page offers **Replace with a Mas app**; removing
+the app later puts the old site back.
+
+### Redeploy all
+
+**Apps → Redeploy all** queues a deployment of the latest commit of every app from GitHub; they run
+one after the other (services of the catalog are not touched).
 
 ### Adopting an existing service
 
@@ -456,6 +494,113 @@ $ sudo mas github status
 
 Pull-request preview deployments are not implemented yet; the data model (an `environment`
 per app) is ready for them.
+
+## Running the server
+
+### Resources
+
+The **Resources** page shows what uses the memory and the CPU of the server, everything at once,
+refreshed every 10 seconds: one row per Mas app (all its instances), per compose project (services
+of the catalog, Supabase, your own compose files), per other system service, Mas itself and the user
+sessions, sorted by memory, with the CPU of each. It reads the cgroups of systemd
+(`memory.current` without the inactive file cache, `cpu.stat`), so measuring the whole server
+costs almost nothing.
+
+Each Node.js, Next.js or Python app has a **Resources** card (also editable from that page):
+
+- **Memory limit**: written in its units (`MemoryHigh` at 90 %, `MemoryMax`); Node apps get a
+  matching `--max-old-space-size`. An app that leaks slows down and restarts alone instead of taking
+  the memory of the others.
+- **Sleep when idle**: after N minutes without a request the app is stopped and uses nothing. The
+  next visitor wakes it up through Mas and sees a short "starting" page meanwhile.
+- **Instances follow the traffic**: between a minimum and a maximum, one more instance per 600
+  requests a minute or when the CPU stays above 70 %, one less after 10 quiet minutes. Instances are
+  started and stopped without a rebuild.
+- **Advice** from what the app really uses: a limit to set, a limit that is too tight, an app that
+  could sleep, instances that could follow the traffic, `output: "standalone"` for Next.js, a
+  Minecraft container that reserves all its memory. **Apply** applies one, **Apply all advice**
+  every one of them.
+
+### Traffic statistics
+
+The page of every app and every site of the server has a **Traffic** card: requests, page views and
+visitors per day (7 to 365 days) and the most viewed pages. They are counted from the nginx access
+logs, incrementally, without cookies or scripts: no IP address is kept, robots, images and scripts
+are left out of page views, and a visitor is counted once per day. Sites without an access log of
+their own are counted from `/var/log/nginx/mas-hosts.access.log`, which Mas adds for them (each line
+starts with the site name).
+
+### Maintenance mode
+
+**Apps → Maintenance** (or the **Maintenance** card of an app) puts a site on hold: visitors get a
+page of your choice with a `503` and `Retry-After` (search engines come back later), the addresses
+you allow still see the real site, and the app keeps running. A maintenance can end by itself at a
+set time, and every site can go into maintenance (or come back) at once.
+
+- **Pages** are written by Mas from a title, a message, a return time and a color, or **imported**:
+  one HTML file, or a ZIP of a folder with an `index.html` and its images, styles and fonts. Mas adds
+  a `<base>` so that relative links work from any URL of the site. Every page has a preview and can
+  be used on every site.
+- Turning it on never rewrites the vhost: Mas writes a `geo` and a `map` in
+  `/etc/nginx/conf.d/mas-maintenance.conf` and a snippet the vhost includes, tests with `nginx -t`
+  and reloads; the page and ACME challenges always pass.
+- It applies to the sites whose nginx configuration Mas writes (apps and services with a domain).
+
+### Restart everything, identical
+
+**Overview → Restart everything** restarts every running service exactly as it was, after showing
+the list (you can untick some). Containers are restarted in place through the Docker API, never
+recreated: same container, image, variables, volumes and ports. Units restart with
+`systemctl restart`, PM2 apps with `pm2 restart`, then the Mas apps one instance at a time with a
+health check, and nginx is reloaded last after `nginx -t`. Inside a compose project, the containers
+the others depend on go first. Mas compares the configuration of each service before and after and
+reports *identical* or what changed; what was stopped stays stopped. Mas itself, nginx, Docker and
+SSH are left alone.
+
+### Health checks
+
+`mas doctor` (CLI) and the **Health** page check, read-only:
+
+| Check | Why it matters |
+|-------|----------------|
+| Broken certbot lineage (`live/*/cert.pem` not a symlink), renewal config without files | certbot skips or fails on it at every run |
+| Expired / expiring certificates | renewal is failing somewhere |
+| Certificates used by no enabled vhost | leftovers that make `certbot renew` fail |
+| `standalone` renewals with `systemctl stop nginx` hooks | every renewal takes all sites down, and may leave nginx stopped |
+| Missing webroot, inactive `certbot.timer` | renewals cannot succeed |
+| nginx running outside systemd | `systemctl reload` does nothing, restarts fail with "address already in use" |
+| vhost pointing to a missing certificate, `nginx -t` failing | the next reload breaks every site |
+| Domains not resolving, or resolving to another server | site moved elsewhere: its vhost/certificate here are dead weight |
+
+Each problem comes with an explanation and, when safe, the command that fixes it. Mas never
+applies these fixes by itself.
+
+## Several servers (cluster)
+
+The **Servers** page turns several Mas servers into one cluster, driven from one dashboard.
+
+1. On each other server, install Mas, then make it an **agent**: no dashboard, it only answers the
+   calls of the primary server on its private address (a VPC, WireGuard or Tailscale network, never
+   a public one).
+
+   ```console
+   $ sudo mas agent init --address 10.0.0.2      # prints the join token, shown once
+   $ sudo mas agent token                        # another token later
+   ```
+
+2. On the primary: **Servers → Add a server** with `http://10.0.0.2:7070` and the token. Tokens are
+   stored hashed, give the right to deploy code on that server, and can be revoked.
+3. On an app's **Load balancing** card, tick the servers it should run on. Every deploy builds the
+   same commit on each of them (with a short-lived clone token from the primary's GitHub App), and
+   nginx on the primary spreads the requests over every copy that answers.
+
+- **Live map**: which server runs which copy, and the requests of the last minute per backend.
+- **Auto-fill**: a server silent for 2 minutes has its copies rebuilt on another available server.
+- **If the primary is lost**: the primary keeps sending its state (apps, settings, encrypted) to the
+  agents. On one of them, `sudo mas agent promote` makes it the primary: its copies become the apps,
+  the other apps are built there, and it drives the remaining servers. Point the domains to it; if
+  the former primary comes back, the others refuse its orders (each promotion raises an epoch).
+- `sudo mas agent leave` turns an agent back into a normal Mas with its dashboard.
 
 ## How detection works
 
@@ -537,6 +682,12 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   when the user's daemon is already running (it would otherwise start one), and as that user.
 - **Secrets** found along the way (credentials in git remotes, PM2 environment variables) are
   neither stored nor displayed. The database (`/var/lib/mas/mas.db`) is `0600`, root only.
+- **Cluster**: join tokens are random, stored hashed and revocable; servers talk over the private
+  network only; the state sent to the agents is encrypted, and a promoted server's epoch makes the
+  others refuse a former primary.
+- **Maintenance pages** are public files (every visitor of a site in maintenance gets them): the
+  dashboard previews them in a sandboxed frame without scripts; imported ZIPs cannot write outside
+  their folder or add hidden files.
 - **Lost phone**: `sudo mas user 2fa-reset` on the server. Root on the server is the
   recovery path.
 - **Why the agent runs as root**: it must read `/proc` for every user, `ss -p` and the Docker
@@ -548,11 +699,12 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
 ## Beta: known limitations
 
 - Debian (and derivatives) with nginx only; Apache/Caddy servers are not detected.
-- One admin account; no 2FA recovery codes yet (`sudo mas user 2fa-reset` on the server).
+- Administrator accounts are created on the server; no 2FA recovery codes yet (`sudo mas user 2fa-reset`).
 - No pull-request preview deployments yet; one production branch per app.
 - DNS providers other than OVH and Cloudflare are implemented from their API documentation and
   not yet battle-tested: please report issues.
 - The dashboard CSP keeps `'unsafe-inline'` (required by the static Next.js export).
+- Resources and traffic need cgroup v2 (Debian 11+): on older systems only Mas apps are measured.
 
 ## Development
 
@@ -582,9 +734,12 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
       releases, generated systemd unit and nginx vhost, certbot, health check with automatic
       rollback, 5 releases kept, live build logs (SSE), adoption of detected services.
 - [x] **Load balancing on one server**: several instances per app, outside backends, rolling restarts.
-- [ ] **Cluster**: choose the role at install time (`standalone`, `primary`, `node`); a primary
-      deploys an app on several nodes through a Mas agent and balances between them.
-- [ ] Later: preview deployments per pull request, recovery codes for 2FA, notifications.
+- [x] **Services, Supabase and CMS**: ready-made services with backups, self-hosted Supabase, a CMS
+      for clients, traffic statistics, dashboard in four languages.
+- [x] **Cluster**: agents, copies of apps on several servers, live map, auto-fill, promotion.
+- [x] **Resources and operations**: Resources page, memory limits, sleep when idle, autoscaling,
+      advice, restart everything identical, maintenance mode.
+- [ ] Next: preview deployments per pull request, recovery codes for 2FA, notifications.
 
 ## License
 
