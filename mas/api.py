@@ -27,6 +27,7 @@ from mas.github import GitHubApp
 from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas.sitestats import SiteStats, service_target
+from mas.usage import Usage
 from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
@@ -226,6 +227,7 @@ def create_app(
         Cluster(host, config, db, deployer)
     resources = Resources(host, config, db, deployer, cluster)
     restart_all = RestartAll(host, config, db, deployer, scanner)
+    usage = Usage(host, config, db, scanner, resources)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -486,6 +488,11 @@ def create_app(
         if not target["domain"]:
             return {**NO_STATS, "reason": "no-domain"}
         return await asyncio.to_thread(site_stats.report, target, days)
+
+    @app.get("/api/usage")
+    async def usage_overview(_: SessionInfo = Depends(current_session)) -> dict:
+        """Memory and CPU of everything on the server, grouped by app / project / service."""
+        return await asyncio.to_thread(usage.overview)
 
     # -- restart every service at once, exactly as it was ------------------------
 

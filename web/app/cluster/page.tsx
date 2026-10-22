@@ -131,7 +131,7 @@ function Metrics({ info }: { info: ServerInfo }) {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-3 text-sm">
-        <div><div className="text-xs text-zinc-500">CPU</div><div className="tabular-nums">{info.load[0]?.toFixed(2)} <span className="text-xs text-zinc-500">/ {info.cpus} {t("cores")}</span></div></div>
+        <div><div className="text-xs text-zinc-500">CPU</div><div className="tabular-nums">{info.cpus ? `${Math.round((info.load[0] / info.cpus) * 100)} %` : info.load[0]?.toFixed(2)} <span className="text-xs text-zinc-500">{t("load {load} / {n} cores", { load: info.load[0]?.toFixed(2), n: info.cpus ?? "?" })}</span></div></div>
         <div><div className="text-xs text-zinc-500">{t("Up for")}</div><div>{uptime(info.uptime_s, t)}</div></div>
         <div><div className="text-xs text-zinc-500">Mas</div><div className="mono text-xs">{info.version}</div></div>
       </div>

@@ -12,6 +12,7 @@ import {
   StatusDot, Terminal, Textarea,
 } from "@/components/ui";
 import { api, ApiError, SERVICE_TYPES, timeAgo, type App, type Release } from "@/lib/api";
+import { ADVICE } from "@/lib/advice";
 import { msg, tr, useT } from "@/lib/i18n";
 
 const RUNNING = new Set(["queued", "building"]);
@@ -30,13 +31,6 @@ interface ResourcesInfo {
   target_rpm_per_instance: number; memory_now_mb: number | null; advice: Advice[];
 }
 
-const ADVICE: Record<string, string> = {
-  "memory-limit": msg("Uses {used} MB per instance with no limit: cap it at {mb} MB so it cannot take the memory of the other apps."),
-  "memory-high": msg("Uses {used} MB per instance, close to its {limit} MB limit: it slows down then restarts. Give it more or look for a leak."),
-  sleep: msg("Almost no visits ({rpm} req/min): let it sleep after {min} minutes without a visit, it starts again on the next one."),
-  autoscale: msg("{n} instances for {rpm} req/min: let the instances follow the traffic instead."),
-  "next-standalone": msg("Add output: \"standalone\" to next.config: the server loads only the files it needs and uses much less memory."),
-};
 
 function ResourcesCard({ app }: { app: App }) {
   const t = useT();

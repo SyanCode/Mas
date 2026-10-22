@@ -39,6 +39,7 @@ const NAV = [
   { href: "/", label: msg("Overview"), match: (p: string) => p === "/" || p.startsWith("/service") },
   { href: "/apps/", label: msg("Apps"), match: (p: string) => p.startsWith("/apps") },
   { href: "/databases/", label: msg("Databases"), match: (p: string) => p.startsWith("/databases") },
+  { href: "/resources/", label: msg("Resources"), match: (p: string) => p.startsWith("/resources") },
   { href: "/cluster/", label: msg("Servers"), match: (p: string) => p.startsWith("/cluster") },
   { href: "/health/", label: msg("Health"), match: (p: string) => p.startsWith("/health") },
   { href: "/history/", label: msg("Activity"), match: (p: string) => p.startsWith("/history") },
