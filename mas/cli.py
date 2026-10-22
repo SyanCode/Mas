@@ -362,6 +362,26 @@ def user_create(
         _enroll_totp(env.db, user_id, username)
 
 
+@user_app.command("rename")
+def user_rename(
+    ctx: typer.Context,
+    username: Annotated[str, typer.Argument(help="Current login name.")],
+    new: Annotated[str, typer.Argument(help="New login name.")],
+) -> None:
+    """Change the login name of an account (password, 2FA and sessions are kept)."""
+    env: Env = ctx.obj
+    new = new.strip().lower()
+    _get_user(env, username)
+    if not auth.USERNAME_RE.fullmatch(new):
+        fail("username: 2-32 chars, lowercase letters, digits, . _ -")
+    if env.db.get_user(new):
+        fail(f"user {new!r} already exists")
+    env.db.rename_user(username, new)
+    env.db.audit(actor(), "user-rename", True, detail=f"{username} → {new}")
+    console.print(f"[green]✓[/] {username} is now {new} (the authenticator app keeps working; "
+                  "its label shows the old name until you run `mas user 2fa`)")
+
+
 @user_app.command("list")
 def user_list(ctx: typer.Context) -> None:
     """List accounts."""

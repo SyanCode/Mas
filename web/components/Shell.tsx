@@ -86,7 +86,7 @@ function UserMenu({ session }: { session: Session }) {
         {session.username.slice(0, 1).toUpperCase()}
       </button>
       {open && (
-        <div className="glass absolute right-0 top-10 z-40 w-56 rounded-xl p-1.5 shadow-2xl dark:bg-zinc-950/90" onMouseLeave={() => setOpen(false)}>
+        <div className="panel absolute right-0 top-10 z-40 w-56 rounded-xl p-1.5" onMouseLeave={() => setOpen(false)}>
           <div className="px-3 py-2">
             <div className="text-sm font-medium">{session.username}</div>
             <div className="text-xs text-zinc-500">{session.totp_enabled ? t("2FA enabled") : t("2FA off")} · v{session.version}</div>

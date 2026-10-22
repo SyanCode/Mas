@@ -69,7 +69,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-[12vh] backdrop-blur-sm" onMouseDown={onClose}>
       <div
-        className="glass ring-gradient w-full max-w-xl overflow-hidden rounded-2xl shadow-[0_30px_80px_-20px_rgba(99,102,241,0.45)] dark:bg-zinc-950/80"
+        className="panel ring-gradient w-full max-w-xl overflow-hidden rounded-2xl shadow-[0_30px_80px_-20px_rgba(99,102,241,0.45)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-zinc-200/80 px-4 dark:border-white/[0.06]">

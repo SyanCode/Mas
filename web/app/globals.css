@@ -82,6 +82,10 @@ body {
 .glass {
   @apply border border-zinc-200/80 bg-white/70 backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.03];
 }
+/* Menus and dialogs: opaque, so what is behind never shows through the text. */
+.panel {
+  @apply border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-zinc-950;
+}
 .text-gradient {
   @apply bg-gradient-to-r from-indigo-400 via-sky-300 to-fuchsia-400 bg-clip-text text-transparent;
 }

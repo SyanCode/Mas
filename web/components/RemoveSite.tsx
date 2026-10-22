@@ -42,7 +42,7 @@ export function RemoveSite({ serviceId }: { serviceId: string }) {
     <>
       <Button variant="danger" onClick={() => setOpen(true)}>{t("Remove the site")}</Button>
       <dialog ref={ref} onCancel={() => setOpen(false)}
-        className="glass m-auto w-[min(92vw,30rem)] rounded-2xl p-0 text-zinc-900 shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-sm dark:bg-zinc-950/90 dark:text-zinc-100">
+        className="panel m-auto w-[min(92vw,30rem)] rounded-2xl p-0 text-zinc-900 backdrop:bg-black/60 backdrop:backdrop-blur-sm dark:text-zinc-100">
         <div className="space-y-3 p-6 text-sm">
           <h3 className="text-base font-semibold">{t("Remove the site?")}</h3>
           <p className="text-zinc-600 dark:text-zinc-400">{t("Nothing runs behind it any more. nginx stops serving it: a link in sites-enabled is removed (its file stays in sites-available), another file is moved to /etc/nginx/mas-removed. If nginx -t refuses, everything is put back.")}</p>

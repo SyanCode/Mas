@@ -65,7 +65,7 @@ export function RestartAll() {
     <>
       <Button onClick={() => { setStarted(false); setSkip([]); setOpen(true); }}>{t("Restart everything")}</Button>
       <dialog ref={ref} onCancel={() => setOpen(false)}
-        className="glass m-auto w-[min(94vw,40rem)] rounded-2xl p-0 text-zinc-900 shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-sm dark:bg-zinc-950/90 dark:text-zinc-100">
+        className="panel m-auto w-[min(94vw,40rem)] rounded-2xl p-0 text-zinc-900 backdrop:bg-black/60 backdrop:backdrop-blur-sm dark:text-zinc-100">
         <div className="space-y-4 p-6">
           <h3 className="text-base font-semibold">{t("Restart every service")}</h3>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">

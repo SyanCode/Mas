@@ -232,6 +232,10 @@ class Database:
             )
             return int(cur.lastrowid)
 
+    def rename_user(self, username: str, new: str) -> bool:
+        with self.tx() as c:
+            return c.execute("UPDATE users SET username = ? WHERE username = ?", (new, username)).rowcount > 0
+
     def delete_user(self, username: str) -> bool:
         with self.tx() as c:
             return c.execute("DELETE FROM users WHERE username = ?", (username,)).rowcount > 0

@@ -243,7 +243,7 @@ export function ConfirmDialog({
     <dialog
       ref={ref}
       onCancel={onCancel}
-      className="glass m-auto w-[min(92vw,28rem)] rounded-2xl p-0 text-zinc-900 shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-sm dark:bg-zinc-950/90 dark:text-zinc-100"
+      className="panel m-auto w-[min(92vw,28rem)] rounded-2xl p-0 text-zinc-900 backdrop:bg-black/60 backdrop:backdrop-blur-sm dark:text-zinc-100"
     >
       <div className="space-y-3 p-6">
         <h3 className="text-base font-semibold">{title}</h3>

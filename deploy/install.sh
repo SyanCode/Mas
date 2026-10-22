@@ -4,6 +4,7 @@
 #   sudo ./deploy/install.sh                       # asks for the dashboard domain
 #   sudo ./deploy/install.sh --domain mas.example.com --email you@example.com
 #   sudo ./deploy/install.sh --no-nginx            # API on 127.0.0.1:7070 only (SSH tunnel)
+#   sudo ./deploy/install.sh --admin syan          # name of the first account (asked otherwise)
 #
 # Layout: /opt/mas/{src,venv}  /etc/mas/config.toml  /var/lib/mas/mas.db
 set -euo pipefail
@@ -20,7 +21,7 @@ STAMP=$(date +%Y%m%d%H%M%S)
 
 DOMAIN=""
 EMAIL=""
-ADMIN="admin"
+ADMIN=""
 WITH_NGINX=1
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -124,7 +125,16 @@ fi
 # -- admin account (before the service, so the dashboard is never open) ------
 if [ -z "$(mas user list 2>/dev/null)" ]; then
     log "Creating the admin account"
-    [ -t 0 ] || die "no admin account yet: run 'sudo mas user create' interactively"
+    [ -t 0 ] || die "no admin account yet: run 'sudo mas user create <name>' interactively"
+    while [ -z "$ADMIN" ]; do
+        read -r -p "Admin username [admin]: " ADMIN
+        ADMIN=${ADMIN:-admin}
+        ADMIN=${ADMIN,,}
+        if ! [[ "$ADMIN" =~ ^[a-z][a-z0-9_.-]{1,31}$ ]]; then
+            warn "2-32 characters: lowercase letters, digits, . _ - (starting with a letter)"
+            ADMIN=""
+        fi
+    done
     mas user create "$ADMIN"
 fi
 

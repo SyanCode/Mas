@@ -95,6 +95,11 @@ def test_cli_user_and_history(host, tmp_path):
     assert "at least 10" in r.output
     r = runner.invoke(app, [*base, "user", "list"])
     assert "admin" in r.output and "2FA off" in r.output
+    r = runner.invoke(app, [*base, "user", "rename", "admin", "Syan"])
+    assert r.exit_code == 0, r.output
+    r = runner.invoke(app, [*base, "user", "list"])
+    assert r.output.startswith("syan ")  # "admin" after it is the role
+    assert runner.invoke(app, [*base, "user", "rename", "syan", "9bad"]).exit_code != 0
     r = runner.invoke(app, [*base, "restart", "api.example.com"], input="n\n")
     assert r.exit_code != 0  # aborted at the confirmation
     r = runner.invoke(app, [*base, "history"], env={"COLUMNS": "200"})
