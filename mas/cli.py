@@ -101,7 +101,11 @@ def main(
     db: Annotated[Optional[Path], typer.Option(hidden=True, help="Database path (development).")] = None,
 ) -> None:
     if version:
-        console.print(f"mas {__version__}")
+        from mas.banner import colors, render
+        if colors():  # a terminal: the logo; a script still gets "mas <version>"
+            sys.stdout.write(render(__version__))
+        else:
+            print(f"mas {__version__}")
         raise typer.Exit()
     ctx.obj = Env(fixture, db)
     if fixture is None and ctx.invoked_subcommand not in NO_UPDATE_CHECK:
@@ -902,6 +906,9 @@ def self_update_cmd(
         self_update(env.config, from_archive, restart=not no_restart, log=console.print)
     except UpdateError as exc:
         fail(str(exc))
+    from mas.banner import colors, render, version_from_source
+    if colors():
+        sys.stdout.write(render(version_from_source(env.config.src_dir) or __version__, subtitle="updated"))
     console.print("[green]✓[/] Mas updated")
 
 

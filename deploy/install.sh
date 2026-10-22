@@ -199,7 +199,7 @@ fi
 # -- done ---------------------------------------------------------------------
 sleep 1
 systemctl is-active --quiet mas || warn "mas.service is not running: journalctl -u mas -n 50"
-echo
+mas --version 2>/dev/null || true
 log "Mas is installed"
 if [ -n "$URL" ]; then
     echo "    Dashboard: $URL"
