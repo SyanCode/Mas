@@ -16,3 +16,12 @@ def test_plain_and_colored():
 def test_version_stays_plain_for_scripts():
     assert CliRunner().invoke(app, ["--version"]).output.strip() == f"mas {__version__}"
     assert version_from_source() == __version__
+
+
+def test_logo_is_symmetric_and_the_word_centered():
+    lines = ART.splitlines()
+    for line in lines:
+        logo = line[:24].ljust(24)
+        assert logo == logo[::-1]
+    word = [i for i, line in enumerate(lines) if line[24:].strip()]
+    assert word[0] + word[-1] == len(lines) - 1  # same distance to the top and the bottom of the logo
