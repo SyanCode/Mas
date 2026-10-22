@@ -19,13 +19,19 @@ export default function SignupPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const token = new URLSearchParams(window.location.search).get("invite");
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const legacyToken = new URLSearchParams(window.location.search).get("invite");
+    const token = params.get("invite") || legacyToken;
+    if (legacyToken) {
+      // Keep old invitation links working, but remove the bearer token from
+      // the request URL and browser history before making any API call.
+      window.history.replaceState(null, "", `${window.location.pathname}#invite=${encodeURIComponent(token || "")}`);
+    }
     setInvite(token);
-    const query = token ? `?invite=${encodeURIComponent(token)}` : "";
-    api<{ open: boolean; code_required: boolean; invite: boolean | null }>(`/signup${query}`)
+    api<{ open: boolean; code_required: boolean; invite: boolean | null }>("/signup")
       .then(setInfo).catch(() => setInfo({ open: false, code_required: false, invite: null }));
   }, []);
-  const invited = !!invite && info?.invite === true;
+  const invited = !!invite;
 
   async function submit(e: FormEvent) {
     e.preventDefault();

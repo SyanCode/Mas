@@ -40,6 +40,7 @@ log = logging.getLogger(__name__)
 
 FINAL_STATUSES = {"live", "failed", "superseded"}
 HEALTH_TTL = 300
+MAX_WEBHOOK_BYTES = 25 * 1024 * 1024  # GitHub's maximum webhook payload size
 
 
 class ManifestBody(BaseModel):
@@ -153,7 +154,8 @@ def register(
         try:
             return fn(*args)
         except GitHubError as exc:
-            raise HTTPException(502, str(exc)) from None
+            log.exception("GitHub API call failed")
+            raise HTTPException(502, "GitHub API error") from None
 
     # -- health (phase 2.5) ------------------------------------------------
 
@@ -278,7 +280,13 @@ def register(
 
     @app.post("/api/github/webhook")
     async def github_webhook(request: Request) -> dict:
-        body = await request.body()
+        # Do not trust Content-Length: chunked requests can omit it or lie.
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > MAX_WEBHOOK_BYTES:
+                raise HTTPException(413, "webhook payload too large")
+        body = bytes(body)
         if not verify_signature(config.github_webhook_secret, body, request.headers.get("x-hub-signature-256")):
             raise HTTPException(401, "invalid signature")
         # A captured (validly signed) delivery must not be replayable.
@@ -381,8 +389,7 @@ def register(
         rid = deployer.enqueue(body.id, "create", s.username)
         return app_payload(db.get_app(body.id), db) | {"release_id": rid}
 
-    @app.post("/api/apps/adopt")
-    async def adopt(body: AdoptService, s=Depends(current_session)) -> dict:
+    async def adoption_plan(body: AdoptService) -> dict:
         svc = scanner.get(body.service_id)
         if svc is None:
             raise HTTPException(404, "unknown service")
@@ -407,10 +414,30 @@ def register(
         git_root = svc.path
         while git_root not in ("", "/") and not host.exists(f"{git_root}/.git"):
             git_root = str(Path(git_root).parent).replace("\\", "/")
+        git_root = git_root if git_root not in ("", "/") else svc.path
+        return {"service": svc, "repo": repo, "installation": installation, "app_id": app_id,
+                "branch": branch, "path": git_root}
+
+    @app.post("/api/apps/adopt/preview")
+    async def preview_adoption(body: AdoptService, _=Depends(current_session)) -> dict:
+        plan = await adoption_plan(body)
+        svc = plan["service"]
+        return {"service_id": svc.id, "app_id": plan["app_id"], "repo": plan["repo"],
+                "branch": plan["branch"], "type": svc.type.value, "path": plan["path"],
+                "manager": svc.manager.value, "status": svc.status.value, "domains": svc.domains,
+                "effects": ["Register this existing checkout with Mas; files are not copied or moved.",
+                            "A future deploy or push updates this checkout in place, builds it, and restarts its service.",
+                            "Mas refuses deployment while the checkout has uncommitted tracked changes."]}
+
+    @app.post("/api/apps/adopt")
+    async def adopt(body: AdoptService, s=Depends(current_session)) -> dict:
+        plan = await adoption_plan(body)
+        svc, repo, installation = plan["service"], plan["repo"], plan["installation"]
+        app_id, branch, git_root = plan["app_id"], plan["branch"], plan["path"]
         db.create_app(app_id, name=svc.display_name or svc.name, repo=repo, branch=branch,
                       installation_id=installation, domain=svc.domains[0] if svc.domains else None,
                       type=svc.type.value, port=svc.port, mode="adopted", service_id=svc.id,
-                      path=git_root if git_root not in ("", "/") else svc.path, auto_deploy=1)
+                      path=git_root, auto_deploy=1)
         db.audit(s.username, "app-adopt", True, svc.id, detail=f"{app_id}: {repo}@{branch}")
         return app_payload(db.get_app(app_id), db)
 

@@ -12,7 +12,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from mas.config import Config
 
@@ -37,8 +37,17 @@ def _extract(tarball: Path, dest: Path) -> Path:
             tar.extractall(dest, filter="data")
         except TypeError:  # Python without extraction filters
             for member in tar.getmembers():
-                if member.name.startswith(("/", "..")) or ".." in Path(member.name).parts:
+                # Validate names using both archive (POSIX) and host (Windows)
+                # path rules, then reject links and special files. Without the
+                # data filter, a link could redirect a later archive member
+                # outside dest even when that member's own name looks safe.
+                posix = PurePosixPath(member.name)
+                windows = PureWindowsPath(member.name)
+                if (posix.is_absolute() or windows.is_absolute() or windows.drive
+                        or ".." in posix.parts or ".." in windows.parts):
                     raise UpdateError(f"unsafe path in archive: {member.name}")
+                if not (member.isdir() or member.isfile()):
+                    raise UpdateError(f"unsupported member in archive: {member.name}")
             tar.extractall(dest)
     root = dest
     entries = [p for p in dest.iterdir()]

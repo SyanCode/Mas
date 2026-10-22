@@ -682,6 +682,48 @@ class SupabaseManager:
                         "created_at": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).isoformat()})
         return out
 
+    def restore_backup(self, name: str) -> str:
+        """Restore a listed dump after validating it and creating a safety dump."""
+        if not re.fullmatch(r"supabase-\d{8}-\d{6}\.dump", name):
+            raise SupabaseError("unknown backup")
+        inst = self.get()
+        if not inst or inst["status"] != "running":
+            raise SupabaseError("Supabase must be running to restore a backup")
+        archive = self.backups_dir() / name
+        if not archive.is_file() or archive.stat().st_size == 0:
+            raise SupabaseError("unknown or empty backup")
+
+        inside = f"/tmp/mas-restore-{secrets.token_hex(8)}.dump"
+        copied = self.host.run(["docker", "cp", str(archive), f"{DB_CONTAINER}:{inside}"], timeout=60)
+        if copied is None or not copied.ok:
+            raise SupabaseError(f"could not copy backup into the database container: "
+                                f"{(copied.stderr if copied else 'docker missing').strip()[-300:]}")
+        safety = None
+        try:
+            check = self.host.run(["docker", "exec", DB_CONTAINER, "pg_restore", "--list", inside], timeout=120)
+            if check is None or not check.ok:
+                raise SupabaseError(f"backup validation failed: "
+                                    f"{(check.stderr if check else 'docker missing').strip()[-500:]}")
+
+            # Keep a fresh copy of the current database before applying a restore.
+            safety = self.backup()
+            argv = ["docker", "exec", DB_CONTAINER, "pg_restore", "--exit-on-error", "--clean", "--if-exists",
+                    "--no-owner", "--no-privileges", "-U", "postgres", "-d", "postgres", inside]
+            restored = self.host.run(argv, timeout=3600)
+            if restored is None or not restored.ok:
+                detail = (restored.stderr if restored else "docker missing").strip()[-800:]
+                recovered = self.host.run(["docker", "cp", str(safety), f"{DB_CONTAINER}:{inside}"], timeout=60)
+                if recovered is not None and recovered.ok:
+                    rollback = self.host.run(argv, timeout=3600)
+                    if rollback is not None and rollback.ok:
+                        raise SupabaseError(f"restore failed and the original database was restored from "
+                                            f"{safety.name}: {detail}")
+                raise SupabaseError(f"restore failed and automatic recovery did not complete; "
+                                    f"safety backup {safety.name} is available: {detail}")
+            return safety.name
+        finally:
+            self.host.run(["docker", "exec", DB_CONTAINER, "rm", "-f", inside], timeout=30)
+
     def auto_backup(self) -> None:
         """Called periodically: one backup a day while Supabase runs."""
         inst = self.get()

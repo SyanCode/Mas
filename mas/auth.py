@@ -8,7 +8,7 @@ import re
 import secrets
 import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass
 
 import pyotp
@@ -137,28 +137,52 @@ def create_session(db: Database, user_id: int, ttl_seconds: float, ip: str | Non
 
 
 class RateLimiter:
-    """Sliding window counter, in memory (single process)."""
+    """Sliding window counter, in memory (single process), with bounded key storage."""
+
+    MAX_KEYS = 10_000
 
     def __init__(self, max_hits: int, window_seconds: float) -> None:
         self.max_hits = max_hits
         self.window = window_seconds
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self._hits: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
 
-    def _prune(self, key: str, now: float) -> deque[float]:
-        hits = self._hits[key]
+    def _prune(self, key: str, now: float) -> deque[float] | None:
+        hits = self._hits.get(key)
+        if hits is None:
+            return None
         while hits and hits[0] <= now - self.window:
             hits.popleft()
+        if not hits:
+            self._hits.pop(key, None)
+            return None
         return hits
+
+    def _prune_expired(self, now: float) -> None:
+        for key in list(self._hits):
+            self._prune(key, now)
 
     def blocked(self, key: str) -> bool:
         with self._lock:
-            return len(self._prune(key, time.monotonic())) >= self.max_hits
+            now = time.monotonic()
+            hits = self._prune(key, now)
+            if hits is None and len(self._hits) >= self.MAX_KEYS:
+                self._prune_expired(now)
+                # Fail closed under a key-flood rather than allocate without bound.
+                return len(self._hits) >= self.MAX_KEYS
+            return len(hits or ()) >= self.max_hits
 
     def hit(self, key: str) -> None:
         with self._lock:
             now = time.monotonic()
-            self._prune(key, now).append(now)
+            hits = self._prune(key, now)
+            if hits is None:
+                if len(self._hits) >= self.MAX_KEYS:
+                    self._prune_expired(now)
+                if len(self._hits) >= self.MAX_KEYS:
+                    return
+                hits = self._hits.setdefault(key, deque())
+            hits.append(now)
 
     def reset(self, key: str) -> None:
         with self._lock:

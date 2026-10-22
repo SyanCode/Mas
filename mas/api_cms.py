@@ -156,7 +156,9 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
                                      expires_at)
         db.audit(s.username, "invite-create", True,
                  detail=f"#{invite_id} {body.note.strip()} → {', '.join(body.apps) or 'no site'}".strip())
-        return {"id": invite_id, "path": f"/signup/?invite={token}", "expires_at": expires_at}
+        # URL fragments stay in the browser and are not sent in HTTP requests,
+        # access logs, or Referer headers.
+        return {"id": invite_id, "path": f"/signup/#invite={token}", "expires_at": expires_at}
 
     @app.delete("/api/invites/{invite_id}")
     def revoke_invite(invite_id: int, s=Depends(current_session)) -> dict:

@@ -252,6 +252,10 @@ function ServiceDetail() {
   const [confirm, setConfirm] = useState<string | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [rt, setRt] = useState<ServiceRuntime | null>(null);
+  const [adoption, setAdoption] = useState<{
+    service_id: string; app_id: string; repo: string; branch: string; type: string; path: string;
+    manager: string; status: string; domains: string[]; effects: string[];
+  } | null>(null);
 
   const load = useCallback(() => {
     api<Service>(`/services/${encodeURIComponent(id)}`).then(setSvc).catch((e: ApiError) => setError(e.detail));
@@ -272,7 +276,17 @@ function ServiceDetail() {
     }
   }
 
-  async function adopt() {
+  async function previewAdoption() {
+    try {
+      const plan = await api<typeof adoption>("/apps/adopt/preview", { method: "POST", body: { service_id: id } });
+      setAdoption(plan);
+    } catch (e) {
+      setResult({ ok: false, action: t("Connect to GitHub"), command: [], output: (e as ApiError).detail });
+    }
+  }
+
+  async function confirmAdoption() {
+    setAdoption(null);
     try {
       const created = await api<{ id: string }>("/apps/adopt", { method: "POST", body: { service_id: id } });
       window.location.href = `/apps/view/?id=${encodeURIComponent(created.id)}`;
@@ -310,7 +324,7 @@ function ServiceDetail() {
         </div>
         <div className="flex flex-wrap gap-2">
           {gh && svc.path && ["systemd", "pm2", "php-fpm", "nginx-static"].includes(svc.manager) && (
-            <Button onClick={adopt} title={t("Deploy this service on every push, in place")}>{t("Connect to GitHub")}</Button>
+            <Button onClick={previewAdoption} title={t("Review the changes before connecting this service")}>{t("Connect to GitHub")}</Button>
           )}
           {svc.app && (
             <Link href={`/apps/view/?id=${encodeURIComponent(svc.app.id)}`} className="inline-flex h-9 items-center rounded-lg border border-violet-400/40 px-3 text-sm font-medium text-violet-600 hover:bg-violet-500/10 dark:text-violet-300">
@@ -344,6 +358,28 @@ function ServiceDetail() {
           {result.output && <pre className="mono mt-1 whitespace-pre-wrap text-xs">{result.output}</pre>}
         </div>
       )}
+
+      <ConfirmDialog
+        open={adoption !== null}
+        title={t("Review service adoption")}
+        confirmLabel={t("Connect to GitHub")}
+        onCancel={() => setAdoption(null)}
+        onConfirm={confirmAdoption}
+        message={adoption ? (
+          <div className="space-y-3">
+            <p>{t("Mas will register this existing service. No files are changed now.")}</p>
+            <dl className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1 text-xs">
+              <dt>{t("App ID")}</dt><dd>{adoption.app_id}</dd>
+              <dt>{t("Repository")}</dt><dd className="break-all">{adoption.repo} · {adoption.branch}</dd>
+              <dt>{t("Type")}</dt><dd>{adoption.type}</dd>
+              <dt>{t("Folder")}</dt><dd className="break-all">{adoption.path}</dd>
+              <dt>{t("Service")}</dt><dd>{adoption.manager} · {t(adoption.status)}</dd>
+              {adoption.domains.length > 0 && <><dt>{t("Domains")}</dt><dd className="break-all">{adoption.domains.join(", ")}</dd></>}
+            </dl>
+            <ul className="list-disc space-y-1 pl-5 text-xs">{adoption.effects.map((effect) => <li key={effect}>{t(effect)}</li>)}</ul>
+          </div>
+        ) : null}
+      />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">

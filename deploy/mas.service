@@ -24,11 +24,16 @@ UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=full
 PrivateTmp=yes
+PrivateDevices=yes
 ReadWritePaths=-/var/lib/mas -/srv/mas -/etc/nginx -/etc/mas -/etc/systemd/system -/etc/letsencrypt
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
 RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 LockPersonality=yes
 
 [Install]

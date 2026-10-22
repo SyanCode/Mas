@@ -176,6 +176,12 @@ def register(app: FastAPI, *, host: Host, db: Database, current_session: Callabl
         db.audit(s.username, "supabase-backup", True, detail=path.name)
         return {"ok": True, "name": path.name}
 
+    @app.post("/api/supabase/backups/{name}/restore")
+    async def restore_backup(name: str, s=Depends(current_session)) -> dict:
+        safety = await asyncio.to_thread(call, manager.restore_backup, name)
+        db.audit(s.username, "supabase-restore", True, detail=f"{name}; safety backup {safety}")
+        return {"ok": True, "safety_backup": safety}
+
     @app.delete("/api/supabase")
     async def remove(purge: bool = False, s=Depends(current_session)) -> dict:
         done = await asyncio.to_thread(call, manager.remove, purge)

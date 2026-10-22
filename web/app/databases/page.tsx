@@ -162,6 +162,7 @@ function Databases() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [restoreBackup, setRestoreBackup] = useState<string | null>(null);
   const [purge, setPurge] = useState(false);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [components, setComponents] = useState<string[] | null>(null);
@@ -397,7 +398,13 @@ function Databases() {
             <p className="mb-3 text-xs text-zinc-500">{t("Daily pg_dump, last 7 kept in /var/lib/mas/backups/supabase.")}</p>
             <ul className="space-y-2 text-sm">
               {backups.map((b) => (
-                <li key={b.name} className="flex justify-between gap-2"><span className="mono truncate text-xs">{b.name}</span><span className="shrink-0 text-xs text-zinc-500">{(b.size / 1048576).toFixed(1)} MB · {timeAgo(b.created_at)}</span></li>
+                <li key={b.name} className="flex items-center justify-between gap-2">
+                  <span className="mono truncate text-xs">{b.name}</span>
+                  <span className="flex shrink-0 items-center gap-2 text-xs text-zinc-500">
+                    {(b.size / 1048576).toFixed(1)} MB · {timeAgo(b.created_at)}
+                    <Button disabled={!!busy || inst.status !== "running"} onClick={() => setRestoreBackup(b.name)}>{t("Restore")}</Button>
+                  </span>
+                </li>
               ))}
               {backups.length === 0 && <li className="text-zinc-500">{t("No backup yet.")}</li>}
             </ul>
@@ -415,6 +422,20 @@ function Databases() {
         danger
         onConfirm={() => { setConfirmRemove(false); run("remove", () => api(`/supabase?purge=${purge}`, { method: "DELETE" }), t("Supabase removed.")); }}
         onCancel={() => setConfirmRemove(false)}
+      />
+      <ConfirmDialog
+        open={restoreBackup !== null}
+        title={t("Restore database backup?")}
+        message={<span className="block space-y-2"><span className="block">{t("This replaces database objects with the selected backup. Mas first saves the current database as a safety backup.")}</span><code className="mono block break-all text-xs">{restoreBackup}</code></span>}
+        confirmLabel={t("Restore backup")}
+        danger
+        onConfirm={() => {
+          const name = restoreBackup;
+          setRestoreBackup(null);
+          if (name) run("restore", () => api<{ safety_backup: string }>(`/supabase/backups/${encodeURIComponent(name)}/restore`, { method: "POST" })
+            .then((r) => setMsg(t("Database restored. Safety backup: {name}", { name: r.safety_backup }))));
+        }}
+        onCancel={() => setRestoreBackup(null)}
       />
     </>
   );
