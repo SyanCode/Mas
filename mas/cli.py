@@ -35,6 +35,9 @@ user_app = typer.Typer(help="Manage the admin account and its two-factor authent
 nginx_app = typer.Typer(help="nginx helpers.", no_args_is_help=True)
 app.add_typer(user_app, name="user")
 app.add_typer(nginx_app, name="nginx")
+router_app = typer.Typer(help="Router port forwarding for temporary replacements (UPnP IGD).",
+                         no_args_is_help=True)
+app.add_typer(router_app, name="router")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -620,6 +623,97 @@ def rollback(ctx: typer.Context, app_id: Annotated[str, typer.Argument()],
         fail(f"rollback #{rid} failed")
 
 
+# -- Router port forwarding ---------------------------------------------------------
+
+ROUTER_REPLACEMENT_SETTING = "replacement_router_snapshot"
+
+
+@router_app.command("status")
+def router_status(ctx: typer.Context) -> None:
+    """Discover a local UPnP IGD router and list Mas-relevant capabilities."""
+    import ipaddress
+    from mas.router import RouterError, discover_gateway
+
+    try:
+        gateway = discover_gateway()
+    except RouterError as exc:
+        fail(str(exc))
+    console.print(f"[green]✓[/] UPnP IGD found ({gateway.service_type})")
+    try:
+        external_ip = gateway.external_address()
+        ip = ipaddress.ip_address(external_ip) if external_ip else None
+        if ip and not ip.is_global:
+            console.print(f"[yellow]![/] router WAN address {external_ip} is not public; check for CGNAT or double NAT")
+        else:
+            console.print(f"  WAN address: {external_ip or 'unknown'}")
+    except RouterError as exc:
+        console.print(f"[yellow]![/] could not read router WAN address: {exc}")
+    console.print("  Mas can inspect and move existing TCP/UDP forwarding rules on this router.")
+
+
+@router_app.command("switch")
+def router_switch(
+    ctx: typer.Context,
+    old_address: Annotated[str, typer.Argument(help="Current server LAN IPv4 address.")],
+    replacement_address: Annotated[str, typer.Argument(help="Replacement server LAN IPv4 address.")],
+) -> None:
+    """Move UPnP port mappings from the old server to its replacement."""
+    import ipaddress
+    import json
+    from mas.router import RouterError, discover_gateway, switch_to
+
+    env: Env = ctx.obj
+    for address in (old_address, replacement_address):
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            fail(f"invalid address: {address}")
+        if (ip.version != 4 or (not ip.is_private and ip not in ipaddress.ip_network("100.64.0.0/10"))
+                or ip.is_loopback or ip.is_link_local):
+            fail("UPnP router switching requires private LAN IPv4 addresses")
+    if env.db.get_setting(ROUTER_REPLACEMENT_SETTING):
+        fail("a router replacement snapshot already exists; restore it before starting another switch")
+    def save_snapshot(mappings: list[dict]) -> None:
+        if mappings:
+            env.db.set_setting(ROUTER_REPLACEMENT_SETTING,
+                               json.dumps({"old": old_address, "replacement": replacement_address,
+                                           "mappings": mappings}, separators=(",", ":")))
+
+    try:
+        gateway = discover_gateway()
+        snapshot = switch_to(gateway, old_address, replacement_address, before_switch=save_snapshot)
+    except RouterError as exc:
+        fail(str(exc))
+    if not snapshot:
+        fail(f"no UPnP forwarding rules target {old_address}; no router settings changed")
+    env.db.audit(actor(), "replacement-router-switch", True,
+                 detail=f"{len(snapshot)} mapping(s): {old_address} -> {replacement_address}")
+    console.print(f"[green]✓[/] {len(snapshot)} router mapping(s) moved to {replacement_address}")
+    console.print("  Restore the original target after maintenance with: mas router restore")
+
+
+@router_app.command("restore")
+def router_restore(ctx: typer.Context) -> None:
+    """Restore the router mappings saved by `mas router switch`."""
+    import json
+    from mas.router import RouterError, discover_gateway, restore
+
+    env: Env = ctx.obj
+    raw = env.db.get_setting(ROUTER_REPLACEMENT_SETTING)
+    if not raw:
+        fail("no saved router replacement snapshot")
+    try:
+        snapshot = json.loads(raw)
+        gateway = discover_gateway()
+        count = restore(gateway, snapshot["mappings"], snapshot["replacement"], snapshot["old"])
+    except (ValueError, KeyError, RouterError) as exc:
+        fail(str(exc))
+    env.db.set_setting(ROUTER_REPLACEMENT_SETTING, None)
+    env.db.audit(actor(), "replacement-router-restore", True,
+                 detail=f"{count} mapping(s): {snapshot['replacement']} -> {snapshot['old']}")
+    console.print(f"[green]✓[/] {count} router mapping(s) restored to {snapshot['old']}")
+
+
 # -- DNS providers -----------------------------------------------------------------
 
 dns_app = typer.Typer(help="DNS providers (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun) and server IPs.",
@@ -885,6 +979,25 @@ def agent_leave(ctx: typer.Context, restart: Annotated[bool, typer.Option(help="
     if restart:
         env.host.run(["systemctl", "restart", "mas"], timeout=60)
     console.print("[green]✓[/] this server is a normal Mas again (dashboard on 127.0.0.1, behind nginx)")
+
+
+@app.command("replacement-prepare")
+def replacement_prepare(
+    ctx: typer.Context,
+    remote: Annotated[str, typer.Argument(help="SSH target of the prepared replacement, in user@host form.")],
+    final: Annotated[bool, typer.Option("--final", help="Stop Mas, nginx and Docker during the final file sync.")] = False,
+) -> None:
+    """Copy Mas configuration, apps, service data and TLS files to a temporary host."""
+    from mas.replacement import Replacement, ReplacementError
+
+    env: Env = ctx.obj
+    try:
+        result = Replacement(env.host).prepare(remote, final=final)
+    except ReplacementError as exc:
+        fail(str(exc))
+    console.print(f"[green]✓[/] Replacement synchronized: {result['remote']}")
+    console.print("  copied: " + ", ".join(result["paths"]))
+    console.print("  " + result["next"])
 
 
 @app.command("self-update")

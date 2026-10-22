@@ -579,6 +579,30 @@ ces corrections de lui-même.
 
 La page **Serveurs** réunit plusieurs serveurs Mas en un seul cluster, piloté depuis un seul tableau de bord.
 
+### Préparer un serveur de remplacement temporaire
+
+Pour une maintenance du serveur principal, installez d'abord Mas sur un serveur de remplacement et
+configurez un accès SSH par clé et `sudo` sans mot de passe depuis le principal. `mas replacement-prepare
+user@remplacement` effectue une première copie de Mas, des apps, des données de services, de nginx et des
+certificats. Juste avant la coupure, relancez avec `--final` : Mas, nginx et Docker sont arrêtés le temps
+de la dernière copie, puis redémarrés sur le serveur d'origine. Arrêtez aussi les services autonomes et
+préparez les bases de données externes séparément ; la commande ne sait pas les figer.
+
+Mas ne commande pas encore la réservation d'un serveur ni le déplacement d'une IP publique. Après la
+synchronisation, basculez l'IP, les enregistrements DNS ou les redirections de ports du routeur vers le
+remplaçant, vérifiez les services, puis débranchez le serveur principal. Pour le DNS, Mas possède déjà
+des connecteurs pour OVHcloud, Cloudflare, Gandi, Hetzner DNS, DigitalOcean et Porkbun ; le domaine peut
+être enregistré ailleurs si ses serveurs DNS sont gérés par l'un de ces fournisseurs. Le retour se fait
+en synchronisant les changements vers le principal avant de rétablir le routage. Les bases de données
+externes et les services hors des répertoires listés par la commande doivent être transférés séparément.
+
+Pour un routeur ou une box d'opérateur avec UPnP IGD activé, Mas peut aussi gérer les redirections
+localement : `mas router status`, puis `mas router switch <IP-LAN-principal> <IP-LAN-remplacement>`.
+Les règles TCP/UDP sont sauvegardées et `mas router restore` les rétablit après la maintenance. Cette
+méthode standard peut fonctionner avec Freebox et d'autres box compatibles. Si UPnP IGD est désactivé
+ou absent, utilisez l'interface de la box ou un adaptateur spécifique. Une adresse WAN privée indique
+souvent du CGNAT ou un double NAT : les redirections locales ne suffisent alors pas pour recevoir le trafic Internet.
+
 1. Sur chacun des autres serveurs, installez Mas, puis faites-en un **agent** : pas de tableau de bord, il ne répond qu'aux
    appels du serveur principal sur son adresse privée (un réseau VPC, WireGuard ou Tailscale, jamais
    un réseau public).
