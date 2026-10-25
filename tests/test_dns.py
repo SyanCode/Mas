@@ -274,3 +274,66 @@ def test_cloudflare_point_domain():
     assert result["provider"] == "Cloudflare" and result["domain"] == "app.example.org"
     assert fake.records[0]["name"] == "app.example.org" and fake.records[0]["content"] == IP
     assert all("already set" in c for c in point_domain(cf, "example.org", "app", IP)["changes"])
+
+
+# -- root domains and their www ------------------------------------------------------------
+
+
+def test_root_domains():
+    from mas.domains import is_root, record_name, www_of
+    assert is_root("klarfi.com") and is_root("shop.co.uk")
+    assert not is_root("app.klarfi.com") and not is_root("www.klarfi.com") and not is_root("a.shop.co.uk")
+    assert www_of("Klarfi.com") == "www.klarfi.com" and www_of("app.klarfi.com") is None and www_of(None) is None
+    assert record_name("klarfi.com") == "@" and record_name("app.klarfi.com") == "app"
+    assert record_name("a.b.shop.co.uk") == "a.b"
+
+
+def test_root_domain_brings_its_www(api):
+    client, db, fake, queued, h = api
+    connect(client, h)
+    db.set_setting(IPV4_KEY, IP)
+    r = client.post("/api/apps/web/domain", json={"zone": "sxn.fr", "subdomain": ""}, headers=h)
+    assert r.status_code == 200, r.text
+    assert any(c.startswith("www: A ") for c in r.json()["changes"])
+    assert {(rec["subDomain"], rec["target"]) for rec in fake.records.values()} >= {("", IP), ("www", IP)}
+    assert json.loads(db.get_app("web")["aliases"]) == ["www.sxn.fr"]
+
+    # a sub-domain has no www; the www of the previous root domain goes with it
+    r = client.post("/api/apps/web/domain", json={"zone": "example.com", "subdomain": "web"}, headers=h)
+    assert not any(c.startswith("www") for c in r.json()["changes"])
+    assert db.get_app("web")["aliases"] is None
+
+
+def test_www_pointing_elsewhere_is_not_changed(api):
+    client, db, fake, queued, h = api
+    connect(client, h)
+    db.set_setting(IPV4_KEY, IP)
+    fake.add("example.com", "www", "A", "9.9.9.9")
+    r = client.post("/api/apps/web/domain", json={"zone": "example.com", "subdomain": ""}, headers=h)
+    assert r.status_code == 200
+    assert any("www: " in c and "not changed" in c for c in r.json()["changes"])
+    assert any(rec["subDomain"] == "www" and rec["target"] == "9.9.9.9" for rec in fake.records.values())
+
+
+def test_www_alias_on_create_and_patch_and_domain_check(api):
+    client, db, fake, queued, h = api
+    db.set_setting(IPV4_KEY, IP)
+    db.create_app("other", name="o", repo="acme/o", branch="main", type="static", domain="www.taken.com")
+    body = {"id": "site", "repo": "acme/site", "branch": "main", "installation_id": 1, "type": "static",
+            "domain": "klarfi.com"}
+    assert client.post("/api/apps", json=body, headers=h).json()["aliases"] == ["www.klarfi.com"]
+    taken = {**body, "id": "taken", "domain": "taken.com"}
+    assert client.post("/api/apps", json=taken, headers=h).json()["aliases"] == []  # its www is another app
+    assert client.patch("/api/apps/site", json={"domain": "app.klarfi.com"}, headers=h).json()["aliases"] == []
+    assert client.patch("/api/apps/site", json={"domain": "klarfi.fr"}, headers=h).json()["aliases"] == \
+        ["www.klarfi.fr"]
+
+    client.app.state.deployer.resolver = lambda name: {"klarfi.fr": [IP], "www.klarfi.fr": []}.get(name, ["9.9.9.9"])
+    checks = {c["name"]: c for c in client.get("/api/apps/site/domains").json()["domains"]}
+    assert checks["klarfi.fr"]["status"] == "ok"
+    assert checks["www.klarfi.fr"]["status"] == "missing"
+    assert checks["www.klarfi.fr"]["records"][0] == {"type": "CNAME", "name": "www", "value": "klarfi.fr."}
+    client.patch("/api/apps/site", json={"domain": "shop.klarfi.fr"}, headers=h)
+    checks = client.get("/api/apps/site/domains").json()["domains"]
+    assert checks == [{"name": "shop.klarfi.fr", "status": "elsewhere", "ips": ["9.9.9.9"],
+                       "records": [{"type": "A", "name": "shop", "value": IP}]}]

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { isRootDomain } from "@/components/DomainStatus";
 import { Input, Spinner } from "@/components/ui";
 import { api, type DnsCheck, type DnsStatus, type DnsZone } from "@/lib/api";
 import { useT } from "@/lib/i18n";
@@ -112,6 +113,9 @@ export function DomainPicker({ suggestion, onChange }: { suggestion: string; onC
               </p>
             )
           )}
+          {check && !checking && !check.cname && !check.used_by && isRootDomain(check.domain) && (
+            <p className="text-xs text-zinc-500">{t("www.{domain} is added too: Mas creates its record and serves it like {domain}.", { domain: check.domain })}</p>
+          )}
           <button type="button" onClick={() => setManual(true)} className="text-xs text-zinc-500 hover:underline">{t("DNS managed elsewhere? Type the domain")}</button>
         </>
       ) : (
@@ -119,6 +123,7 @@ export function DomainPicker({ suggestion, onChange }: { suggestion: string; onC
           <Input value={manualDomain} onChange={(e) => setManualDomain(e.target.value.trim().toLowerCase())} placeholder="app.example.com" className="mono" />
           <p className="text-xs text-zinc-500">
             {t("Create the record yourself: A → {ip}.", { ip: status.ipv4 ?? t("this server's IP") })}{" "}
+            {DOMAIN.test(manualDomain) && isRootDomain(manualDomain) && <>{t("And for www.{domain}: CNAME → {domain}.", { domain: manualDomain })}{" "}</>}
             {status.providers.length && zones.length ? (
               <button type="button" onClick={() => setManual(false)} className="underline">{t("Pick a connected domain instead")}</button>
             ) : (

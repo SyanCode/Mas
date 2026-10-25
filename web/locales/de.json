@@ -1099,5 +1099,17 @@
   "Paper": "Papier",
   "Warm paper, serif titles and ink, like a magazine.": "Warmes Papier, Serifen-Titel und Tinte, wie ein Magazin.",
   "Static sites": "Statische Seiten",
-  "Ready-made services": "Fertige Dienste"
+  "Ready-made services": "Fertige Dienste",
+  "Change the domain": "Domain ändern",
+  "www.{domain} is added too: Mas creates its record and serves it like {domain}.": "www.{domain} wird ebenfalls hinzugefügt: Mas legt den Eintrag an und bedient es wie {domain}.",
+  "And for www.{domain}: CNAME → {domain}.": "Und für www.{domain}: CNAME → {domain}.",
+  "Valid configuration": "Gültige Konfiguration",
+  "Points elsewhere": "Zeigt woanders hin",
+  "Invalid configuration": "Ungültige Konfiguration",
+  "No DNS record yet. Set the following record at your registrar:": "Noch kein DNS-Eintrag. Legen Sie diesen Eintrag bei Ihrem Registrar an:",
+  "It points to {ips}. Set the following record at your registrar:": "Er zeigt auf {ips}. Setzen Sie diesen Eintrag bei Ihrem Registrar:",
+  "Value": "Wert",
+  "or": "oder",
+  "Checked again every 30 s. DNS changes can take a few minutes.": "Alle 30 s erneut geprüft. DNS-Änderungen können einige Minuten dauern.",
+  "Every name points to this server.": "Alle Namen zeigen auf diesen Server."
 }

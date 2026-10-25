@@ -816,6 +816,9 @@ def set_domain(
     from mas.deploy import DOMAIN_RE, domain_conflict, vhost_paths
     from mas.dns import server_ips, zone_index
     from mas.dnsproviders import DnsError, point_domain
+    import json
+
+    from mas.domains import aliases_for, point_www
 
     env: Env = ctx.obj
     domain = domain.strip().lower()
@@ -843,9 +846,14 @@ def set_domain(
         except DnsError as exc:
             fail(f"{exc}" + ("" if overwrite else " (use --overwrite to replace it)"))
             return
+        result["changes"] += point_www(index[zone], zone, domain[: -len(zone)].rstrip("."), ipv4, ipv6)
         for change in result["changes"]:
             console.print(f"DNS ({result['provider']}): {change}")
-    env.db.update_app(app_id, domain=domain)
+    aliases = aliases_for(env.db, app_id, domain, json.loads(target.get("aliases") or "[]"),
+                          old_domain=target["domain"])
+    if aliases:
+        console.print(f"Also served as: {', '.join(aliases)}")
+    env.db.update_app(app_id, domain=domain, aliases=json.dumps(aliases) if aliases else None)
     env.db.audit(actor(), "app-domain", True, detail=f"{app_id} → {domain}")
     rid = env.db.create_release(app_id, "manual", actor())
     if not _deployer(env).run(rid, echo=lambda line: console.print(line, markup=False, highlight=False)):

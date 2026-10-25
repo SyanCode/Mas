@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Callable
 
@@ -13,6 +14,7 @@ from mas.config import Config
 from mas.db import Database
 from mas.deploy import DOMAIN_RE, Deployer, domain_conflict, vhost_paths
 from mas.dns import IPV4_KEY, IPV6_KEY, load_providers, save_providers, server_ips, zone_index
+from mas.domains import aliases_for, point_www
 from mas.dnsproviders import (
     PROVIDERS, DnsConflict, DnsError, Opener, Provider, catalog, fqdn, make_provider, point_domain, validate_subdomain,
     validate_zone,
@@ -172,7 +174,11 @@ def register(
     async def create_records(zone: str, subdomain: str, overwrite: bool) -> dict:
         zone, provider = await asyncio.to_thread(provider_for, zone)
         ipv4, ipv6 = ips()
-        return await asyncio.to_thread(dns_call, point_domain, provider, zone, subdomain, ipv4, ipv6, overwrite)
+        result = await asyncio.to_thread(dns_call, point_domain, provider, zone, subdomain, ipv4, ipv6, overwrite)
+        # A root domain brings its www (never overwritten: a www pointing elsewhere is reported, not changed).
+        result["changes"] += await asyncio.to_thread(point_www, provider, zone, subdomain.strip().strip("."),
+                                                     ipv4, ipv6)
+        return result
 
     @app.post("/api/dns/records")
     async def records(body: RecordBody, s=Depends(current_session)) -> dict:
@@ -205,7 +211,8 @@ def register(
         changes: list[str] = []
         if body.zone:
             changes = (await create_records(body.zone, body.subdomain, body.overwrite))["changes"]
-        db.update_app(app_id, domain=name)
+        aliases = aliases_for(db, app_id, name, json.loads(target.get("aliases") or "[]"), old_domain=target["domain"])
+        db.update_app(app_id, domain=name, aliases=json.dumps(aliases) if aliases else None)
         db.audit(s.username, "app-domain", True,
                  detail=f"{app_id} → {name}" + (f" ({'; '.join(changes)})" if changes else ""))
         rid = deployer.enqueue(app_id, "manual", s.username)

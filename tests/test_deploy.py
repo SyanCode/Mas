@@ -169,14 +169,16 @@ def env(tmp_path):
         gh.shas = [sha]
         host._commands["git -C * rev-parse HEAD"] = {"output": sha}
 
+    dns: dict[str, list[str]] = {}  # names that resolve differently; every other one points to 203.0.113.10
     deployer = Deployer(host, config, db, lambda: gh,
-                        health_check=lambda url, h, t: (health["ok"], "HTTP 200" if health["ok"] else "refused"))
+                        health_check=lambda url, h, t: (health["ok"], "HTTP 200" if health["ok"] else "refused"),
+                        resolver=lambda name: dns.get(name, ["203.0.113.10"]))
     fernet = load_fernet(host, config.secret_key_path)
     db.create_app("web", name="web", repo="acme/web", branch="main", installation_id=99,
                   domain="web.example.com", type="nextjs", port=7100,
                   env=encrypt_env(fernet, {"API_KEY": "s3cr3t"}))
     return {"host": host, "db": db, "config": config, "gh": gh, "deployer": deployer, "health": health,
-            "calls": calls, "set_sha": set_sha}
+            "calls": calls, "set_sha": set_sha, "dns": dns}
 
 
 def deploy_once(env, sha):
@@ -616,6 +618,22 @@ def test_an_app_replaces_a_site_without_a_gap(env):
     assert app["replaces"] is None and json.loads(app["aliases"]) == ["doc.example.com"]
     certbot = next(a for a, _ in calls if "certonly" in a)
     assert certbot[-4:] == ["-d", "docs.example.com", "-d", "doc.example.com"] and "--expand" in certbot
+
+
+def test_a_name_without_dns_waits_for_the_next_certificate(env):
+    host, db, deployer, calls = env["host"], env["db"], env["deployer"], env["calls"]
+    db.set_setting("dns_ipv4", "203.0.113.10")
+    db.update_app("web", domain="klarfi.com", aliases=json.dumps(["www.klarfi.com"]))
+    env["dns"]["www.klarfi.com"] = []
+    rid, ok = deploy_once(env, SHA1)
+    log = deployer.log_path("web", rid).read_text(encoding="utf-8")
+    assert ok, log
+    assert "✓ klarfi.com: valid configuration" in log
+    assert "✗ www.klarfi.com: no DNS record, add CNAME www → klarfi.com." in log
+    certbot = next(a for a, _ in calls if "certonly" in a)
+    assert certbot[-2:] == ["-d", "klarfi.com"] and "www.klarfi.com" not in certbot
+    vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+    assert "server_name klarfi.com www.klarfi.com;" in vhost  # served anyway, HTTPS comes later
 
 
 def test_a_failed_replacement_gives_the_site_back(env):

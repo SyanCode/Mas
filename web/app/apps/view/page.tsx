@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { DomainStatus } from "@/components/DomainStatus";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
 import { MaintenanceCard } from "@/components/MaintenanceCard";
@@ -272,12 +273,9 @@ function DomainCard({ app, onLinked }: { app: App; onLinked: (releaseId: number)
   return (
     <Card title={t("Domain")}>
       {!editing && app.domain ? (
-        <div className="flex items-center justify-between gap-2">
-          <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2 text-sm font-medium hover:underline">
-            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_10px_2px_rgba(52,211,153,0.5)]" />
-            <span className="truncate">{app.domain}</span>
-          </a>
-          <Button variant="ghost" onClick={() => setEditing(true)}>{t("Change")}</Button>
+        <div className="space-y-3">
+          <DomainStatus appId={app.id} />
+          <Button variant="ghost" onClick={() => setEditing(true)}>{t("Change the domain")}</Button>
         </div>
       ) : (
         <div className="space-y-4">

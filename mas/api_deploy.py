@@ -28,6 +28,7 @@ from mas.deploy import (
     validate_commands,
 )
 from mas.dns import server_ips
+from mas.domains import aliases_for, check_app
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env
 from mas.github import GitHubApp, GitHubError, convert_manifest, repo_from_remote, verify_signature
 from mas.health import run_checks
@@ -133,6 +134,8 @@ def register_managed_app(host: Host, config: Config, db: Database, *, app_id: st
         raise DeployError(f"app {app_id} already exists")
     if app_type == ServiceType.PYTHON and not (start_command or "").strip():
         raise DeployError("python apps need a start command")
+    if aliases is None:  # a root domain also answers to its www
+        aliases = aliases_for(db, app_id, domain)
     port = allocate_port(host, config, db) if app_type in PROXY_TYPES else None
     token = encrypt_env(load_fernet(host, config.secret_key_path), variables) if variables else None
     db.create_app(app_id, name=app_id, repo=repo, branch=branch, installation_id=installation_id, domain=domain,
@@ -414,7 +417,7 @@ def register(
     @app.post("/api/apps")
     async def create_app(body: CreateApp, s=Depends(current_session)) -> dict:
         domain = (body.domain or "").strip().lower() or None
-        aliases: list[str] = []
+        aliases: list[str] | None = None
         replaces = None
         if body.replace_service:
             domain, aliases, files = plan_for(body.replace_service)
@@ -529,10 +532,22 @@ def register(
             raise HTTPException(400, str(exc)) from None
         if current["mode"] == "adopted" and "domain" in fields:
             raise HTTPException(400, "the domain of an adopted service is managed by its own nginx vhost")
+        if "domain" in fields and fields["domain"] != current["domain"]:
+            aliases = aliases_for(db, app_id, fields["domain"], json.loads(current.get("aliases") or "[]"),
+                                  old_domain=current["domain"])
+            fields["aliases"] = json.dumps(aliases) if aliases else None
         if fields:
             db.update_app(app_id, **fields)
             db.audit(s.username, "app-edit", True, detail=f"{app_id}: {', '.join(fields)}")
         return app_payload(db.get_app(app_id), db)
+
+    @app.get("/api/apps/{app_id}/domains")
+    async def app_domains(app_id: str, _=Depends(current_session)) -> dict:
+        """Like Vercel: does each name of the app point to this server, and which records to add."""
+        target = find_app(app_id)
+        expected = server_ips(db, config)
+        checks = await asyncio.to_thread(check_app, target, expected, deployer.resolver)
+        return {"ipv4": expected[0], "ipv6": expected[1], "domains": checks}
 
     @app.get("/api/apps/{app_id}/env")
     def get_env(app_id: str, _=Depends(current_session)) -> dict:

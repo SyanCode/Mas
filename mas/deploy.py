@@ -45,6 +45,7 @@ from mas.collectors.processes import load_users
 from mas.config import Config
 from mas.db import Database
 from mas.dns import server_ips
+from mas.domains import check_app, describe
 from mas.envcrypt import EnvError, decrypt_env, load_fernet, systemd_env_file
 from mas.health import _resolve
 from mas.github import GitHubApp, GitHubError, git_auth_env
@@ -829,6 +830,7 @@ class Deployer:
         """Before building: the domain answers right away (status page on a first
         deploy) and gets its certificate, so visitors never hit another site's vhost."""
         rlog.step(f"Preparing {app['domain']}")
+        self.check_domains(app, rlog)
         if app.get("replaces"):  # the replaced site keeps serving: only the certificate is prepared
             self._ensure_certificate(app, rlog)
             return
@@ -836,6 +838,16 @@ class Deployer:
         self._install_vhost(app, app_type, paths, rlog, page)
         if not self._has_cert(app["domain"]) and self._ensure_certificate(app, rlog):
             self._install_vhost(app, app_type, paths, rlog, page)  # now with HTTPS
+
+    def check_domains(self, app: dict, rlog: ReleaseLog) -> list[dict]:
+        """Like Vercel: does each name of the app point to this server? Logged, never blocking."""
+        checks = check_app(app, server_ips(self.db, self.config), self.resolver)
+        for check in checks:
+            rlog.line(f"DNS {describe(check)}")
+        if any(c["status"] != "ok" for c in checks):
+            rlog.line("DNS: the site deploys anyway; a name gets HTTPS once it points here (DNS changes can take "
+                      "a few minutes, up to 48 h at some registrars)")
+        return checks
 
     def _wait_dns(self, domain: str, rlog: ReleaseLog) -> None:
         """Wait (bounded) until a freshly created DNS record is visible."""
@@ -857,7 +869,11 @@ class Deployer:
     def _ensure_certificate(self, app: dict, rlog: ReleaseLog) -> bool:
         """Request a certificate if missing. True when a new one was obtained."""
         domain = app["domain"]
-        names = app_names(app)
+        # A name that does not resolve would make Let's Encrypt refuse every name: it waits for the next deploy.
+        names = [n for n in app_names(app) if n == domain or self.resolver(n)]
+        skipped = [n for n in app_names(app) if n not in names]
+        if skipped:
+            rlog.line(f"certificate: {', '.join(skipped)} left out until its DNS record exists")
         if self._has_cert(domain):
             covered = self._cert_names(domain)
             if not covered or set(names) <= set(covered):  # unreadable: keep it, as before
