@@ -10,7 +10,7 @@ import { MaintenanceCard } from "@/components/MaintenanceCard";
 import { StackCard } from "@/components/StackCard";
 import { TrafficStats } from "@/components/TrafficStats";
 import {
-  Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner,
+  Actions, Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner,
   StatusDot, Terminal, Textarea,
 } from "@/components/ui";
 import { api, ApiError, SERVICE_TYPES, timeAgo, type App, type Release } from "@/lib/api";
@@ -894,7 +894,10 @@ function AppView() {
             </div>
           </div>
         </div>
-        <div className="flex gap-2">
+        <Actions main={<Button variant="glow" className="!h-9" onClick={() => post("/deploy")} disabled={building}>{building ? <Spinner /> : null}{building ? t("Deploying…") : t("Redeploy")}</Button>} more={[
+          ...(app.domain ? [{ label: `${t("Visit")} ↗`, href: `https://${app.domain}` }] : []),
+          { label: t("Remove"), onClick: () => setConfirmDelete(true), danger: true },
+        ]}>
           {app.domain && (
             <a href={`https://${app.domain}`} target="_blank" rel="noreferrer" className="glass inline-flex h-8 items-center rounded-lg px-3 text-[13px] font-medium hover:bg-white/[0.08]">
               {t("Visit")} ↗
@@ -902,7 +905,7 @@ function AppView() {
           )}
           <Button variant="glow" onClick={() => post("/deploy")} disabled={building}>{building ? <Spinner /> : null}{building ? t("Deploying…") : t("Redeploy")}</Button>
           <Button variant="ghost" onClick={() => setConfirmDelete(true)}>{t("Remove")}</Button>
-        </div>
+        </Actions>
       </div>
 
       <ErrorText>{error}</ErrorText>
@@ -910,7 +913,7 @@ function AppView() {
       {app.pending && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
           <span className="text-lg">❄</span>
-          <span className="min-w-0 flex-1">
+          <span className="min-w-[14rem] flex-1">
             <span className="font-medium">{t("{n} commit(s) waiting", { n: app.pending.commits })}</span>
             {" · "}<code className="text-xs">{app.pending.sha.slice(0, 7)}</code> {app.pending.message}
             <span className="opacity-70"> · {app.pending.author} · {timeAgo(app.pending.at)}</span>

@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { RepoPicker } from "@/components/RepoPicker";
 import { Shell } from "@/components/Shell";
-import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Monogram, Notice, ReleaseBadge, Select, StatusDot } from "@/components/ui";
+import { Actions, Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Monogram, Notice, ReleaseBadge, Select, StatusDot } from "@/components/ui";
 import { api, ApiError, timeAgo, type Project, type Repo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -116,6 +116,19 @@ function ProjectView() {
   const allFrozen = apps.every((a) => !a.app || !a.app.auto_deploy);
   const missing = apps.filter((a) => !a.exists).length;
 
+  const sync = () => act("sync", async () => {
+    const r = await api<Project & { created: string[] }>(`/projects/${encodeURIComponent(id)}/sync`, { method: "POST" });
+    return r.created.length ? t("File read again: {names} created and deploying.", { names: r.created.join(", ") }) : t("File read again: the project is up to date.");
+  });
+  const freeze = () => act("freeze", async () => {
+    await api("/apps/freeze", { method: "POST", body: { app_ids: existing, frozen: !allFrozen } });
+    return allFrozen ? t("The apps of the project deploy on push again.") : t("The apps of the project are frozen: pushes wait for you.");
+  });
+  const deploy = () => act("deploy", async () => {
+    const r = await api<{ queued: { app_id: string }[] }>(`/projects/${encodeURIComponent(id)}/deploy`, { method: "POST", body: { include_frozen: true } });
+    return t("{n} deployment(s) queued, in order: {names}.", { n: r.queued.length, names: r.queued.map((q) => q.app_id).join(" → ") });
+  });
+
   return (
     <div className="space-y-6">
       <Link href="/projects/" className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white">← {t("Projects")}</Link>
@@ -131,29 +144,25 @@ function ProjectView() {
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {project.source && <Button disabled={!!busy} onClick={() => act("sync", async () => {
-            const r = await api<Project & { created: string[] }>(`/projects/${encodeURIComponent(id)}/sync`, { method: "POST" });
-            return r.created.length ? t("File read again: {names} created and deploying.", { names: r.created.join(", ") }) : t("File read again: the project is up to date.");
-          })}>{t("Read the file again")}</Button>}
+        <Actions main={<Button variant="glow" className="!h-9" disabled={!!busy || !existing.length} onClick={deploy}>{busy === "deploy" ? t("Deploying…") : t("Deploy the project")}</Button>} more={[
+          ...(project.source ? [{ label: t("Read the file again"), onClick: sync, disabled: !!busy }] : []),
+          { label: t("Edit"), href: `/projects/new/?edit=${encodeURIComponent(id)}` },
+          { label: allFrozen ? t("Unfreeze") : t("❄ Freeze"), onClick: freeze, disabled: !!busy || !existing.length },
+          { label: t("Remove"), onClick: () => setConfirmDelete(true), danger: true },
+        ]}>
+          {project.source && <Button disabled={!!busy} onClick={sync}>{t("Read the file again")}</Button>}
           <Link href={`/projects/new/?edit=${encodeURIComponent(id)}`} className="glass inline-flex h-8 items-center rounded-lg px-3 text-[13px] font-medium hover:bg-white/[0.08]">{t("Edit")}</Link>
-          <Button disabled={!!busy || !existing.length} onClick={() => act("freeze", async () => {
-            await api("/apps/freeze", { method: "POST", body: { app_ids: existing, frozen: !allFrozen } });
-            return allFrozen ? t("The apps of the project deploy on push again.") : t("The apps of the project are frozen: pushes wait for you.");
-          })}>{allFrozen ? t("Unfreeze") : t("❄ Freeze")}</Button>
-          <Button variant="glow" disabled={!!busy || !existing.length} onClick={() => act("deploy", async () => {
-            const r = await api<{ queued: { app_id: string }[] }>(`/projects/${encodeURIComponent(id)}/deploy`, { method: "POST", body: { include_frozen: true } });
-            return t("{n} deployment(s) queued, in order: {names}.", { n: r.queued.length, names: r.queued.map((q) => q.app_id).join(" → ") });
-          })}>{busy === "deploy" ? t("Deploying…") : t("Deploy the project")}</Button>
+          <Button disabled={!!busy || !existing.length} onClick={freeze}>{allFrozen ? t("Unfreeze") : t("❄ Freeze")}</Button>
+          <Button variant="glow" disabled={!!busy || !existing.length} onClick={deploy}>{busy === "deploy" ? t("Deploying…") : t("Deploy the project")}</Button>
           <Button variant="ghost" onClick={() => setConfirmDelete(true)}>{t("Remove")}</Button>
-        </div>
+        </Actions>
       </div>
 
       <ErrorText>{error}</ErrorText>
       <Notice>{notice}</Notice>
       {missing > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-          <span className="flex-1">{t("{n} app(s) of the file are not in Mas yet.", { n: missing })}</span>
+          <span className="min-w-[14rem] flex-1">{t("{n} app(s) of the file are not in Mas yet.", { n: missing })}</span>
           <Button disabled={!!busy} onClick={() => act("create", async () => {
             const r = await api<Project & { created: string[] }>(`/projects/${encodeURIComponent(id)}`, { method: "PUT", body: { manifest: project.manifest, deploy: false } });
             return t("{names} created and deploying.", { names: r.created.join(", ") || "—" });
