@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+web/node_modules/
+web/out/
+web/.next/
+*.tsbuildinfo
+*.db
+*.tar.gz

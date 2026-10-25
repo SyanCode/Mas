@@ -1,0 +1,756 @@
+<div align="center">
+
+**English** · [Français](README.fr.md) · [Español](README.es.md) · [Deutsch](README.de.md)
+
+# Mas
+
+**Your server, mapped and deployed.**
+Self-hosted dashboard that adopts what already runs on your Debian + nginx box, deploys from GitHub on every push,
+runs ready-made services and spreads your apps over several servers.
+
+![status: beta](https://img.shields.io/badge/status-beta-8b5cf6)
+![license: MIT](https://img.shields.io/badge/license-MIT-0ea5e9)
+![python 3.11+](https://img.shields.io/badge/python-3.11%2B-22c55e)
+![Debian + nginx](https://img.shields.io/badge/Debian%20%2B%20nginx-supported-f59e0b)
+
+![Mas dashboard: an app with its production deployment and live build log](docs/app.jpg)
+
+</div>
+
+**Mas maps the server you already have.** Point it at a Debian + nginx box that has been
+running for years, with a mix of PHP sites, Node apps under PM2, a few systemd units and a
+Docker container or two, and it tells you what is running, where, for which domain, under
+which user and from which git repository. Nothing gets reinstalled or broken.
+
+You then manage those services from the `mas` CLI or from a web dashboard protected by a
+password and two-factor authentication, keep an eye on certificates and nginx, link domains
+from your registrar (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun) and deploy
+projects from GitHub on every push, Vercel-style, on the same machine. When one server is not
+enough, other servers join as agents and run copies of your apps behind the same load balancer.
+
+## At a glance
+
+| | |
+|---|---|
+| 🔎 **Discovery** | nginx vhosts, ports, `/proc`, systemd, PM2 and Docker read into one list of services: domain, user, folder, git repository. Read-only, no AI. |
+| 🚀 **Deploy from GitHub** | Atomic releases on every push, generated systemd unit and nginx vhost, Let's Encrypt, health check, automatic rollback, live build logs. |
+| 🌐 **Domains** | DNS records created at OVH, Cloudflare, Gandi, Hetzner, DigitalOcean or Porkbun, then HTTPS. |
+| 🗄️ **Supabase** | The official stack self-hosted in one click, apps connected from their repository, migrations at deploy. |
+| 📦 **Ready-made services** | Mail server, Minecraft, Uptime Kuma, Vaultwarden, n8n, Gitea or any Docker image, with nightly backups. |
+| ✏️ **CMS** | Your clients edit the texts, images and articles of their site; every save is a commit and a deploy. |
+| 📊 **Traffic** | Requests, page views and visitors per day for every site, from the nginx logs, without cookies. |
+| 🧠 **Resources** | Memory and CPU of everything on one page; memory limits, sleep when idle, instances that follow the traffic, advice applied in one click. |
+| 🛠️ **Operations** | Health checks with fixes, restart every service identical, maintenance pages, redeploy everything. |
+| 🖧 **Cluster** | Agents without a dashboard, copies of apps on several servers, live map, automatic failover, promotion. |
+
+## Contents
+
+- [Why another one?](#why-another-one) · [Installation](#installation) · [CLI](#cli) · [Dashboard](#dashboard)
+- [Deploying from GitHub](#deploying-from-github) · [Domains](#domains-ovh-cloudflare-gandi-hetzner-digitalocean-porkbun) ·
+  [Supabase](#self-hosted-supabase) · [Ready-made services](#ready-made-services) · [CMS](#cms-for-your-clients)
+- [Running the server](#running-the-server): [resources](#resources), [traffic](#traffic-statistics),
+  [maintenance](#maintenance-mode), [restart everything](#restart-everything-identical), [health checks](#health-checks)
+- [Several servers](#several-servers-cluster) · [How detection works](#how-detection-works) ·
+  [Security model](#security-model) · [Development](#development) · [Roadmap](#roadmap)
+
+> [!WARNING]
+> **Beta.** Mas runs as root and edits nginx, systemd and DNS. Every change is backed up and
+> validated (`nginx -t`) and discovery is read-only, but try it on a server you can restore
+> first, and read the [security model](#security-model). Feedback and issues are very welcome.
+
+## Why another one?
+
+Coolify, Dokploy and CapRover are great, but they want a clean server: everything has to
+run in their containers, behind their proxy. If your server already hosts ten sites
+configured by hand, adopting one of them means migrating everything.
+
+Mas starts from the other end:
+
+|                         | Coolify / Dokploy / CapRover | Mas                                   |
+|-------------------------|------------------------------|---------------------------------------|
+| Starting point          | Fresh server                 | Your existing server                  |
+| Reverse proxy           | Traefik / Caddy (theirs)     | Your nginx, your vhosts               |
+| Runtimes                | Docker only                  | PHP-FPM, systemd, PM2, Docker, static |
+| Existing apps           | Re-deploy them               | Detected and adopted in place         |
+| Detection               | n/a                          | Deterministic parsing, no AI          |
+| Idle apps               | Always running               | Can sleep and wake on the next visit  |
+
+Every detection is deterministic: config file parsing, `/proc`, `ss`, `systemctl`, `pm2 jlist`
+and the Docker socket. No AI model is involved anywhere, and discovery needs no external API
+(only the optional GitHub and DNS-provider integrations talk to their own APIs).
+
+## Installation
+
+On the server (Debian 12+, as root):
+
+```console
+$ git clone https://github.com/SyanCode/Mas.git /opt/mas-install
+$ cd /opt/mas-install
+$ sudo ./deploy/install.sh --domain mas.example.com --email you@example.com
+```
+
+Without `--domain` the dashboard stays private (SSH tunnel, see below). Updates:
+`sudo mas self-update` (git pull, reinstall, rebuild, restart).
+
+The installer is idempotent and asks for two things:
+
+1. **The admin password, then 2FA**: a QR code is printed in the terminal; scan it with
+   Google Authenticator, Aegis, 1Password, Bitwarden… and type the 6-digit code.
+2. **The dashboard domain** (e.g. `mas.example.com`, its DNS must point to the server). Mas gets
+   a Let's Encrypt certificate and installs an HTTPS vhost. Leave it empty to keep the dashboard
+   private and reach it through an SSH tunnel:
+   `ssh -L 7070:127.0.0.1:7070 you@server`, then open http://localhost:7070.
+
+Non-interactive: `sudo ./deploy/install.sh --domain mas.example.com --email you@example.com`.
+
+What gets installed: `/opt/mas/src` (source), `/opt/mas/venv`, `/etc/mas/config.toml`,
+`/var/lib/mas/mas.db`, `mas.service`, `/etc/nginx/sites-available/mas.conf` and `/usr/local/bin/mas`.
+
+### Updating
+
+```console
+$ sudo mas self-update                       # follow the published branch (git checkout)
+$ sudo mas self-update --from mas.tar.gz     # from a `git archive` tarball
+```
+
+It updates the source, reinstalls, rebuilds the dashboard and restarts `mas.service`. A git
+checkout is moved to `origin/<branch>` even if that branch was force-pushed; it refuses to touch a
+checkout with local changes. An archive install keeps the previous source as
+`/opt/mas/src.mas-bak-<date>`.
+
+When a newer version is published, every `sudo mas …` command starts with a one-line reminder to
+run `sudo mas self-update` (checked against GitHub at most every 6 hours, 2 s timeout, silent when
+offline; `MAS_NO_UPDATE_CHECK=1` turns it off).
+
+## CLI
+
+```console
+$ sudo mas scan                 # table of every detected service (--json available)
+$ sudo mas logs blog.example.com -n 200
+$ sudo mas restart api          # asks for confirmation (-y to skip)
+$ sudo mas start|stop|reload <service>
+$ sudo mas nginx reload         # nginx -t first, reload only if valid
+$ sudo mas history              # who did what, when, with what result
+
+$ sudo mas user create [name]   # password + 2FA QR code
+$ sudo mas user 2fa [name]      # set up / replace the authenticator app
+$ sudo mas user 2fa-reset [name]  # lost phone: disable 2FA (root only)
+$ sudo mas user passwd [name]
+```
+
+`<service>` is the id shown by `mas scan` (usually the domain), or any unambiguous part of it.
+
+| Manager        | Actions                        | Command                                           |
+|----------------|--------------------------------|---------------------------------------------------|
+| `systemd`      | start, stop, restart, reload   | `systemctl <action> <unit>`                       |
+| `pm2`          | start, stop, restart, reload   | `runuser -u <owner> -- pm2 <action> <app>`        |
+| `docker`       | start, stop, restart           | Docker API `POST /containers/<id>/<action>`       |
+| `php-fpm`      | reload, restart                | `systemctl <action> php*-fpm.service`             |
+| `nginx-static` | reload                         | `nginx -t && systemctl reload nginx`              |
+
+## Dashboard
+
+![Overview: every service detected on the server](docs/overview.jpg)
+
+Press <kbd>⌘K</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd> anywhere to jump to a service, an app or a page.
+
+The dashboard speaks **English, French, Spanish and German**: the browser language is used by
+default, and the picker in the user menu (and on the sign-in page) remembers your choice. The
+English text is the key (`t("Deploy Supabase")`), translations live in `web/locales/<lang>.json`,
+and `tests/test_i18n.py` fails if a text has no translation. Adding a language is one JSON file
+plus one line in `web/lib/i18n.tsx`.
+
+| Page | What it shows |
+|---|---|
+| **Overview** | every detected service: status, domains, type, manager, port, SSL expiry (orange under 14 days), GitHub repository, the Mas app it belongs to; filters and search; **Restart everything**, **Reload nginx** |
+| **Service** | details, live memory / CPU / uptime / ports and links, logs, actions (with confirmation), traffic of its site, history, display name and notes, **Replace with a Mas app** |
+| **Apps** | apps deployed from GitHub and services of the catalog; **Redeploy all**, **Maintenance** |
+| **App** | deployments with live build logs, rollback, domain, traffic, resources, load balancing, maintenance, database, CMS, environment variables |
+| **Databases** | the self-hosted Supabase: parts, memory per container, Studio access, backups |
+| **Resources** | memory and CPU of everything on the server, limits, sleep, instances, advice |
+| **Servers** | the cluster: this server, the other ones, join tokens, live map of the requests |
+| **Health** | certificate, certbot, nginx and DNS checks, with the fixes |
+| **Activity** | the audit log: who did what, when, with what result |
+| **Settings** | 2FA, password, GitHub App, DNS providers, people (CMS editors and invitations) |
+
+Light and dark theme (follows the system by default).
+
+## Deploying from GitHub
+
+### 1. Connect GitHub (once)
+
+In **Settings → GitHub**, click **Create GitHub App** (optionally for an organization). GitHub
+shows the App to create; confirm, and GitHub sends its credentials back to Mas through the
+[manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest):
+App ID, private key (stored in `/etc/mas/github-app.pem`, `0600`) and webhook secret (stored in
+`/etc/mas/config.toml`, `0600`). Then click **Install** and choose the repositories Mas may read.
+
+The App is private and asks for: **Contents: read and write** (write is only used by the CMS, to
+commit content edits), **Metadata: read**, **Pull requests: read**, and the **push** and
+**pull_request** webhook events. An App created before the CMS has Contents read-only: change it
+to *Read and write* in the App settings on GitHub, then accept the new permissions on the
+installation.
+
+<details>
+<summary>Creating the App by hand instead</summary>
+
+1. github.com → Settings → Developer settings → GitHub Apps → **New GitHub App**.
+2. Homepage URL: `https://<your dashboard>`; Webhook URL: `https://<your dashboard>/api/github/webhook`;
+   Webhook secret: a long random string.
+3. Permissions: Contents read and write, Metadata read-only, Pull requests read-only. Events: Push, Pull request.
+4. "Only on this account", create, then **Generate a private key** (downloads a `.pem`).
+5. On the server: `sudo mas github setup` (asks for the App ID, slug, `.pem` path and secret), then
+   `sudo systemctl restart mas`, and install the App on your repositories.
+</details>
+
+### 2. Create an app
+
+**Apps → New app**: pick a repository and a branch. Mas detects the type (Next.js, Node, Python,
+static, PHP) from the repository; set an optional domain and environment variables (stored
+encrypted with a key in `/etc/mas/secret.key`). Create: the first deployment starts and its log
+streams live in the dashboard.
+
+Every push to the branch then deploys automatically:
+
+1. `git clone` of the pushed commit into `/srv/mas/apps/<app>/releases/<sha>/` (the installation
+   token is passed to git through the environment, never on the command line or in logs)
+2. build as the dedicated user `mas-<app>` (`npm ci && npm run build`, a Python venv +
+   `pip install`, `composer install`, or your own build command)
+3. atomic switch of the `current` symlink (a Next.js app built with `output: 'export'` has no
+   server: Mas serves its `out/` folder with nginx and skips the systemd unit)
+4. `mas-app-<app>.service` (generated systemd unit, non-root user, `NoNewPrivileges`,
+   `ProtectSystem`, `ProtectHome`, app listening on `127.0.0.1:<port>`) restarted
+5. nginx vhost generated from a template (backup, `nginx -t`, reload; refused if another vhost
+   already serves the domain)
+6. `certbot certonly --nginx` if the domain has no certificate yet, then HTTPS vhost
+7. HTTP health check; **if it fails, the previous release is put back automatically**
+
+The last 5 releases are kept; **Rollback** puts any of them back in one click (`mas rollback <app>`).
+
+### Domains (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun)
+
+Mas can create the DNS records itself. In **Settings → Domains**:
+
+1. Set this server's **public IP** (Mas suggests the address your existing domains point to).
+2. Connect one or more registrars. Each card links to the provider's token page and lists the
+   exact rights to give (read zones, create/update records; Mas never deletes a record). Keys are
+   verified with the provider, then stored encrypted.
+
+| Provider | Credentials |
+|----------|-------------|
+| OVHcloud | application key + secret + consumer key (token page with pre-filled rights) |
+| Cloudflare | API token, template “Edit zone DNS” (records are created DNS-only, grey cloud) |
+| Gandi | Personal access token (LiveDNS) |
+| Hetzner DNS | API token |
+| DigitalOcean | API token with the `domain` scope |
+| Porkbun | API key + secret (enable API access on each domain) |
+
+Namecheap is not supported: its API needs a whitelisted IP and rewrites the whole zone on every change.
+
+Then, on an app (or in *New app*), pick one of your domains and a sub-domain (the app name by
+default). Mas checks the name live (free, already pointing here, pointing elsewhere, CNAME,
+already used), creates the `A` (and `AAAA`) record, waits until it resolves, then deploys with the
+nginx site and the HTTPS certificate. A record pointing elsewhere is only replaced after an explicit
+confirmation; a CNAME is never touched.
+
+CLI: `mas dns connect <provider>`, `mas dns ip <ipv4> [--ipv6 …]`, `mas dns zones`,
+`mas domain <app> <sub.example.com> [--overwrite | --no-dns]`.
+
+### Self-hosted Supabase
+
+**Databases → Deploy Supabase** installs the official Supabase docker stack (Postgres, Auth,
+REST, Realtime, Storage, Studio) on the server:
+
+- every published port is bound to `127.0.0.1` (Docker would otherwise bypass the firewall);
+- only the public API (`/rest`, `/auth`, `/realtime`, `/storage`, `/functions`, `/graphql`) is
+  published through nginx, on the domain you pick (DNS record created like for apps), with HTTPS;
+- **Studio stays private**: on the Supabase domain it only answers the local network and the
+  addresses you allow (Databases page), behind its login; otherwise through the SSH tunnel Mas shows;
+- secrets (Postgres password, JWT secret, `anon` / `service_role` keys) are generated by Mas and
+  stored encrypted;
+- a `pg_dump` runs every day, the last 7 are kept in `/var/lib/mas/backups/supabase`. From
+  **Databases → Backups**, you can restore a dump; Mas checks the archive, saves the current
+  database first, and attempts to recover from that safety dump if the restore fails.
+
+One instance per server (every connected app shares its database); the stack needs Docker with
+the compose plugin.
+
+**What to install.** Pick what your apps need, Mas suggests the choice that fits the free memory:
+
+| Choice | What apps can do | ≈ RAM |
+|---|---|---|
+| **Essential** | database, user accounts, API | 400 MB |
+| **Recommended** | + file uploads, live updates, admin dashboard | 880 MB |
+| **Complete** | + image resizing, server functions, logs, many connections | 1.8 GB |
+
+**Customize** shows the parts one by one, and the Databases page changes them later
+(`docker compose up -d --remove-orphans`, data volumes are kept):
+
+| Part | Supabase name | Recommended | ≈ RAM |
+|---|---|---|---|
+| Database, user accounts and API (always on) | Postgres, Auth, REST, Kong | on | 400 MB |
+| Admin dashboard (private, start/stop on demand) | Studio + pg-meta | on | 250 MB |
+| Live updates | Realtime | on | 150 MB |
+| File uploads | Storage | on | 80 MB |
+| Image resizing | imgproxy | off | 60 MB |
+| Server functions | Edge Functions | off | 150 MB |
+| Logs and statistics | Logflare + Vector | off | 600 MB |
+| Many connections | Supavisor (off: Postgres is published directly on `127.0.0.1`) | off | 150 MB |
+
+#### Connecting an app
+
+The **Database** card of an app reads its repository and adapts to it:
+
+- **It finds out the app uses Supabase** from its libraries (`@supabase/supabase-js`,
+  `@supabase/ssr`, `supabase` for Python…), its example env file or a `supabase/` folder. When the
+  server has no Supabase yet, **Create the database and connect** installs it and connects the app
+  as soon as it runs. In **Apps → New app**, a Supabase app is connected before its first build.
+- **Connect the database** writes the URL and keys under the names the code reads: the usual ones
+  (`SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+  `DATABASE_URL`…), the framework ones (`VITE_…`, `PUBLIC_…` for Astro and SvelteKit, `EXPO_PUBLIC_…`)
+  and every Supabase variable of its `.env.example`. A secret (service_role key, Postgres URL) is
+  never written to a variable the browser can read (`NEXT_PUBLIC_`, `VITE_`…): Mas lists it instead.
+- **The repository describes its database** with the layout of the Supabase CLI:
+  `supabase/migrations/<timestamp>_<name>.sql` and `supabase/seed.sql`. On every deploy of a
+  connected app, Mas runs the new migrations before the build, in order, each in one transaction,
+  and records them in `supabase_migrations.schema_migrations` like `supabase db push`. If one
+  fails, the deploy stops and the site stays on its current version. The seed is loaded once,
+  when you tick it while connecting. The card lists the migrations, applied or pending.
+- **Import my dev database** copies the `public` schema of a supabase.com project (tables,
+  functions, policies, with or without the rows) and connects the app. Paste the *Session pooler*
+  connection string (project → **Connect**); it is passed to `pg_dump` in the environment, never
+  on a command line, and not kept. Tables that already exist here are refused unless you tick
+  *replace them*. Mas runs a `pg_dump` as recent as the source server. Not copied: users
+  (`auth`), files (Storage) and triggers on `auth.users`.
+
+An app connected to another Supabase project (its `SUPABASE_URL` points elsewhere) is left alone.
+
+The services that stay are tuned for a small server: Postgres `shared_buffers=64MB` and smaller
+work memory, one Kong worker with a 32 MB cache, a capped Node.js heap for Studio, Storage and
+pg-meta. The unmodified upstream file is kept as `docker-compose.original.yml`; the page shows
+the memory actually used by each container.
+
+Restore a backup: `docker cp <file> supabase-db:/tmp/r.dump && docker exec supabase-db pg_restore
+-U postgres -d postgres --clean /tmp/r.dump`.
+
+### Ready-made services
+
+**Apps → Deploy a service** runs ready-made servers with Docker, no repository needed: pick one, fill
+a short form, Mas writes `/srv/mas/stacks/<name>/docker-compose.yml`, opens the ports, gets the
+certificate of its address and shows how to use it.
+
+| Service | What you get |
+|---|---|
+| **Minecraft server (Java)** | Paper, Vanilla, Fabric, Forge or Purpur; version, memory, game mode, allowed players, operators |
+| **Minecraft server (Bedrock)** | for phones, consoles and Windows (UDP 19132) |
+| **Mail server** | docker-mailserver: your `@yourdomain` mailboxes in any mail app (IMAP 993, SMTP 465/587), DKIM key created, the DNS records to add (A, MX, SPF, DKIM, DMARC) listed with their values, **Add a mailbox** in one click |
+| **Uptime Kuma**, **Vaultwarden**, **n8n**, **Gitea** | served on their own domain with HTTPS |
+| **Any Docker image** | an image, its web port on a domain and/or ports published as they are, its environment and a kept folder |
+
+- Web pages listen on `127.0.0.1` and nginx serves them with HTTPS. Ports meant for the outside
+  (25565, 25, 993…) are published by Docker on every interface, which opens them in the firewall;
+  Mas refuses a port another service already uses.
+- Passwords (first mailbox, Vaultwarden admin token) are generated and kept encrypted; the
+  service's page shows them on demand, with the address to connect to.
+- The service's page has **Start / Stop / Restart**, its logs, and its settings: saving them
+  redeploys it. **Redeploy** also pulls the latest image. Data stays in `/srv/mas/stacks/<name>/data`
+  across updates; removing the service keeps it unless you tick *also delete its data*.
+- **Backups**: every night between 3 and 5 a.m. (server time), Mas stops the service, copies its
+  `data` folder to `/var/lib/mas/backups/stacks/<name>/<name>-<date>.tar.gz` and starts it again
+  (a Minecraft world or a mailbox copied while written could not be restored). The last 7 are kept
+  (`stacks_keep_backups` in `[deploy]`), and they outlive the service. **Back up now** and
+  **Restore** are on the service's page; a restore puts the current data aside in
+  `data.before-restore` first.
+- Minecraft servers start with a 512 MB heap that grows up to the memory you chose, and give it back
+  when nobody plays.
+- For mail, ask your hosting provider for the reverse DNS (PTR) of the server and check that it does
+  not block outgoing port 25.
+
+New services are a template in `mas/stacks.py` (a compose file built from the form); after changing
+the catalog, run `python -m mas.stacks > web/lib/stackTexts.ts` so its texts get translated.
+
+### CMS for your clients
+
+Host client sites with Mas and let each client edit their own content (texts, images, articles),
+without giving them access to the server or the code. The site keeps its design: the repository
+declares what can be edited in **`mas.cms.json`**, the client fills forms in the dashboard, and Mas
+writes the values, as a commit on the deployed branch (which redeploys the site) or, for collections
+stored in Supabase, as table rows online at once.
+
+**→ The full reference is [docs/cms.md](docs/cms.md)**: pages, collections (articles, news…),
+field types, git or Supabase storage, how the site reads its content, and a checklist.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/SyanCode/Mas/main/schema/mas.cms.schema.json",
+  "pages": [{ "id": "home", "label": "Home page", "file": "content/home.json",
+              "fields": [{ "key": "title", "type": "text", "max": 80, "required": true },
+                         { "key": "hero", "type": "image" }] }],
+  "collections": [{ "id": "articles", "label": "Articles", "dir": "content/articles",
+                    "fields": [{ "key": "title" }, { "key": "date", "type": "date" },
+                               { "key": "body", "type": "markdown" }] }]
+}
+```
+
+**Making a site Mas compatible.** With Claude Code, install the plugin of this repository once,
+then ask for it in plain words in the site's project:
+
+```
+/plugin marketplace add SyanCode/Mas
+/plugin install mas-cms@mas
+
+Rends ce site compatible Mas
+```
+
+Claude moves the editable content into JSON files, writes `mas.cms.json`, wires the site to it
+without touching its design and checks the result with the plugin's `check.py`. By hand: follow the
+[checklist](docs/cms.md#making-a-site-compatible-checklist), and start `mas.cms.json` with the
+`$schema` line above for completion in your editor. The **CMS** card of an app can also write
+`mas.cms.json` from the JSON files already in the repository.
+
+In **Apps → New app**, a repository with a valid `mas.cms.json` shows a **Mas compatible** badge (or
+*invalid mas.cms.json* with the reason when hovered). Then:
+
+1. Give your client an account, in **Settings → People**, one of three ways:
+   - **Invitation link** (simplest): pick the sites, send the link. It works once, for 7 days,
+     even when sign-up is closed; the client chooses a username and a password and lands on
+     their site. The secret stays in the URL fragment (not HTTP logs or referrers); only a hash
+     is stored, and pending links can be revoked.
+   - **Open sign-up**: anyone can create an account at `/signup/`, optionally only with an
+     invitation code you set. A new account sees nothing until you give it a site. Sign-ups are
+     limited to 5 per hour per address and written to the audit log.
+   - **New editor**: you choose the username, Mas generates a password shown once.
+
+   **Sites** on each editor chooses which apps it may edit; the app page has the same switch in
+   its **CMS** card, which also checks the schema (and, for Supabase collections, creates the table).
+2. The client signs in to the same dashboard and only sees **My sites** and **Account** (password,
+   2FA). Every other API route answers `403` for an editor.
+
+What keeps the site safe: the schema is always read from the repository (never from the browser);
+only the declared fields of the declared files (or tables) are written, and keys the schema does not
+know are kept untouched; values are checked server-side (length, type, allowed choices, links
+limited to `https://`, `/`, `#`, `mailto:` and `tel:`, no control characters); `.git/`, `.github/`
+and `mas.cms.json` itself cannot be targeted; images are checked by their content (PNG, JPEG, GIF,
+WebP, AVIF; no SVG) and get a fresh file name. Each save is a single commit (`cms(home): … Edited
+by <editor>`) on top of the version the editor opened: if someone changed it meanwhile, the editor
+is asked to reload instead of overwriting. Undo a change with `git revert` or roll back the
+deployment in Mas. Supabase collections are written with the service_role key, which never leaves
+Mas; the site reads them with its anon key (row level security: read only).
+
+### Load balancing
+
+The **Load balancing** card of a Node.js, Next.js or Python app spreads its traffic:
+
+- **Instances on this server**: Mas runs the app N times (`mas-app-<id>.service`,
+  `mas-app-<id>.2.service`…, each on its own loopback port) to use every CPU core. A redeploy
+  restarts them one at a time and checks each one before the next, so the site never goes down;
+  if an instance does not come back, the release is rolled back.
+- **Servers of the cluster**: copies built by Mas on the agents you tick (see
+  [Several servers](#several-servers-cluster)).
+- **Other servers**: `host:port` of copies of the app you run elsewhere, typically over a
+  private network. They are added to the same pool.
+
+With more than one backend the vhost gets an nginx `upstream` (`least_conn`): a backend that
+fails twice is skipped for 10 s, and a request that hits a restarting or dead backend is retried
+on the next one. Spreading requests means the app must not keep state in memory or on local disk
+(sessions, uploads, caches): use the database or Supabase storage. Static and PHP sites are
+served by nginx directly and need none of this.
+
+### While a site deploys
+
+On a first deployment the domain answers immediately with a **“Deploying…” page** (nginx placeholder
+vhost) and gets its certificate **before** the build, so visitors never land on another site's
+vhost (the `421 Misdirected Request` you would otherwise get over HTTP/2). The real site replaces
+it once the health check passes; if the first deployment fails, a “not available yet” page stays.
+Proxied apps also show the page during the second or two of a restart instead of a 502.
+
+### Replacing a detected site with an app
+
+A site Mas detected (a PHP folder, a static site, a PM2 app…) can be replaced by a Mas app built from
+its repository, **without interruption**: the app is built and checked next to the old site, then
+the old nginx files leave and the app's vhost arrives in the same reload. If the first deployment
+fails, the old site stays as it was. The service page offers **Replace with a Mas app**; removing
+the app later puts the old site back.
+
+### Redeploy all
+
+**Apps → Redeploy all** queues a deployment of the latest commit of every app from GitHub; they run
+one after the other (services of the catalog are not touched).
+
+### Adopting an existing service
+
+A detected service whose folder is a GitHub checkout (for example a PM2 or systemd app) shows
+**Connect to GitHub** on its page. Mas first previews the repository, branch, service folder and
+future deployment effects; nothing changes until you confirm. It then deploys **in place**, without
+reinstalling anything:
+`git fetch` + `git reset --hard` in its folder (as the folder owner, refused if there are local
+uncommitted changes), build, restart through its current manager, health check, and
+`git reset` back to the previous commit if it fails.
+
+### CLI
+
+```console
+$ sudo mas apps                    # apps, live release, last deploy
+$ sudo mas deploy <app>            # deploy now, logs printed live
+$ sudo mas releases <app>
+$ sudo mas rollback <app> [release]
+$ sudo mas github status
+```
+
+Pull-request preview deployments are not implemented yet; the data model (an `environment`
+per app) is ready for them.
+
+## Running the server
+
+### Resources
+
+The **Resources** page shows what uses the memory and the CPU of the server, everything at once,
+refreshed every 10 seconds: one row per Mas app (all its instances), per compose project (services
+of the catalog, Supabase, your own compose files), per other system service, Mas itself and the user
+sessions, sorted by memory, with the CPU of each. It reads the cgroups of systemd
+(`memory.current` without the inactive file cache, `cpu.stat`), so measuring the whole server
+costs almost nothing.
+
+Each Node.js, Next.js or Python app has a **Resources** card (also editable from that page):
+
+- **Memory limit**: written in its units (`MemoryHigh` at 90 %, `MemoryMax`); Node apps get a
+  matching `--max-old-space-size`. An app that leaks slows down and restarts alone instead of taking
+  the memory of the others.
+- **Sleep when idle**: after N minutes without a request the app is stopped and uses nothing. The
+  next visitor wakes it up through Mas and sees a short "starting" page meanwhile.
+- **Instances follow the traffic**: between a minimum and a maximum, one more instance per 600
+  requests a minute or when the CPU stays above 70 %, one less after 10 quiet minutes. Instances are
+  started and stopped without a rebuild.
+- **Advice** from what the app really uses: a limit to set, a limit that is too tight, an app that
+  could sleep, instances that could follow the traffic, `output: "standalone"` for Next.js, a
+  Minecraft container that reserves all its memory. **Apply** applies one, **Apply all advice**
+  every one of them.
+
+### Traffic statistics
+
+The page of every app and every site of the server has a **Traffic** card: requests, page views and
+visitors per day (7 to 365 days) and the most viewed pages. They are counted from the nginx access
+logs, incrementally, without cookies or scripts: no IP address is kept, robots, images and scripts
+are left out of page views, and a visitor is counted once per day. Sites without an access log of
+their own are counted from `/var/log/nginx/mas-hosts.access.log`, which Mas adds for them (each line
+starts with the site name).
+
+### Maintenance mode
+
+**Apps → Maintenance** (or the **Maintenance** card of an app) puts a site on hold: visitors get a
+page of your choice with a `503` and `Retry-After` (search engines come back later), the addresses
+you allow still see the real site, and the app keeps running. A maintenance can end by itself at a
+set time, and every site can go into maintenance (or come back) at once.
+
+- **Pages** are written by Mas from a title, a message, a return time and a color, or **imported**:
+  one HTML file, or a ZIP of a folder with an `index.html` and its images, styles and fonts. Mas adds
+  a `<base>` so that relative links work from any URL of the site. Every page has a preview and can
+  be used on every site.
+- Turning it on never rewrites the vhost: Mas writes a `geo` and a `map` in
+  `/etc/nginx/conf.d/mas-maintenance.conf` and a snippet the vhost includes, tests with `nginx -t`
+  and reloads; the page and ACME challenges always pass.
+- It applies to the sites whose nginx configuration Mas writes (apps and services with a domain).
+
+### Restart everything, identical
+
+**Overview → Restart everything** restarts every running service exactly as it was, after showing
+the list (you can untick some). Containers are restarted in place through the Docker API, never
+recreated: same container, image, variables, volumes and ports. Units restart with
+`systemctl restart`, PM2 apps with `pm2 restart`, then the Mas apps one instance at a time with a
+health check, and nginx is reloaded last after `nginx -t`. Inside a compose project, the containers
+the others depend on go first. Mas compares the configuration of each service before and after and
+reports *identical* or what changed; what was stopped stays stopped. Mas itself, nginx, Docker and
+SSH are left alone.
+
+### Health checks
+
+`mas doctor` (CLI) and the **Health** page check, read-only:
+
+| Check | Why it matters |
+|-------|----------------|
+| Broken certbot lineage (`live/*/cert.pem` not a symlink), renewal config without files | certbot skips or fails on it at every run |
+| Expired / expiring certificates | renewal is failing somewhere |
+| Certificates used by no enabled vhost | leftovers that make `certbot renew` fail |
+| `standalone` renewals with `systemctl stop nginx` hooks | every renewal takes all sites down, and may leave nginx stopped |
+| Missing webroot, inactive `certbot.timer` | renewals cannot succeed |
+| nginx running outside systemd | `systemctl reload` does nothing, restarts fail with "address already in use" |
+| vhost pointing to a missing certificate, `nginx -t` failing | the next reload breaks every site |
+| Domains not resolving, or resolving to another server | site moved elsewhere: its vhost/certificate here are dead weight |
+
+Each problem comes with an explanation and, when safe, the command that fixes it. Mas never
+applies these fixes by itself.
+
+## Several servers (cluster)
+
+The **Servers** page turns several Mas servers into one cluster, driven from one dashboard.
+
+1. On each other server, install Mas, then make it an **agent**: no dashboard, it only answers the
+   calls of the primary server on its private address (a VPC, WireGuard or Tailscale network, never
+   a public one).
+
+   ```console
+   $ sudo mas agent init --address 10.0.0.2      # prints the join token, shown once
+   $ sudo mas agent token                        # another token later
+   ```
+
+2. On the primary: **Servers → Add a server** with `http://10.0.0.2:7070` and the token. Tokens are
+   stored hashed, give the right to deploy code on that server, and can be revoked.
+3. On an app's **Load balancing** card, tick the servers it should run on. Every deploy builds the
+   same commit on each of them (with a short-lived clone token from the primary's GitHub App), and
+   nginx on the primary spreads the requests over every copy that answers.
+
+- **Live map**: which server runs which copy, and the requests of the last minute per backend.
+- **Auto-fill**: a server silent for 2 minutes has its copies rebuilt on another available server.
+- **If the primary is lost**: the primary keeps sending its state (apps, settings, encrypted) to the
+  agents. On one of them, `sudo mas agent promote` makes it the primary: its copies become the apps,
+  the other apps are built there, and it drives the remaining servers. Point the domains to it; if
+  the former primary comes back, the others refuse its orders (each promotion raises an epoch).
+- `sudo mas agent leave` turns an agent back into a normal Mas with its dashboard.
+
+## How detection works
+
+```
+nginx vhost ──proxy_pass──▶ port ──ss──▶ PID ──/proc──▶ cgroup → manager (systemd / pm2 / docker)
+                                                 └────▶ cwd    → project folder → type, git
+nginx vhost ──fastcgi_pass + root──▶ PHP-FPM site
+nginx vhost ──root only──▶ static site
+listening port / pm2 app / container / unit without vhost ──▶ "no domain" service
+```
+
+| Collector       | Source                                                                 |
+|-----------------|------------------------------------------------------------------------|
+| `nginx`         | `/etc/nginx/sites-enabled/*`, `conf.d/*.conf`, includes, upstreams, certificates |
+| `ports`         | `ss -tlnpH` (TCP) and `ss -xlnpH` (unix sockets)                       |
+| `processes`     | `/proc/<pid>/{status,cmdline,cwd,cgroup,environ}`                      |
+| `systemd`       | `systemctl list-units` / `systemctl show`, OS units filtered out       |
+| `pm2`           | `pm2 jlist` for every user with a `~/.pm2` (only if its daemon is running) |
+| `docker`        | `/var/run/docker.sock` (skipped cleanly if absent)                     |
+
+Certbot's "80 → 443" redirect blocks and `www.` redirects are merged with the HTTPS block of the
+same site. Git metadata (remote, branch, last commit) is read directly from `.git/`, with any
+credentials embedded in the remote URL stripped.
+
+Service types are decided by ordered rules: `fastcgi_pass` or `.php` files → **php**,
+`package.json` with `next` → **nextjs**, `package.json` → **node**,
+`requirements.txt` / `pyproject.toml` → **python**, `root` without proxy → **static**,
+otherwise **unknown**. A label set by hand in the dashboard always wins.
+
+### Configuration
+
+`/etc/mas/config.toml`:
+
+```toml
+[server]
+port = 7070           # always bound to 127.0.0.1
+session_hours = 12    # idle timeout (sessions also expire after 7 days)
+scan_interval = 60    # background scan, seconds
+
+[scan]
+extra_exclude_units = ["my-backup-agent"]  # added to the built-in OS list
+hide_os_daemons = true  # hide units with no port and only system paths in their command
+```
+
+## Security model
+
+- **Network**: the API listens on `127.0.0.1:7070` only (`mas serve` refuses anything else).
+  The public entry point is the nginx vhost: HTTPS only, HSTS, `X-Frame-Options: DENY`, CSP,
+  `client_max_body_size 2m`.
+- **Authentication**: administrator accounts are created on the server (`mas user create`), never
+  from the web. CMS editor accounts are created by an administrator in the dashboard and can only
+  reach the CMS routes of the sites they were given. Passwords are hashed with argon2id. **TOTP 2FA** (RFC 6238, 30 s, ±1 step), and
+  each code is accepted only once (replay protection). Five failed logins per account or ten per
+  IP in 15 minutes trigger a temporary block (HTTP 429). Rate-limit state is capped at 10,000 keys
+  per limiter to prevent memory exhaustion through unique usernames or addresses. Logins are written
+  to the audit log.
+- **Sessions**: random 256-bit token in a `HttpOnly`, `Secure`, `SameSite=Strict` cookie; only
+  its SHA-256 is stored. 12 h idle timeout, 7 days maximum. Changing the password or the 2FA
+  device signs out every other session.
+- **CSRF**: every mutating request needs the per-session `X-CSRF-Token` header, and a foreign
+  `Origin` is rejected.
+- **Deployments**: the GitHub webhook is rejected unless its `X-Hub-Signature-256` HMAC is valid,
+  before the payload is even parsed. Apps run as their own non-root user, listen on loopback, and
+  get their secrets from a `0600` environment file; secrets are encrypted at rest in the database.
+  Build commands you configure run as that unprivileged user. Generated files are backed up
+  before being replaced and nginx is only reloaded after a successful `nginx -t`.
+- **Hardening from the security review**: build/start commands are single-line (no systemd
+  directive injection), the served folder cannot leave the release (`..` refused), GitHub paths
+  and refs are validated and URL-encoded, each webhook delivery is accepted once, replacing the 2FA
+  device requires a current code, password checks inside a session are rate-limited, the session
+  cookie is `__Host-` prefixed, `Permissions-Policy` and `Cross-Origin-Opener-Policy` headers are
+  set, and app units run with no capabilities (`CapabilityBoundingSet=`), `PrivateDevices`,
+  `ProtectKernel*`, `RestrictSUIDSGID`.
+- **Actions**: strict allow-list `(manager, action) → argv`, built from identifiers found by
+  the scan (re-validated with regexes), executed without a shell. Stop and restart ask for
+  confirmation. Every action, with its command and output, is written to the audit log.
+- **nginx**: Mas only reloads after a successful `nginx -t`. The installer backs up any file it
+  replaces (`<file>.mas-bak-<timestamp>`) and restores it if `nginx -t` fails.
+- **Read-only discovery**: scans never write. The test suite hashes the whole fixture tree
+  before and after a scan and allow-lists every command executed. `pm2 jlist` is only called
+  when the user's daemon is already running (it would otherwise start one), and as that user.
+- **Secrets** found along the way (credentials in git remotes, PM2 environment variables) are
+  neither stored nor displayed. The database (`/var/lib/mas/mas.db`) is `0600`, root only.
+- **Cluster**: join tokens are random, stored hashed and revocable; servers talk over the private
+  network only; the state sent to the agents is encrypted, and a promoted server's epoch makes the
+  others refuse a former primary.
+- **Maintenance pages** are public files (every visitor of a site in maintenance gets them): the
+  dashboard previews them in a sandboxed frame without scripts; imported ZIPs cannot write outside
+  their folder or add hidden files.
+- **Lost phone**: `sudo mas user 2fa-reset` on the server. Root on the server is the
+  recovery path.
+- **Why the agent runs as root**: it must read `/proc` for every user, `ss -p` and the Docker
+  socket, and restart services. `mas.service` reduces the blast radius with
+  `NoNewPrivileges=yes`, `ProtectSystem=full`, `PrivateTmp=yes`, `PrivateDevices=yes`,
+  `ProtectClock=yes`, `ProtectHostname=yes`, `ProtectKernel*`, and a restricted set of address
+  families (`AF_UNIX`, IPv4/IPv6 and netlink) needed by its local API, integrations and scanner. It
+  also uses
+  `ReadWritePaths=` limited to `/var/lib/mas /srv/mas /etc/nginx /etc/mas /etc/systemd/system
+  /etc/letsencrypt`.
+
+## Beta: known limitations
+
+- Debian (and derivatives) with nginx only; Apache/Caddy servers are not detected.
+- Administrator accounts are created on the server; no 2FA recovery codes yet (`sudo mas user 2fa-reset`).
+- No pull-request preview deployments yet; one production branch per app.
+- DNS providers other than OVH and Cloudflare are implemented from their API documentation and
+  not yet battle-tested: please report issues.
+- The dashboard CSP keeps `'unsafe-inline'` (required by the static Next.js export).
+- Resources and traffic need cgroup v2 (Debian 11+): on older systems only Mas apps are measured.
+
+## Development
+
+```console
+$ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+$ .venv/bin/pytest
+$ cd web && npm ci && npm run build      # dashboard → web/out
+```
+
+The tests don't need a real server. `tests/fixtures/server.py` builds a fake Debian tree (nginx
+configs, `/proc`, `ss` and `systemctl` outputs, a PM2 jlist, Docker API responses), and
+`FixtureHost` serves it to the collectors. You can run the whole app against it:
+
+```console
+$ python tests/fixtures/server.py /tmp/mas-demo
+$ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db user create admin
+$ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
+```
+
+## Roadmap
+
+- [x] **Phase 1: detection.** Collectors, correlation, type detection, `mas scan [--json]`.
+- [x] **Phase 2: dashboard and management.** API, 2FA, background scan, logs, allow-listed
+      actions, labels, audit log, `install.sh`, `mas.service`, `mas self-update`.
+- [x] **Phase 2.5: health checks.** Certificates, certbot renewal, nginx, DNS (`mas doctor`).
+- [x] **Phase 3: deploy from GitHub.** GitHub App (manifest flow), signed webhooks, atomic
+      releases, generated systemd unit and nginx vhost, certbot, health check with automatic
+      rollback, 5 releases kept, live build logs (SSE), adoption of detected services.
+- [x] **Load balancing on one server**: several instances per app, outside backends, rolling restarts.
+- [x] **Services, Supabase and CMS**: ready-made services with backups, self-hosted Supabase, a CMS
+      for clients, traffic statistics, dashboard in four languages.
+- [x] **Cluster**: agents, copies of apps on several servers, live map, auto-fill, promotion.
+- [x] **Resources and operations**: Resources page, memory limits, sleep when idle, autoscaling,
+      advice, restart everything identical, maintenance mode.
+- [ ] Next: preview deployments per pull request, recovery codes for 2FA, notifications.
+
+## License
+
+MIT

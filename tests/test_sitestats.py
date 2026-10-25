@@ -1,0 +1,114 @@
+"""Visits counted from nginx access logs."""
+
+from __future__ import annotations
+
+import gzip
+from datetime import date
+
+import server
+
+from mas.config import Config
+from mas.db import Database
+from mas.host import FixtureHost
+from mas.sitestats import SiteStats, count
+
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15"
+
+
+def line(ip, day, path, status=200, agent=UA, method="GET"):
+    return f'{ip} - - [{day}/Oct/2026:10:00:00 +0200] "{method} {path} HTTP/2.0" {status} 512 "-" "{agent}"'
+
+
+def test_count_pages_people_and_requests():
+    days = count([
+        line("1.1.1.1", "20", "/"), line("1.1.1.1", "20", "/"), line("1.1.1.1", "20", "/assets/a.jpg"),
+        line("2.2.2.2", "20", "/oeuvres?x=1"), line("3.3.3.3", "20", "/", agent="Googlebot/2.1"),
+        line("4.4.4.4", "20", "//.env.save", status=404), line("4.4.4.4", "20", "/wp-login.php"),
+        line("5.5.5.5", "20", "/contact", method="POST"), line("1.1.1.1", "21", "/"), "garbage",
+    ])
+    d20 = days["2026-10-20"]
+    assert d20["requests"] == 8 and d20["pageviews"] == 3 and d20["visitors"] == 2
+    assert d20["pages"] == {"/": 2, "/oeuvres": 1}
+    assert days["2026-10-21"]["visitors"] == 1
+
+
+def test_report_reads_rotated_logs_and_keeps_the_history(tmp_path):
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    db.create_app("bb", name="bb", repo="acme/bb", branch="main", type="static", domain="bb.example.com")
+    log = "/var/log/nginx/mas-app-bb.access.log"
+    host.write_text(log, line("1.1.1.1", "21", "/") + "\n")
+    host.write_text(f"{log}.1", line("1.1.1.1", "20", "/") + "\n" + line("2.2.2.2", "20", "/a") + "\n")
+    real = host.real(f"{log}.2.gz")
+    real.write_bytes(gzip.compress((line("9.9.9.9", "19", "/old") + "\n").encode()))
+    stats = SiteStats(host, Config(), db)
+    app = db.get_app("bb")
+    r = stats.report(app, days=7, today=date(2026, 10, 21))
+    by_day = {d["day"]: d for d in r["days"]}
+    assert by_day["2026-10-19"]["visitors"] == 1 and by_day["2026-10-20"]["pageviews"] == 2
+    assert r["totals"]["pageviews"] == 4 and r["top_pages"][0] == {"path": "/", "views": 2}
+    assert len(r["days"]) == 7 and r["tracked_since"] == "2026-10-19"
+    # rotated away: the days stay in the database
+    host.remove(f"{log}.2.gz")
+    stats.refresh(app, force=True)
+    assert stats.report(app, days=7, today=date(2026, 10, 21))["totals"]["pageviews"] == 4
+    assert "1.1.1.1" not in str(db.site_stats("bb", "2026-01-01"))  # no IP kept
+
+
+def test_only_new_lines_are_read_and_rotation_is_followed(tmp_path):
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    db.create_app("bb", name="bb", repo="acme/bb", branch="main", type="static", domain="bb.example.com")
+    app, log = db.get_app("bb"), "/var/log/nginx/mas-app-bb.access.log"
+    today = date.today()
+    dd = f"{today.day:02d}"
+    mon = today.strftime("%b")
+
+    def ln(ip, path="/"):
+        return f'{ip} - - [{dd}/{mon}/{today.year}:10:00:00 +0200] "GET {path} HTTP/2.0" 200 5 "-" "{UA}"\n'
+
+    stats = SiteStats(host, Config(), db)
+    host.write_text(log, ln("1.1.1.1") + ln("2.2.2.2"))
+    stats.refresh(app, force=True)
+    real = host.real(log)
+    with open(real, "a") as fh:  # nginx keeps writing
+        fh.write(ln("1.1.1.1", "/a") + ln("3.3.3.3") + '9.9.9.9 - - [half a line')
+    reads = []
+    original = host.read_from
+    host.read_from = lambda p, o, n: reads.append((p, o)) or original(p, o, n)
+    stats.refresh(app, force=True)
+    assert reads and reads[0][1] > 0  # from where it stopped, not from the start
+    row = db.site_stats("bb", today.isoformat())[0]
+    assert row["pageviews"] == 4 and row["visitors"] == 3  # 1.1.1.1 counted once
+    # rotation: the log becomes .1 (with its unread end), a new one starts
+    with open(real, "a") as fh:
+        fh.write("]\n" + ln("4.4.4.4"))
+    real.rename(real.with_name(real.name + ".1"))
+    host.write_text(log, ln("5.5.5.5") + ln("2.2.2.2"))
+    stats.refresh(app, force=True)
+    row = db.site_stats("bb", today.isoformat())[0]
+    assert row["pageviews"] == 7 and row["visitors"] == 5  # 4.4.4.4 (end of .1), 5.5.5.5; 2.2.2.2 already came
+    stats.refresh(app, force=True)  # nothing new
+    assert db.site_stats("bb", today.isoformat())[0]["pageviews"] == 7
+
+
+def test_a_site_of_the_server_is_counted_from_the_shared_log(tmp_path):
+    """blog.example.com writes to the shared access.log: its lines of mas-hosts.access.log are counted."""
+    from mas.sitestats import HOSTS_LOG, service_target
+    from mas.state import Scanner
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    config = Config()
+    svc = Scanner(host, config, db).get("blog.example.com")
+    target = service_target(svc, db.list_apps(), config.apps_dir)
+    assert target["own_log"] is False and target["hosts"] == ["blog.example.com", "www.blog.example.com"]
+    host.write_text(HOSTS_LOG, "\n".join([
+        "blog.example.com " + line("1.1.1.1", "21", "/"), "www.blog.example.com " + line("2.2.2.2", "21", "/a"),
+        "docs.example.com " + line("3.3.3.3", "21", "/"), "BLOG.example.com " + line("1.1.1.1", "21", "/b"),
+    ]) + "\n")
+    stats = SiteStats(host, config, db)
+    report = stats.report(target, days=7, today=date(2026, 10, 21))
+    assert report["totals"] == {"requests": 3, "pageviews": 3, "visitors": 2}
+    host.write_text(HOSTS_LOG, host.read_text(HOSTS_LOG) + "blog.example.com " + line("4.4.4.4", "21", "/") + "\n")
+    stats._done.clear()
+    assert stats.report(target, days=7, today=date(2026, 10, 21))["totals"]["requests"] == 4

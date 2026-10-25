@@ -1,0 +1,12 @@
+{
+  "name": "mas",
+  "owner": { "name": "SyanCode" },
+  "metadata": { "description": "Claude Code plugins for Mas, the self-hosted deployment dashboard." },
+  "plugins": [
+    {
+      "name": "mas-cms",
+      "source": "./plugins/mas-cms",
+      "description": "Make a website editable from the Mas CMS: content in JSON files or Supabase, mas.cms.json written and checked."
+    }
+  ]
+}
