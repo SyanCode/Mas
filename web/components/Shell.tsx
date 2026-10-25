@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
@@ -88,6 +88,75 @@ function UserMenu({ session }: { session: Session }) {
   );
 }
 
+type NavItem = (typeof NAV)[number];
+
+/** The tabs that fit in the header, the others in "More": measured, so it holds with every theme and font. */
+function PriorityNav({ items, pathname }: { items: NavItem[]; pathname: string }) {
+  const t = useT();
+  const box = useRef<HTMLDivElement>(null);
+  const ruler = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(items.length);
+  const [open, setOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const fit = () => {
+      if (!box.current || !ruler.current) return;
+      const widths = [...ruler.current.children].map((c) => (c as HTMLElement).offsetWidth);
+      const moreWidth = widths.pop() ?? 0;
+      const room = box.current.clientWidth;
+      let used = widths.reduce((a, b) => a + b, 0);
+      if (used <= room) return setShown(widths.length);
+      let n = widths.length;
+      while (n > 0 && used + moreWidth > room) used -= widths[--n];
+      setShown(n);
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    if (box.current) observer.observe(box.current);
+    if (ruler.current) observer.observe(ruler.current);  // a theme with another font
+    document.fonts?.ready.then(fit).catch(() => {});
+    return () => observer.disconnect();
+  }, [items, t]);
+
+  useEffect(() => setOpen(false), [pathname]);
+
+  const tab = (active: boolean) => `relative flex shrink-0 items-center whitespace-nowrap px-3 text-[13px] transition ${active ? "font-medium text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"}`;
+  const line = <span className="mas-accent-line absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-gradient-to-r from-indigo-400 via-sky-400 to-fuchsia-400" />;
+  const hidden = items.slice(shown);
+  const hiddenActive = hidden.find((i) => i.match(pathname));
+  return (
+    <div ref={box} className="relative hidden h-14 min-w-0 flex-1 md:block">
+      <div ref={ruler} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 flex h-0 overflow-hidden">
+        {items.map((item) => <span key={item.href} className={tab(true)}>{t(item.label)}</span>)}
+        <span className={tab(true)}>{t("More")} ▾</span>
+      </div>
+      <nav className="-mb-px flex h-14 items-stretch">
+        {items.slice(0, shown).map((item) => {
+          const active = item.match(pathname);
+          return <Link key={item.href} href={item.href} className={tab(active)}>{t(item.label)}{active && line}</Link>;
+        })}
+        {hidden.length > 0 && (
+          <div className="relative flex" onMouseLeave={() => setOpen(false)}>
+            <button type="button" onClick={() => setOpen((o) => !o)} className={tab(!!hiddenActive)} aria-expanded={open}>
+              {hiddenActive ? t(hiddenActive.label) : t("More")} ▾{hiddenActive && line}
+            </button>
+            {open && (
+              <div className="panel absolute left-0 top-12 z-40 min-w-44 rounded-xl p-1">
+                {hidden.map((item) => (
+                  <Link key={item.href} href={item.href}
+                    className={`block whitespace-nowrap rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06] ${item.match(pathname) ? "font-medium" : ""}`}>
+                    {t(item.label)}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </nav>
+    </div>
+  );
+}
+
 export function Backdrop() {
   return <div className="mas-backdrop" aria-hidden />;
 }
@@ -139,45 +208,32 @@ export function Shell({ children }: { children: ReactNode }) {
       <Backdrop />
       <div className="min-h-screen">
         <header className="mas-header sticky top-0 z-30 border-b border-zinc-200/70 bg-white/60 backdrop-blur-xl dark:border-white/[0.06] dark:bg-[#050608]/60">
-          <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6">
-            <Link href={editor ? "/cms/" : "/"} className="flex items-center gap-2.5">
+          <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:gap-6">
+            <Link href={editor ? "/cms/" : "/"} className="flex shrink-0 items-center gap-2.5">
               <Logo />
               <span className="text-[15px] font-semibold tracking-tight">mas</span>
             </Link>
-            <nav className="-mb-px hidden h-14 min-w-0 items-stretch gap-1 overflow-x-auto md:flex">
-              {nav.map((item) => {
-                const active = item.match(pathname);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`relative flex items-center whitespace-nowrap px-3 text-[13px] transition ${active ? "font-medium text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"}`}
-                  >
-                    {t(item.label)}
-                    {active && <span className="mas-accent-line absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-gradient-to-r from-indigo-400 via-sky-400 to-fuchsia-400" />}
-                  </Link>
-                );
-              })}
-            </nav>
-            <div className="ml-auto flex items-center gap-3">
+            <PriorityNav items={nav} pathname={pathname} />
+            <div className="ml-auto flex shrink-0 items-center gap-3">
               {!session.totp_enabled && (
-                <Link href="/settings/" className="hidden rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-xs text-amber-600 sm:inline dark:text-amber-300">
+                <Link href="/settings/" className="hidden whitespace-nowrap rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-xs text-amber-600 xl:inline dark:text-amber-300">
                   {t("Enable 2FA")}
                 </Link>
               )}
               {!editor && <button
                 onClick={() => setPalette(true)}
-                className="glass hidden h-8 items-center gap-6 rounded-lg px-3 text-xs text-zinc-500 transition hover:text-zinc-800 sm:flex dark:hover:text-zinc-200"
+                className="glass hidden h-8 items-center gap-6 whitespace-nowrap rounded-lg px-3 text-xs text-zinc-500 transition hover:text-zinc-800 sm:flex dark:hover:text-zinc-200"
+                title={t("Search…")}
               >
-                {t("Search…")}
+                <span className="hidden lg:inline">{t("Search…")}</span>
                 <Kbd>⌘K</Kbd>
               </button>}
               <UserMenu session={session} />
             </div>
           </div>
-          <nav className="flex gap-1 overflow-x-auto px-4 pb-2 md:hidden">
+          <nav className="no-scrollbar flex gap-1 overflow-x-auto px-4 pb-2 md:hidden">
             {nav.map((item) => (
-              <Link key={item.href} href={item.href} className={`rounded-md px-2.5 py-1 text-xs ${item.match(pathname) ? "bg-zinc-200 dark:bg-white/10" : "text-zinc-500"}`}>
+              <Link key={item.href} href={item.href} className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-xs ${item.match(pathname) ? "bg-zinc-200 dark:bg-white/10" : "text-zinc-500"}`}>
                 {t(item.label)}
               </Link>
             ))}

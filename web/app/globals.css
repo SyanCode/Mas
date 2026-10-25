@@ -110,6 +110,18 @@ body {
   animation: var(--animate-shimmer);
 }
 
+/* A grid item never grows past its track: long names (monospace themes above all) truncate instead. */
+.grid > * {
+  min-width: 0;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 code,
 pre,
 .mono {

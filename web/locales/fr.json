@@ -1115,5 +1115,7 @@
   "Value": "Valeur",
   "or": "ou",
   "Checked again every 30 s. DNS changes can take a few minutes.": "Revérifié toutes les 30 s. Un changement DNS peut prendre quelques minutes.",
-  "Every name points to this server.": "Tous les noms pointent vers ce serveur."
+  "Every name points to this server.": "Tous les noms pointent vers ce serveur.",
+  "More": "Plus",
+  "More actions": "Autres actions"
 }

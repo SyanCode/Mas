@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FolderHeader, FolderLayout, FolderSidebar, MoveMenu, dragProps, useFolderView, useFolders, visibleIds, type FoldersApi } from "@/components/Folders";
 import { Shell } from "@/components/Shell";
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorText, Input, Monogram, Notice, PageHeader, ReleaseBadge, StatusDot } from "@/components/ui";
+import { Actions, Badge, Button, ConfirmDialog, EmptyState, ErrorText, Input, Monogram, Notice, PageHeader, ReleaseBadge, StatusDot } from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type FreezeState, type GitHubStatus } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { BENTO_SPAN, bentoSize, useTheme } from "@/lib/theme";
@@ -141,6 +141,7 @@ function AppRows({ apps, f, frozenAll }: { apps: App[]; f: FoldersApi; frozenAll
               <span className="min-w-0">
                 <span className="block truncate font-medium">{a.id}</span>
                 <span className="block truncate text-xs text-zinc-500">{a.domain ?? t("no domain yet")}</span>
+                <span className="mt-1 flex flex-wrap gap-1 empty:hidden md:hidden"><AppFlags a={a} frozenAll={frozenAll} /></span>
               </span>
             </span>
             <span className="hidden min-w-0 md:block">
@@ -245,7 +246,13 @@ function Apps() {
   return (
     <>
       <PageHeader eyebrow={t("Deployments")} title={t("Apps")} subtitle={t("Push to GitHub, Mas builds and ships it. Atomic releases, instant rollback.")} actions={
-        <div className="flex flex-wrap gap-2">
+        <Actions main={newButton} more={[
+          { label: t("Projects"), href: "/projects/" },
+          { label: t("Deploy a service"), href: "/apps/services/" },
+          { label: frozenAll ? t("▶ Resume deployments") : t("❄ Freeze deployments"), onClick: () => (frozenAll ? setFrozenAll(false) : setConfirmFreeze(true)), disabled: !freeze },
+          { label: t("Redeploy all"), onClick: () => setConfirmAll(true), disabled: !deployAllButton },
+          { label: t("Maintenance"), href: "/maintenance/" },
+        ]}>
           <Link href="/maintenance/" className="inline-flex h-9 items-center rounded-lg border border-zinc-300 px-3 text-sm hover:bg-zinc-100 dark:border-white/10 dark:hover:bg-white/[0.06]">{t("Maintenance")}</Link>
           {freeze && <Button onClick={() => (frozenAll ? setFrozenAll(false) : setConfirmFreeze(true))} className="!h-9" title={t("Pushes are recorded but nothing builds")}>
             {frozenAll ? t("▶ Resume deployments") : t("❄ Freeze deployments")}
@@ -254,7 +261,7 @@ function Apps() {
           <Link href="/projects/" className={linkButton}>{t("Projects")}</Link>
           <Link href="/apps/services/" className={linkButton}>{t("Deploy a service")}</Link>
           {newButton}
-        </div>
+        </Actions>
       } />
       <div className="mb-4 space-y-3">
         <ErrorText>{error}</ErrorText>
@@ -262,7 +269,7 @@ function Apps() {
         {frozenAll && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-800 dark:text-sky-200">
             <span className="text-lg">❄</span>
-            <span className="flex-1">{t("Every deployment is frozen: pushes to GitHub are recorded, nothing builds.")} {waiting > 0 && t("{n} app(s) have commits waiting.", { n: waiting })}</span>
+            <span className="min-w-[14rem] flex-1">{t("Every deployment is frozen: pushes to GitHub are recorded, nothing builds.")} {waiting > 0 && t("{n} app(s) have commits waiting.", { n: waiting })}</span>
             <Button onClick={() => setFrozenAll(false)}>{t("Resume")}</Button>
           </div>
         )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import type { Status } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -254,5 +254,43 @@ export function ConfirmDialog({
         </div>
       </div>
     </dialog>
+  );
+}
+
+export interface MoreAction {
+  label: string;
+  onClick?: () => void;
+  href?: string;
+  danger?: boolean;
+  disabled?: boolean;
+}
+
+/** Page actions: every button from md up; below, the main one and a "⋯" menu holding the others. */
+export function Actions({ main, more, children }: { main?: ReactNode; more: MoreAction[]; children: ReactNode }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const shown = more.filter((m) => !m.disabled);
+  return (
+    <>
+      <div className="hidden flex-wrap items-center gap-2 md:flex">{children}</div>
+      <div className="flex items-center gap-2 md:hidden">
+        {main}
+        {shown.length > 0 && (
+          <div className="relative">
+            <Button onClick={() => setOpen((o) => !o)} className="!h-9 !px-2.5" aria-label={t("More actions")} aria-expanded={open}>⋯</Button>
+            {open && (
+              <div className="panel absolute right-0 top-11 z-40 w-56 rounded-xl p-1" onMouseLeave={() => setOpen(false)}>
+                {shown.map((m) => {
+                  const cls = `block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06] ${m.danger ? "text-rose-600 dark:text-rose-400" : ""}`;
+                  return m.href
+                    ? <a key={m.label} href={m.href} className={cls}>{m.label}</a>
+                    : <button key={m.label} type="button" className={cls} onClick={() => { setOpen(false); m.onClick?.(); }}>{m.label}</button>;
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
