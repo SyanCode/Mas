@@ -120,6 +120,181 @@ pre,
   background: rgba(129, 140, 248, 0.35);
 }
 
+/* -- Themes (lib/theme.tsx) ---------------------------------------------------------------
+   A theme sets data-style on <html>. It re-maps the Tailwind palettes the interface is drawn with
+   (zinc for neutrals, indigo / sky / fuchsia / violet for accents; green, amber and red keep meaning
+   "ok", "warning" and "error") and restyles a few hooks: .mas-cta (main buttons), .mas-header,
+   .mas-accent-line (active tab), .glass, .panel, .mas-backdrop. */
+
+.mas-cta {
+  background-image: linear-gradient(to right, var(--color-indigo-500), var(--color-sky-500), var(--color-fuchsia-500));
+}
+
+/* Geist: black and white, thin borders, small corners, no glow. */
+:root[data-style="geist"] {
+  --bg: #ffffff;
+  --grid: rgba(0, 0, 0, 0.04);
+  --radius-xl: 0.5rem;
+  --radius-2xl: 0.625rem;
+  --color-indigo-300: #a3a3a3; --color-indigo-400: #737373; --color-indigo-500: #171717; --color-indigo-600: #0a0a0a;
+  --color-sky-300: #a3a3a3; --color-sky-400: #737373; --color-sky-500: #404040; --color-sky-600: #262626;
+  --color-fuchsia-400: #737373; --color-fuchsia-500: #525252;
+  --color-violet-300: #a3a3a3; --color-violet-400: #737373; --color-violet-500: #525252;
+  --color-zinc-50: #fafafa; --color-zinc-100: #f2f2f2; --color-zinc-200: #e8e8e8; --color-zinc-300: #d4d4d4;
+  --color-zinc-400: #a1a1a1; --color-zinc-500: #8f8f8f; --color-zinc-600: #6b6b6b; --color-zinc-700: #454545;
+  --color-zinc-800: #2e2e2e; --color-zinc-900: #171717; --color-zinc-950: #0a0a0a;
+}
+:root.dark[data-style="geist"] {
+  --bg: #000000;
+  --grid: rgba(255, 255, 255, 0.035);
+  --color-indigo-300: #d4d4d4; --color-indigo-400: #a1a1a1; --color-indigo-500: #ededed; --color-indigo-600: #ffffff;
+  --color-sky-300: #d4d4d4; --color-sky-400: #a1a1a1; --color-sky-500: #d4d4d4; --color-sky-600: #ededed;
+  --color-fuchsia-400: #a1a1a1; --color-fuchsia-500: #8f8f8f;
+  --color-violet-300: #d4d4d4; --color-violet-400: #a1a1a1; --color-violet-500: #8f8f8f;
+}
+[data-style="geist"] .mas-backdrop::before { display: none; }
+[data-style="geist"] .glass {
+  @apply border-zinc-200 bg-white backdrop-blur-none dark:border-white/[0.1] dark:bg-[#0a0a0a];
+  box-shadow: none;
+}
+[data-style="geist"] .mas-cta { background: #171717; color: #fff; box-shadow: none; }
+:root.dark[data-style="geist"] .mas-cta { background: #ededed; color: #0a0a0a; }
+[data-style="geist"] .mas-header { @apply bg-white/80 dark:bg-black/80; }
+[data-style="geist"] .mas-accent-line { background: currentColor; }
+[data-style="geist"] .text-gradient { background: none; color: inherit; -webkit-text-fill-color: currentColor; }
+
+/* Bento Grid: solid tiles, big corners, vivid accents on a dotted floor. */
+:root[data-style="bento"] {
+  --bg: #f1f1ee;
+  --grid: rgba(0, 0, 0, 0.08);
+  --radius-xl: 1rem;
+  --radius-2xl: 1.75rem;
+  --color-indigo-300: #c4b5fd; --color-indigo-400: #a78bfa; --color-indigo-500: #8b5cf6; --color-indigo-600: #7c3aed;
+  --color-sky-300: #67e8f9; --color-sky-400: #22d3ee; --color-sky-500: #06b6d4; --color-sky-600: #0891b2;
+  --color-fuchsia-400: #fb7185; --color-fuchsia-500: #f43f5e;
+}
+:root.dark[data-style="bento"] { --bg: #0c0c0e; --grid: rgba(255, 255, 255, 0.07); }
+[data-style="bento"] .mas-backdrop::before { display: none; }
+[data-style="bento"] .mas-backdrop::after {
+  background-image: radial-gradient(var(--grid) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  mask-image: none;
+}
+[data-style="bento"] .glass {
+  @apply border-black/[0.06] bg-white backdrop-blur-none dark:border-white/[0.06] dark:bg-[#161618];
+}
+
+/* Terminal: green phosphor, monospace, square corners, scanlines. Dark only. */
+:root[data-style="terminal"] {
+  --bg: #040805;
+  --grid: rgba(57, 255, 106, 0.05);
+  --font-sans: var(--font-mono);
+  --radius-sm: 0; --radius-md: 0.125rem; --radius-lg: 0.125rem; --radius-xl: 0.125rem; --radius-2xl: 0.125rem;
+  --color-zinc-50: #eaffee; --color-zinc-100: #c8ffd4; --color-zinc-200: #9bf5ae; --color-zinc-300: #6fdc86;
+  --color-zinc-400: #4fb866; --color-zinc-500: #3d9a52; --color-zinc-600: #2e7a3f; --color-zinc-700: #1f5a2c;
+  --color-zinc-800: #143d1e; --color-zinc-900: #0b2412; --color-zinc-950: #06140a;
+  --color-indigo-300: #a7ffbf; --color-indigo-400: #5cff86; --color-indigo-500: #39ff6a; --color-indigo-600: #22c55e;
+  --color-sky-300: #99f6e4; --color-sky-400: #2dd4bf; --color-sky-500: #14b8a6; --color-sky-600: #0d9488;
+  --color-fuchsia-400: #fde047; --color-fuchsia-500: #facc15;
+  --color-violet-300: #fde68a; --color-violet-400: #fcd34d; --color-violet-500: #fbbf24;
+}
+[data-style="terminal"] body { text-shadow: 0 0 6px rgba(57, 255, 106, 0.25); }
+[data-style="terminal"] .mas-backdrop::before {
+  inset: 0;
+  filter: none;
+  animation: none;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, 0.28) 2px 3px);
+}
+[data-style="terminal"] .mas-backdrop::after { mask-image: none; background-size: 32px 32px; }
+[data-style="terminal"] .glass,
+[data-style="terminal"] .panel {
+  @apply backdrop-blur-none;
+  border-color: rgba(57, 255, 106, 0.22);
+  background: rgba(4, 12, 6, 0.92);
+  box-shadow: none;
+}
+[data-style="terminal"] .mas-cta {
+  background: transparent;
+  color: #39ff6a;
+  border: 1px solid #39ff6a;
+  box-shadow: 0 0 14px -4px rgba(57, 255, 106, 0.8);
+}
+[data-style="terminal"] .mas-cta:hover { background: rgba(57, 255, 106, 0.12); }
+[data-style="terminal"] .mas-header { background: rgba(4, 8, 5, 0.9); }
+[data-style="terminal"] .text-gradient { background: none; color: #39ff6a; -webkit-text-fill-color: #39ff6a; }
+[data-style="terminal"] h1::before { content: "> "; color: var(--color-zinc-600); }
+
+/* Nord: polar night and snow storm, frost accents. */
+:root[data-style="nord"] {
+  --bg: #e5e9f0;
+  --glow-a: rgba(136, 192, 208, 0.3);
+  --glow-b: rgba(129, 161, 193, 0.25);
+  --glow-c: rgba(180, 142, 173, 0.2);
+  --grid: rgba(46, 52, 64, 0.05);
+  --color-zinc-50: #f4f6f9; --color-zinc-100: #eceff4; --color-zinc-200: #dde3ec; --color-zinc-300: #c9d1dd;
+  --color-zinc-400: #9aa5b8; --color-zinc-500: #7b88a1; --color-zinc-600: #616e88; --color-zinc-700: #4c566a;
+  --color-zinc-800: #434c5e; --color-zinc-900: #3b4252; --color-zinc-950: #2e3440;
+  --color-indigo-300: #a3c9d6; --color-indigo-400: #88c0d0; --color-indigo-500: #5e81ac; --color-indigo-600: #4c6d96;
+  --color-sky-300: #a9d4e0; --color-sky-400: #8fbcbb; --color-sky-500: #81a1c1; --color-sky-600: #5e81ac;
+  --color-fuchsia-400: #c4a0bd; --color-fuchsia-500: #b48ead;
+  --color-violet-300: #d0b6cb; --color-violet-400: #c4a0bd; --color-violet-500: #b48ead;
+}
+:root.dark[data-style="nord"] {
+  --bg: #2e3440;
+  --glow-a: rgba(136, 192, 208, 0.18);
+  --glow-b: rgba(94, 129, 172, 0.2);
+  --glow-c: rgba(180, 142, 173, 0.14);
+  --grid: rgba(236, 239, 244, 0.04);
+}
+:root.dark[data-style="nord"] .glass { border-color: rgba(255, 255, 255, 0.07); background: rgba(59, 66, 82, 0.55); }
+:root.dark[data-style="nord"] .panel { background: #3b4252; border-color: #4c566a; }
+:root.dark[data-style="nord"] .mas-header { background: rgba(46, 52, 64, 0.75); }
+
+/* Paper: warm paper, ink, serif titles, no glow. */
+:root[data-style="paper"] {
+  --bg: #f6f1e7;
+  --grid: rgba(28, 25, 23, 0.04);
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  --radius-xl: 0.375rem;
+  --radius-2xl: 0.5rem;
+  --color-zinc-50: #fbf8f2; --color-zinc-100: #f3ede2; --color-zinc-200: #e7dfd0; --color-zinc-300: #d6cbb8;
+  --color-zinc-400: #a8a29e; --color-zinc-500: #78716c; --color-zinc-600: #57534e; --color-zinc-700: #44403c;
+  --color-zinc-800: #292524; --color-zinc-900: #1c1917; --color-zinc-950: #120f0d;
+  --color-indigo-300: #fdba74; --color-indigo-400: #ea580c; --color-indigo-500: #c2410c; --color-indigo-600: #9a3412;
+  --color-sky-300: #93c5fd; --color-sky-400: #3b82f6; --color-sky-500: #1e3a8a; --color-sky-600: #1e3a8a;
+  --color-fuchsia-400: #b45309; --color-fuchsia-500: #92400e;
+  --color-violet-300: #93c5fd; --color-violet-400: #1d4ed8; --color-violet-500: #1e3a8a;
+}
+:root.dark[data-style="paper"] { --bg: #171412; --grid: rgba(246, 241, 231, 0.03); }
+[data-style="paper"] .mas-backdrop::before { display: none; }
+[data-style="paper"] .mas-backdrop::after {
+  mask-image: none;
+  background-image:
+    radial-gradient(rgba(120, 90, 50, 0.07) 1px, transparent 1px),
+    radial-gradient(rgba(120, 90, 50, 0.05) 1px, transparent 1px);
+  background-size: 7px 7px, 13px 13px;
+  background-position: 0 0, 3px 5px;
+}
+[data-style="paper"] .glass {
+  @apply backdrop-blur-none;
+  background: #fffdf8;
+  border-color: #e2d9c8;
+  box-shadow: 0 1px 0 rgba(28, 25, 23, 0.04), 0 8px 24px -18px rgba(28, 25, 23, 0.35);
+}
+:root.dark[data-style="paper"] .glass { background: #201c19; border-color: #3a332d; box-shadow: none; }
+[data-style="paper"] h1,
+[data-style="paper"] h2,
+[data-style="paper"] h3 {
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
+}
+[data-style="paper"] .text-gradient { background: none; color: var(--color-indigo-500); -webkit-text-fill-color: currentColor; font-style: italic; }
+[data-style="paper"] .mas-cta { background: var(--color-zinc-900); color: #fbf8f2; box-shadow: none; }
+:root.dark[data-style="paper"] .mas-cta { background: #f3ede2; color: #1c1917; }
+[data-style="paper"] .mas-header { background: rgba(246, 241, 231, 0.85); }
+:root.dark[data-style="paper"] .mas-header { background: rgba(23, 20, 18, 0.85); }
+[data-style="paper"] .mas-accent-line { background: var(--color-indigo-500); }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -333,6 +333,8 @@ class Deployer:
         self.resolver = resolver
         # Run after the clone, before the build, with (app, release dir, log): database migrations.
         self.before_build: list[Callable[[dict, str, "ReleaseLog"], None]] = []
+        # More variables for the build and the app, under its own ones: those of its project (mas.projects).
+        self.extra_env: list[Callable[[dict], dict[str, str]]] = []
         # Copies on the other servers of the cluster (mas.cluster): spread(app, sha, log) starts building
         # them and returns a function waiting for the "address:port" of those that answer.
         self.spread: Callable[[dict, str, "ReleaseLog"], Callable[[], list[str]]] | None = None
@@ -368,11 +370,13 @@ class Deployer:
         self._start_worker()
         return rid
 
-    def redeploy_targets(self) -> list[str]:
+    def redeploy_targets(self, include_frozen: bool = False) -> list[str]:
         """Apps deployed from GitHub (managed or adopted) without a deployment already waiting or running.
-        Ready-made services are left out: redeploying them pulls new images and restarts them."""
+        Ready-made services are left out: redeploying them pulls new images and restarts them. Frozen apps
+        (no deployment on push) are left out too unless ``include_frozen``."""
         busy = {"queued", "building"}
         return [a["id"] for a in self.db.list_apps() if a["mode"] in ("managed", "adopted")
+                and (include_frozen or a["auto_deploy"])
                 and not any(r["status"] in busy for r in self.db.list_releases(a["id"], 5))]
 
     def _start_worker(self) -> None:
@@ -905,6 +909,9 @@ class Deployer:
                 self.db.update_release(r["id"], status="superseded")
         self.db.update_release(release_id, status="live", path=path, finished_at=_now())
         self.db.update_app(app["id"], current_release=release_id)
+        release = self.db.get_release(release_id) or {}
+        if app.get("pending") and release.get("trigger") != "rollback":
+            self.db.update_app(app["id"], pending=None)  # the head of the branch is built: nothing waits
 
     def _prune(self, app: dict, paths: AppPaths, rlog: ReleaseLog) -> None:
         """Keep the newest ``keep_releases`` release folders (and always ``current``)."""
@@ -941,6 +948,12 @@ class Deployer:
         rlog.line(f"commit {commit['sha'][:7]} {commit['message']} ({commit['author']})")
         self.db.update_release(release["id"], sha=commit["sha"], message=commit["message"], author=commit["author"])
         env_vars = decrypt_env(load_fernet(self.host, self.config.secret_key_path), app["env"])
+        shared: dict[str, str] = {}
+        for extra in self.extra_env:
+            shared.update(extra(app))
+        if shared:
+            rlog.line(f"project variables: {', '.join(sorted(k for k in shared if k not in env_vars))}")
+            env_vars = {**shared, **env_vars}
         if app_type in PROXY_TYPES:
             self._exec_start(app, app_type, paths.current)  # fail early if python has no start command
 

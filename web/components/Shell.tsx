@@ -4,20 +4,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
 import { api, rememberSession, type Session } from "@/lib/api";
 import { LanguagePicker, msg, useT } from "@/lib/i18n";
 
 const SessionContext = createContext<Session | null>(null);
 export const useSession = () => useContext(SessionContext);
-
-type Theme = "dark" | "light" | "system";
-const THEME_KEY = "mas-theme";
-
-function applyTheme(theme: Theme) {
-  const dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.classList.toggle("dark", dark);
-}
 
 export function Logo({ className = "h-6 w-6" }: { className?: string }) {
   return (
@@ -37,7 +30,7 @@ export function Logo({ className = "h-6 w-6" }: { className?: string }) {
 
 const NAV = [
   { href: "/", label: msg("Overview"), match: (p: string) => p === "/" || p.startsWith("/service") },
-  { href: "/apps/", label: msg("Apps"), match: (p: string) => p.startsWith("/apps") },
+  { href: "/apps/", label: msg("Apps"), match: (p: string) => p.startsWith("/apps") || p.startsWith("/projects") },
   { href: "/databases/", label: msg("Databases"), match: (p: string) => p.startsWith("/databases") },
   { href: "/resources/", label: msg("Resources"), match: (p: string) => p.startsWith("/resources") },
   { href: "/cluster/", label: msg("Servers"), match: (p: string) => p.startsWith("/cluster") },
@@ -56,20 +49,6 @@ const EDITOR_PATHS = ["/cms", "/settings"];
 function UserMenu({ session }: { session: Session }) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useState<Theme>("dark");
-  useEffect(() => {
-    try {
-      setTheme((localStorage.getItem(THEME_KEY) as Theme) || "dark");
-    } catch {}
-  }, []);
-
-  function pick(next: Theme) {
-    setTheme(next);
-    try {
-      localStorage.setItem(THEME_KEY, next);
-    } catch {}
-    applyTheme(next);
-  }
 
   async function logout() {
     await api("/logout", { method: "POST" }).catch(() => {});
@@ -80,24 +59,22 @@ function UserMenu({ session }: { session: Session }) {
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 via-sky-500 to-fuchsia-500 text-xs font-semibold text-white ring-2 ring-white/10"
+        className="mas-cta flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white ring-2 ring-white/10"
         title={session.username}
       >
         {session.username.slice(0, 1).toUpperCase()}
       </button>
       {open && (
-        <div className="panel absolute right-0 top-10 z-40 w-56 rounded-xl p-1.5" onMouseLeave={() => setOpen(false)}>
+        <div className="panel absolute right-0 top-10 z-40 w-72 rounded-xl p-1.5" onMouseLeave={() => setOpen(false)}>
           <div className="px-3 py-2">
             <div className="text-sm font-medium">{session.username}</div>
             <div className="text-xs text-zinc-500">{session.totp_enabled ? t("2FA enabled") : t("2FA off")} · v{session.version}</div>
           </div>
           <div className="my-1 h-px bg-zinc-200 dark:bg-white/[0.06]" />
-          <div className="flex gap-1 p-1.5">
-            {(["dark", "light", "system"] as Theme[]).map((mode) => (
-              <button key={mode} onClick={() => pick(mode)} className={`flex-1 rounded-md px-2 py-1 text-xs ${theme === mode ? "bg-zinc-200 dark:bg-white/10" : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-white/[0.05]"}`}>
-                {mode === "dark" ? t("Dark") : mode === "light" ? t("Light") : t("System")}
-              </button>
-            ))}
+          <div className="space-y-2 p-1.5">
+            <div className="px-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">{t("Theme")}</div>
+            <ThemePicker />
+            <ModePicker />
           </div>
           <div className="px-3 pb-1.5">
             <LanguagePicker className="w-full" />
@@ -161,23 +138,23 @@ export function Shell({ children }: { children: ReactNode }) {
     <SessionContext.Provider value={session}>
       <Backdrop />
       <div className="min-h-screen">
-        <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/60 backdrop-blur-xl dark:border-white/[0.06] dark:bg-[#050608]/60">
+        <header className="mas-header sticky top-0 z-30 border-b border-zinc-200/70 bg-white/60 backdrop-blur-xl dark:border-white/[0.06] dark:bg-[#050608]/60">
           <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6">
             <Link href={editor ? "/cms/" : "/"} className="flex items-center gap-2.5">
               <Logo />
               <span className="text-[15px] font-semibold tracking-tight">mas</span>
             </Link>
-            <nav className="-mb-px hidden h-14 items-stretch gap-1 md:flex">
+            <nav className="-mb-px hidden h-14 min-w-0 items-stretch gap-1 overflow-x-auto md:flex">
               {nav.map((item) => {
                 const active = item.match(pathname);
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`relative flex items-center px-3 text-[13px] transition ${active ? "font-medium text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"}`}
+                    className={`relative flex items-center whitespace-nowrap px-3 text-[13px] transition ${active ? "font-medium text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"}`}
                   >
                     {t(item.label)}
-                    {active && <span className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-gradient-to-r from-indigo-400 via-sky-400 to-fuchsia-400" />}
+                    {active && <span className="mas-accent-line absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-gradient-to-r from-indigo-400 via-sky-400 to-fuchsia-400" />}
                   </Link>
                 );
               })}

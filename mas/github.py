@@ -200,12 +200,22 @@ class GitHubApp:
                 data = self._as_installation(inst["id"], f"/installation/repositories?per_page=100&page={page}")
                 repos = data.get("repositories", [])
                 for r in repos:
+                    owner = r.get("owner") or inst.get("account") or {}
                     out.append({"full_name": r["full_name"], "default_branch": r.get("default_branch", "main"),
-                                "private": r.get("private", False), "installation_id": inst["id"]})
+                                "private": r.get("private", False), "installation_id": inst["id"],
+                                # "User" or "Organization": the repository picker groups by account.
+                                "owner": owner.get("login") or r["full_name"].split("/")[0],
+                                "owner_type": owner.get("type") or "User",
+                                "description": (r.get("description") or "")[:300],
+                                "language": r.get("language"), "pushed_at": r.get("pushed_at"),
+                                "archived": bool(r.get("archived"))})
                 if len(repos) < 100:
                     break
                 page += 1
         return sorted(out, key=lambda r: r["full_name"].lower())
+
+    def default_branch(self, installation_id: int, repo: str) -> str:
+        return self._as_installation(installation_id, f"/repos/{repo}").get("default_branch") or "main"
 
     def branches(self, installation_id: int, repo: str) -> list[str]:
         return [b["name"] for b in self._as_installation(installation_id, f"/repos/{repo}/branches?per_page=100")]

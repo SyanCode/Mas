@@ -103,9 +103,50 @@ class RollbackBody(BaseModel):
     release_id: int
 
 
+class FreezeBody(BaseModel):
+    frozen: bool
+
+
+class FreezeAppsBody(BaseModel):
+    app_ids: list[str] = Field(max_length=500)
+    frozen: bool
+
+
+FREEZE_SETTING = "deploy_freeze"  # "1": no push deploys anything, every app keeps its commits waiting
+
+
+def deploys_frozen(db: Database) -> bool:
+    return db.get_setting(FREEZE_SETTING) == "1"
+
+
+def register_managed_app(host: Host, config: Config, db: Database, *, app_id: str, repo: str, branch: str,
+                         installation_id: int | None, domain: str | None, app_type: ServiceType, env: str = "",
+                         build_command: str | None = None, start_command: str | None = None, root_dir: str = "",
+                         auto_deploy: bool = True, aliases: list[str] | None = None, replaces: str | None = None,
+                         project: str | None = None) -> None:
+    """Validate and record an app Mas builds from GitHub (DeployError / EnvError when refused)."""
+    root_dir = root_dir.strip("/")
+    validate_app(app_id, repo, branch, domain, app_type.value)
+    validate_commands(build_command, start_command, root_dir)
+    variables = parse_env(env)
+    if db.get_app(app_id):
+        raise DeployError(f"app {app_id} already exists")
+    if app_type == ServiceType.PYTHON and not (start_command or "").strip():
+        raise DeployError("python apps need a start command")
+    port = allocate_port(host, config, db) if app_type in PROXY_TYPES else None
+    token = encrypt_env(load_fernet(host, config.secret_key_path), variables) if variables else None
+    db.create_app(app_id, name=app_id, repo=repo, branch=branch, installation_id=installation_id, domain=domain,
+                  type=app_type.value, port=port, mode="managed", root_dir=root_dir,
+                  build_command=(build_command or "").strip() or None,
+                  start_command=(start_command or "").strip() or None,
+                  env=token, auto_deploy=int(auto_deploy),
+                  aliases=json.dumps(aliases) if aliases else None, replaces=replaces, project=project)
+
+
 def app_payload(app: dict, db: Database) -> dict:
     data = {k: v for k, v in app.items() if k != "env"}
     data["auto_deploy"] = bool(app["auto_deploy"])
+    data["pending"] = json.loads(app["pending"]) if app.get("pending") else None
     data["has_env"] = bool(app["env"])
     data["instances"] = len(app_instances(app)) or 1
     data["instance_ports"] = [p for _, p in app_instances(app)]
@@ -134,6 +175,7 @@ def register(
     github_client: Callable[[], GitHubApp | None],
     reset_github: Callable[[], None],
     appdb=None,
+    projects=None,
 ) -> None:
     manifest_states: dict[str, tuple[int, float]] = {}
     health_cache: dict[str, object] = {}
@@ -313,13 +355,34 @@ def register(
                 return {"ok": True, "deployed": []}
             branch = ref[len("refs/heads/"):]
             actor = (payload.get("pusher") or {}).get("name") or "github"
-            deployed = []
-            for target in db.apps_for_push(repo, branch):
-                deployer.enqueue(target["id"], "push", f"github:{actor}", sha)
-                deployed.append(target["id"])
-            db.audit(f"github:{actor}", "webhook-push", True,
-                     detail=f"{repo}@{branch} {sha[:7]} → {', '.join(deployed) or 'no app'}")
-            return {"ok": True, "deployed": deployed}
+            head = payload.get("head_commit") or {}
+            commits = payload.get("commits") if isinstance(payload.get("commits"), list) else []
+            deployed, waiting = [], []
+            frozen_all = deploys_frozen(db)
+            for target in db.apps_for_push(repo, branch, frozen=True):
+                if target["mode"] == "stack":
+                    continue
+                if target["auto_deploy"] and not frozen_all:
+                    deployer.enqueue(target["id"], "push", f"github:{actor}", sha)
+                    deployed.append(target["id"])
+                    continue
+                # Frozen: nothing is built; the dashboard shows what waits and deploys it on demand.
+                before = json.loads(target["pending"]) if target.get("pending") else {}
+                message = (head.get("message") or "").splitlines()
+                db.update_app(target["id"], pending=json.dumps({
+                    "sha": sha, "message": message[0][:200] if message else "",
+                    "author": ((head.get("author") or {}).get("name") or actor)[:100],
+                    "commits": int(before.get("commits", 0)) + max(len(commits), 1),
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
+                waiting.append(target["id"])
+            synced = projects.on_push(repo, branch, payload) if projects is not None else []
+            detail = f"{repo}@{branch} {sha[:7]} → {', '.join(deployed) or 'no app'}"
+            if waiting:
+                detail += f"; frozen: {', '.join(waiting)}"
+            if synced:
+                detail += f"; project updated: {', '.join(synced)}"
+            db.audit(f"github:{actor}", "webhook-push", True, detail=detail)
+            return {"ok": True, "deployed": deployed, "frozen": waiting}
         if event == "pull_request":
             # Preview deployments are not implemented yet; the event is acknowledged.
             return {"ok": True, "ignored": "pull_request"}
@@ -356,25 +419,16 @@ def register(
         if body.replace_service:
             domain, aliases, files = plan_for(body.replace_service)
             replaces = json.dumps({"service_id": body.replace_service, "files": files})
-        try:
-            validate_app(body.id, body.repo, body.branch, domain, body.type.value)
-            validate_commands(body.build_command, body.start_command, body.root_dir.strip("/"))
-            env = parse_env(body.env)
-        except (DeployError, EnvError) as exc:
-            raise HTTPException(400, str(exc)) from None
         if db.get_app(body.id):
             raise HTTPException(409, f"app {body.id} already exists")
-        if body.type == ServiceType.PYTHON and not (body.start_command or "").strip():
-            raise HTTPException(400, "python apps need a start command")
-        port = allocate_port(host, config, db) if body.type in PROXY_TYPES else None
-        token = encrypt_env(load_fernet(host, config.secret_key_path), env) if env else None
-        db.create_app(body.id, name=body.id, repo=body.repo, branch=body.branch,
-                      installation_id=body.installation_id, domain=domain, type=body.type.value, port=port,
-                      mode="managed", root_dir=body.root_dir.strip("/"),
-                      build_command=(body.build_command or "").strip() or None,
-                      start_command=(body.start_command or "").strip() or None,
-                      env=token, auto_deploy=int(body.auto_deploy),
-                      aliases=json.dumps(aliases) if aliases else None, replaces=replaces)
+        try:
+            register_managed_app(host, config, db, app_id=body.id, repo=body.repo, branch=body.branch,
+                                 installation_id=body.installation_id, domain=domain, app_type=body.type,
+                                 env=body.env, build_command=body.build_command, start_command=body.start_command,
+                                 root_dir=body.root_dir, auto_deploy=body.auto_deploy, aliases=aliases,
+                                 replaces=replaces)
+        except (DeployError, EnvError) as exc:
+            raise HTTPException(400, str(exc)) from None
         db.audit(s.username, "app-create", True, detail=f"{body.id}: {body.repo}@{body.branch} → {domain}"
                  + (f" (replaces {body.replace_service})" if replaces else ""))
         if body.supabase and appdb is not None:
@@ -525,13 +579,44 @@ def register(
         return app_payload(db.get_app(app_id), db) | {"release_id": rid}
 
     @app.post("/api/apps/deploy-all")
-    def deploy_all(s=Depends(current_session)) -> dict:
-        """Queue a deployment of every app from GitHub; they run one after the other."""
+    def deploy_all(include_frozen: bool = False, s=Depends(current_session)) -> dict:
+        """Queue a deployment of every app from GitHub; they run one after the other. Frozen apps stay
+        as they are unless ``include_frozen``."""
         queued = [{"app_id": a, "release_id": deployer.enqueue(a, "manual", s.username)}
-                  for a in deployer.redeploy_targets()]
+                  for a in deployer.redeploy_targets(include_frozen)]
         db.audit(s.username, "deploy-all", True,
                  detail=", ".join(q["app_id"] for q in queued) or "nothing to deploy")
         return {"queued": queued}
+
+    # -- freeze: pushes build nothing ------------------------------------------
+
+    @app.get("/api/deploy/freeze")
+    def get_freeze(_=Depends(current_session)) -> dict:
+        apps = [a for a in db.list_apps() if a["mode"] != "stack"]
+        return {"frozen": deploys_frozen(db), "frozen_apps": [a["id"] for a in apps if not a["auto_deploy"]],
+                "waiting": [a["id"] for a in apps if a.get("pending")]}
+
+    @app.put("/api/deploy/freeze")
+    def set_freeze(body: FreezeBody, s=Depends(current_session)) -> dict:
+        """Freeze every app at once: pushes are recorded, nothing builds until it is lifted."""
+        db.set_setting(FREEZE_SETTING, "1" if body.frozen else None)
+        db.audit(s.username, "deploy-freeze" if body.frozen else "deploy-unfreeze", True, detail="every app")
+        return get_freeze()
+
+    @app.post("/api/apps/freeze")
+    def freeze_apps(body: FreezeAppsBody, s=Depends(current_session)) -> dict:
+        """Freeze or unfreeze several apps (a folder, a project, a selection)."""
+        changed = []
+        for app_id in dict.fromkeys(body.app_ids):
+            target = db.get_app(app_id)
+            if target is None or target["mode"] == "stack":
+                continue
+            if bool(target["auto_deploy"]) == body.frozen:
+                db.update_app(app_id, auto_deploy=int(not body.frozen))
+                changed.append(app_id)
+        if changed:
+            db.audit(s.username, "app-freeze" if body.frozen else "app-unfreeze", True, detail=", ".join(changed))
+        return {"changed": changed}
 
     @app.post("/api/apps/{app_id}/deploy")
     def deploy_now(app_id: str, s=Depends(current_session)) -> dict:

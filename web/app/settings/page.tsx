@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { Shell, useSession } from "@/components/Shell";
+import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner } from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
@@ -660,6 +661,16 @@ function PeopleCard() {
   );
 }
 
+function AppearanceCard() {
+  const t = useT();
+  return (
+    <Card title={t("Appearance")} actions={<div className="w-56"><ModePicker /></div>}>
+      <p className="mb-4 text-sm text-zinc-500">{t("Each theme has its colors and its own layout of the apps and services. The choice is kept in this browser.")}</p>
+      <ThemePicker size="full" />
+    </Card>
+  );
+}
+
 function Settings() {
   const t = useT();
   const session = useSession();
@@ -667,6 +678,7 @@ function Settings() {
     return (
       <div className="space-y-4">
         <PageHeader eyebrow={t("Account")} title={t("Your account")} subtitle={t("Password and two-factor authentication.")} />
+        <AppearanceCard />
         <TwoFactor enabled={!!session?.totp_enabled} />
         <PasswordForm />
         <p className="text-xs text-zinc-500">{t("Signed in as {name}", { name: session?.username ?? "" })}</p>
@@ -676,6 +688,7 @@ function Settings() {
   return (
     <div className="space-y-4">
       <PageHeader eyebrow={t("Configuration")} title={t("Settings")} subtitle={t("Domains, GitHub, people and account security.")} />
+      <AppearanceCard />
       <DomainsCard />
       <GitHubCard />
       <PeopleCard />

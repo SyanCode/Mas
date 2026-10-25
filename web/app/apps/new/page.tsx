@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
+import { RepoPicker } from "@/components/RepoPicker";
 import { Shell } from "@/components/Shell";
 import { Badge, Button, Card, ErrorText, Input, PageHeader } from "@/components/ui";
 import { api, ApiError, SERVICE_TYPES, type App, type CmsCompat, type Repo } from "@/lib/api";
@@ -50,7 +51,6 @@ function NewApp() {
   const [startCommand, setStartCommand] = useState("");
   const [rootDir, setRootDir] = useState("");
   const [autoDeploy, setAutoDeploy] = useState(true);
-  const [filter, setFilter] = useState("");
   const [detecting, setDetecting] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -96,9 +96,10 @@ function NewApp() {
     }).catch(() => {}).finally(() => setDetecting(false));
   }, [repo, branch]);
 
+  // The most recently pushed repositories: the picker shows them first.
   const shown = useMemo(
-    () => (repos ?? []).filter((r) => r.full_name.toLowerCase().includes(filter.toLowerCase())).slice(0, 50),
-    [repos, filter],
+    () => [...(repos ?? [])].sort((a, b) => (b.pushed_at ?? "").localeCompare(a.pushed_at ?? "")).slice(0, 60),
+    [repos],
   );
 
   // Badge "Mas compatible" on the repositories shown (a valid mas.cms.json on their default branch).
@@ -172,23 +173,20 @@ function NewApp() {
         <PageHeader eyebrow={t("New app")} title={<>{t("Import a")} <span className="text-gradient">{t("Git repository")}</span></>} subtitle={t("Every push to the branch you pick deploys automatically.")} />
         {replaceBanner}
         <ErrorText>{error}</ErrorText>
-        <Input placeholder={t("Filter repositories…")} value={filter} onChange={(e) => setFilter(e.target.value)} autoFocus />
-        <ul className="divide-y divide-zinc-200 overflow-hidden glass rounded-2xl">
-          {shown.map((r) => (
-            <li key={r.full_name}>
-              <button onClick={() => setRepo(r)} className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
-                <span className="flex min-w-0 items-center gap-2"><span className="truncate font-medium">{r.full_name}</span><CompatBadge compat={compat[r.full_name]} /></span>
-                <span className="shrink-0 text-xs text-zinc-500">{r.private ? t("private") : t("public")} · {r.default_branch}</span>
-              </button>
-            </li>
-          ))}
-          {repos && shown.length === 0 && (
-            <li className="px-4 py-6 text-center text-sm text-zinc-500">
-              {t("No repository. Install the GitHub App on your account or repositories (Settings → GitHub).")}
-            </li>
-          )}
-          {!repos && !error && <li className="px-4 py-6 text-center text-sm text-zinc-500">{t("Loading repositories…")}</li>}
-        </ul>
+        <RepoPicker
+          repos={repos}
+          error={error}
+          onSelect={setRepo}
+          badge={(r) => <CompatBadge compat={compat[r.full_name]} />}
+          empty={t("No repository. Install the GitHub App on your account or repositories (Settings → GitHub).")}
+        />
+        <Link href="/projects/new/" className="glass flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm transition hover:border-indigo-400/40">
+          <span>
+            <span className="font-medium">{t("Several repositories for one product?")}</span>
+            <span className="block text-xs text-zinc-500">{t("A landing page and a dashboard, a front and an API: import them together as a project.")}</span>
+          </span>
+          <span className="shrink-0 text-zinc-500">→</span>
+        </Link>
       </div>
     );
   }

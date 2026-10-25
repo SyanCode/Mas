@@ -68,7 +68,7 @@ const VARIANTS: Record<Variant, string> = {
   secondary: "border border-zinc-300 bg-white/70 hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] backdrop-blur",
   danger: "bg-rose-600 text-white hover:bg-rose-500 shadow-[0_0_20px_-6px_rgba(244,63,94,0.8)]",
   ghost: "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-white",
-  glow: "text-white bg-gradient-to-r from-indigo-500 via-sky-500 to-fuchsia-500 bg-[length:200%_100%] hover:bg-right shadow-[0_0_30px_-8px_rgba(99,102,241,0.9)] transition-[background-position]",
+  glow: "mas-cta text-white bg-[length:200%_100%] hover:bg-right shadow-[0_0_30px_-8px_var(--color-indigo-500)] transition-[background-position]",
 };
 
 export function Button({ variant = "secondary", className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {

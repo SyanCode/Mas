@@ -231,6 +231,73 @@ export interface App {
   current: Release | null;
   last_release: Release | null;
   releases?: Release[];
+  /** Project (several repositories deployed together) the app belongs to. */
+  project: string | null;
+  /** Frozen app (auto_deploy off): the pushes recorded since, not built. */
+  pending: { sha: string; message: string; author: string; commits: number; at: string } | null;
+}
+
+/** GET /deploy/freeze */
+export interface FreezeState {
+  frozen: boolean;
+  frozen_apps: string[];
+  waiting: string[];
+}
+
+export interface Folder {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  color: string | null;
+  position: number;
+}
+
+export interface FolderItem {
+  kind: "app" | "service";
+  item_id: string;
+  folder_id: number;
+}
+
+/** One app of mas.project.json. */
+export interface ProjectApp {
+  id: string;
+  repo: string;
+  branch: string | null;
+  domain: string | null;
+  type: string | null;
+  root_dir: string;
+  build_command: string | null;
+  start_command: string | null;
+  env: Record<string, string>;
+  depends_on: string[];
+}
+
+export interface ProjectManifest {
+  name: string;
+  id: string;
+  env: Record<string, string>;
+  apps: ProjectApp[];
+}
+
+export interface ProjectSource {
+  repo: string;
+  branch: string;
+  installation_id: number;
+}
+
+/** A project, or what importing a mas.project.json would do. */
+export interface ProjectPlan {
+  manifest: ProjectManifest;
+  apps: (ProjectApp & { exists: boolean; problem: string | null; app: App | null })[];
+  order: string[];
+  file: string;
+}
+
+export interface Project extends ProjectPlan {
+  id: string;
+  name: string;
+  source: ProjectSource | null;
+  updated_at: string;
 }
 
 export interface StackField {
@@ -275,6 +342,12 @@ export interface Repo {
   default_branch: string;
   private: boolean;
   installation_id: number;
+  owner: string;
+  owner_type: "User" | "Organization";
+  description: string;
+  language: string | null;
+  pushed_at: string | null;
+  archived: boolean;
 }
 
 export interface ProviderField {

@@ -332,7 +332,7 @@ function ServiceDetail() {
             </Link>
           )}
           {svc.domains.length > 0 && svc.nginx_files.length > 0 && !svc.app && !rt?.app && (
-            <Link href={`/apps/new/?replace=${encodeURIComponent(svc.id)}`} className="inline-flex h-9 items-center rounded-lg bg-gradient-to-r from-indigo-500 via-sky-500 to-fuchsia-500 px-3 text-sm font-medium text-white hover:brightness-110" title={t("A Mas app (deployed from GitHub, CMS) takes over its domains without interruption")}>
+            <Link href={`/apps/new/?replace=${encodeURIComponent(svc.id)}`} className="mas-cta inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-white hover:brightness-110" title={t("A Mas app (deployed from GitHub, CMS) takes over its domains without interruption")}>
               {t("Replace with a Mas app")}
             </Link>
           )}

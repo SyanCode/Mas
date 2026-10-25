@@ -153,6 +153,28 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS folders (         -- the user's folders of apps and services, nested
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+    color TEXT,                                -- one of FOLDER_COLORS
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS folder_items (    -- an app or a detected service is in one folder at most
+    kind TEXT NOT NULL,                        -- app | service
+    item_id TEXT NOT NULL,
+    folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+    PRIMARY KEY (kind, item_id)
+);
+CREATE TABLE IF NOT EXISTS projects (        -- several apps (repositories) deployed together (mas.projects)
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    manifest TEXT NOT NULL,                    -- JSON, the content of mas.project.json
+    source TEXT,                               -- JSON {repo, branch, installation_id}: where the file lives
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
@@ -169,13 +191,17 @@ MIGRATIONS = [
     ("apps", "bind TEXT"),         # address the app listens on (copy of an app of another server)
     ("apps", "replica_of TEXT"),   # copy driven by another Mas: its name
     ("apps", "resources TEXT"),    # JSON {memory_mb, sleep_after_min, autoscale: {min, max}} (mas.resources)
+    ("apps", "project TEXT"),      # id of the project (mas.projects) the app belongs to
+    ("apps", "pending TEXT"),      # frozen app: JSON {sha, message, author, commits, at} of the pushes not built
 ]
 ROLES = ("admin", "editor")
+FOLDER_COLORS = ("zinc", "red", "orange", "amber", "emerald", "teal", "sky", "indigo", "violet", "pink")
+FOLDER_KINDS = ("app", "service")
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
               "current_release", "extra_ports", "backends", "stack", "aliases", "replaces", "cluster",
-              "cluster_backends", "bind", "replica_of", "resources"}
+              "cluster_backends", "bind", "replica_of", "resources", "project", "pending"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
 
 
@@ -535,11 +561,12 @@ class Database:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM apps ORDER BY id")]
 
-    def apps_for_push(self, repo: str, branch: str) -> list[dict]:
+    def apps_for_push(self, repo: str, branch: str, frozen: bool = False) -> list[dict]:
+        """Apps following ``repo``@``branch``: those deploying on push, or (``frozen``) every one of them."""
         with self.tx() as c:
             rows = c.execute(
-                "SELECT * FROM apps WHERE lower(repo) = lower(?) AND branch = ? AND auto_deploy = 1",
-                (repo, branch)).fetchall()
+                "SELECT * FROM apps WHERE lower(repo) = lower(?) AND branch = ?"
+                + ("" if frozen else " AND auto_deploy = 1"), (repo, branch)).fetchall()
         return [dict(r) for r in rows]
 
     def update_app(self, app_id: str, **fields: Any) -> None:
@@ -554,6 +581,7 @@ class Database:
             c.execute("DELETE FROM apps WHERE id = ?", (app_id,))
             c.execute("DELETE FROM site_stats WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM site_visitors WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM folder_items WHERE kind = 'app' AND item_id = ?", (app_id,))
 
     def create_release(self, app_id: str, trigger: str, actor: str | None, sha: str | None = None,
                        status: str = "queued") -> int:
@@ -580,6 +608,83 @@ class Database:
             rows = c.execute("SELECT * FROM releases WHERE app_id = ? ORDER BY id DESC LIMIT ?",
                              (app_id, limit)).fetchall()
         return [dict(r) for r in rows]
+
+    # -- folders -------------------------------------------------------------
+
+    def list_folders(self) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM folders ORDER BY position, lower(name), id")]
+
+    def get_folder(self, folder_id: int) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM folders WHERE id = ?", (folder_id,)).fetchone()
+        return dict(row) if row else None
+
+    def create_folder(self, name: str, parent_id: int | None, color: str | None) -> int:
+        with self.tx() as c:
+            position = c.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM folders WHERE parent_id IS ?",
+                                 (parent_id,)).fetchone()[0]
+            return int(c.execute("INSERT INTO folders (name, parent_id, color, position, created_at) "
+                                 "VALUES (?, ?, ?, ?, ?)", (name, parent_id, color, position, _now())).lastrowid)
+
+    def update_folder(self, folder_id: int, **fields: Any) -> None:
+        if not fields or not set(fields) <= {"name", "parent_id", "color", "position"}:
+            raise ValueError(f"invalid folder fields: {set(fields)}")
+        with self.tx() as c:
+            c.execute(f"UPDATE folders SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+                      (*fields.values(), folder_id))
+
+    def delete_folder(self, folder_id: int) -> None:
+        """Remove a folder: what it holds (sub-folders, apps, services) moves to its parent."""
+        with self.tx() as c:
+            row = c.execute("SELECT parent_id FROM folders WHERE id = ?", (folder_id,)).fetchone()
+            if row is None:
+                return
+            parent = row["parent_id"]
+            c.execute("UPDATE folders SET parent_id = ? WHERE parent_id = ?", (parent, folder_id))
+            if parent is None:
+                c.execute("DELETE FROM folder_items WHERE folder_id = ?", (folder_id,))
+            else:
+                c.execute("UPDATE folder_items SET folder_id = ? WHERE folder_id = ?", (parent, folder_id))
+            c.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+
+    def folder_items(self) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM folder_items ORDER BY kind, item_id")]
+
+    def set_folder_item(self, kind: str, item_id: str, folder_id: int | None) -> None:
+        if kind not in FOLDER_KINDS:
+            raise ValueError(f"invalid kind {kind}")
+        with self.tx() as c:
+            if folder_id is None:
+                c.execute("DELETE FROM folder_items WHERE kind = ? AND item_id = ?", (kind, item_id))
+            else:
+                c.execute("INSERT INTO folder_items (kind, item_id, folder_id) VALUES (?, ?, ?) "
+                          "ON CONFLICT(kind, item_id) DO UPDATE SET folder_id = excluded.folder_id",
+                          (kind, item_id, folder_id))
+
+    # -- projects ------------------------------------------------------------
+
+    def list_projects(self) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM projects ORDER BY lower(name), id")]
+
+    def get_project(self, project_id: str) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return dict(row) if row else None
+
+    def save_project(self, project_id: str, name: str, manifest: str, source: str | None) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO projects (id, name, manifest, source, created_at, updated_at) "
+                      "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, "
+                      "manifest = excluded.manifest, source = excluded.source, updated_at = excluded.updated_at",
+                      (project_id, name, manifest, source, _now(), _now()))
+
+    def delete_project(self, project_id: str) -> None:
+        with self.tx() as c:
+            c.execute("UPDATE apps SET project = NULL WHERE project = ?", (project_id,))
+            c.execute("DELETE FROM projects WHERE id = ?", (project_id,))
 
     def history(self, service_id: str | None = None, limit: int = 100) -> list[dict]:
         sql, args = "SELECT * FROM audit_log", []

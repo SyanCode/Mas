@@ -756,7 +756,10 @@ function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void })
           </>
         )}
         <label className="flex items-center justify-between gap-3 text-sm">
-          <span>{t("Deploy on every push")}</span>
+          <span>
+            {t("Deploy on every push")}
+            <span className="block text-xs text-zinc-500">{autoDeploy ? t("Off: the app is frozen, pushes are recorded and wait for you.") : t("Frozen: pushes are recorded, nothing builds until you deploy.")}</span>
+          </span>
           <button
             type="button"
             onClick={() => setAutoDeploy(!autoDeploy)}
@@ -888,6 +891,8 @@ function AppView() {
                   <span>·</span>
                   <Badge tone="sky">{app.type}</Badge></>}
               {app.mode === "adopted" && <Badge tone="violet">{t("adopted")} · {app.path}</Badge>}
+              {app.mode !== "stack" && !app.auto_deploy && <Badge tone="sky">❄ {t("frozen")}</Badge>}
+              {app.project && <Link href={`/projects/view/?id=${encodeURIComponent(app.project)}`}><Badge tone="violet">◆ {t("project {name}", { name: app.project })}</Badge></Link>}
             </div>
           </div>
         </div>
@@ -903,6 +908,19 @@ function AppView() {
       </div>
 
       <ErrorText>{error}</ErrorText>
+
+      {app.pending && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          <span className="text-lg">❄</span>
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{t("{n} commit(s) waiting", { n: app.pending.commits })}</span>
+            {" · "}<code className="text-xs">{app.pending.sha.slice(0, 7)}</code> {app.pending.message}
+            <span className="opacity-70"> · {app.pending.author} · {timeAgo(app.pending.at)}</span>
+          </span>
+          <Button onClick={() => post("/deploy")} disabled={building}>{t("Deploy them now")}</Button>
+          <Button variant="ghost" onClick={async () => { await api("/apps/freeze", { method: "POST", body: { app_ids: [app.id], frozen: false } }); load(); }}>{t("Unfreeze")}</Button>
+        </div>
+      )}
 
       <section className="glass ring-gradient relative overflow-hidden rounded-2xl p-6 animate-fade-up">
         <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-indigo-500/20 blur-3xl" />

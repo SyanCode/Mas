@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_cluster, api_cms, api_maintenance, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, api_cluster, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -30,6 +30,7 @@ from mas.sitestats import SiteStats, service_target
 from mas.usage import Usage
 from mas import removesite
 from mas.maintenance import Maintenance
+from mas.projects import Projects, project_env
 from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
@@ -239,6 +240,8 @@ def create_app(
     restart_all = RestartAll(host, config, db, deployer, scanner)
     usage = Usage(host, config, db, scanner, resources)
     maintenance = Maintenance(host, config, db, deployer)
+    projects = Projects(db, github_client)
+    deployer.extra_env.append(lambda target: project_env(db, target))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -635,7 +638,10 @@ def create_app(
     app.state.deployer = deployer
     api_deploy.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
                         deployer=deployer, github_client=github_client, reset_github=github_cache.clear,
-                        appdb=appdb)
+                        appdb=appdb, projects=projects)
+    api_projects.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
+                          deployer=deployer, projects=projects)
+    app.state.projects = projects
     api_dns.register(app, host=host, config=config, db=db, current_session=current_session, deployer=deployer,
                      opener=ovh_opener)
     api_supabase.register(app, host=host, db=db, current_session=current_session, deployer=deployer,
