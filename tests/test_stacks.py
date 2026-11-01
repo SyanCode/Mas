@@ -207,3 +207,49 @@ def test_mail_server_setup(env, tmp_path):
     bad = client.post("/api/apps/mail/stack/actions/add-mailbox", json={"values": {"name": "a b"}}, headers=h)
     assert bad.status_code == 400
     assert client.post("/api/apps/mail/stack/actions/nope", json={}, headers=h).status_code == 400
+
+
+def test_minecraft_mods_and_plugins():
+    mc = TEMPLATES["minecraft"]
+    paper = mc.compose(ctx("minecraft", {
+        "eula": True, "modrinth": "luckperms, essentialsx\nlithium", "spiget": "28140",
+        "urls": "https://example.com/a.jar\nhttps://example.com/b.jar", "env": "ALLOW_FLIGHT=TRUE",
+        "seed": "42"}, secrets={"rcon": "pw"}, ports={"game": 25565}))["services"]["minecraft"]["environment"]
+    assert paper["MODRINTH_PROJECTS"] == "luckperms,essentialsx,lithium" and paper["SPIGET_RESOURCES"] == "28140"
+    assert paper["PLUGINS"] == "https://example.com/a.jar,https://example.com/b.jar" and "MODS" not in paper
+    assert paper["ALLOW_FLIGHT"] == "TRUE" and paper["SEED"] == "42" and paper["RCON_PASSWORD"] == "pw"
+    fabric = mc.compose(ctx("minecraft", {"eula": True, "server_type": "FABRIC", "urls": "https://x.io/m.jar"},
+                            ports={"game": 25565}))["services"]["minecraft"]["environment"]
+    assert fabric["MODS"] == "https://x.io/m.jar" and "PLUGINS" not in fabric
+    pack = mc.compose(ctx("minecraft", {"eula": True, "modpack": "fabulously-optimized"},
+                          ports={"game": 25565}))["services"]["minecraft"]["environment"]
+    assert pack["TYPE"] == "MODRINTH" and pack["MODRINTH_MODPACK"] == "fabulously-optimized"
+    for bad in ({"urls": "http://insecure/a.jar"}, {"spiget": "abc"}, {"modrinth": "bad name!"},
+                {"modpack": "a b"}, {"env": "no equals"}):
+        with pytest.raises(StackError):
+            check_options(mc, {"eula": True, **bad})
+
+
+def test_minecraft_file_actions():
+    from mas.stacks import _mc_add_file, _mc_files, _mc_remove_file
+
+    host = FixtureHost("tests/fixtures/server")
+    c = ctx("minecraft", {"eula": True}, secrets={"rcon": "x"}, ports={"game": 25565})
+    c.files = "/srv/mas/stacks/x/data"
+    host.makedirs("/srv/mas/stacks/x/data/plugins")
+    host.write_bytes("/srv/mas/stacks/x/data/plugins/a.jar", b"x")
+
+    class Mgr:
+        pass
+    mgr = Mgr()
+    mgr.host = host
+    mgr.template_of = lambda app: (None, {})
+    assert "a.jar" in _mc_files(mgr, {}, c, {})
+    for bad in ("../x.jar", "a.txt", "nope.jar"):
+        with pytest.raises(StackError):
+            _mc_remove_file(mgr, {}, c, {"name": bad})
+    assert "removed" in _mc_remove_file(mgr, {}, c, {"name": "a.jar"})
+    with pytest.raises(StackError):
+        _mc_add_file(mgr, {}, c, {"url": "http://x.io/a.jar"})
+    with pytest.raises(StackError):
+        _mc_add_file(mgr, {}, c, {"url": "https://x.io/a.jar", "name": "../evil.jar"})

@@ -117,6 +117,22 @@ def _service(image: str, ctx: Ctx, web: int | None = None, **extra) -> dict:
 MEMORY = ["1G", "2G", "3G", "4G", "6G", "8G"]
 
 
+PLUGIN_TYPES = ("PAPER", "PURPUR", "SPIGOT", "BUKKIT", "FOLIA", "PUFFERFISH")  # plugins/ ; the others take mods/
+SERVER_TYPES = ["PAPER", "PURPUR", "FOLIA", "SPIGOT", "VANILLA", "FABRIC", "QUILT", "FORGE", "NEOFORGE", "MODRINTH"]
+URL_RE = re.compile(r"^https://[^\s,]{4,500}$")
+SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:@-]{0,80}$")  # Modrinth: slug, slug:version, datapack:slug…
+FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+ ()-]{0,120}\.(jar|zip)$")
+
+
+def addon_folder(server_type: str) -> str:
+    """Where this kind of server loads its add-ons from."""
+    return "plugins" if server_type in PLUGIN_TYPES else "mods"
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in re.split(r"[\s,]+", text or "") if w]
+
+
 def _minecraft(ctx: Ctx) -> dict:
     o = ctx.options
     # The heap starts small and grows up to the chosen memory; G1 gives unused memory back when the
@@ -125,14 +141,75 @@ def _minecraft(ctx: Ctx) -> dict:
            "INIT_MEMORY": "512M", "MAX_MEMORY": o["memory"],
            "JVM_XX_OPTS": "-XX:+UseG1GC -XX:G1PeriodicGCInterval=60000 -XX:+UseStringDeduplication",
            "DIFFICULTY": o["difficulty"], "MODE": o["mode"], "MAX_PLAYERS": str(o["max_players"]),
-           "MOTD": o["motd"], "ONLINE_MODE": "TRUE" if o["online_mode"] else "FALSE"}
+           "MOTD": o["motd"], "ONLINE_MODE": "TRUE" if o["online_mode"] else "FALSE",
+           "VIEW_DISTANCE": str(o["view_distance"]), "ENABLE_RCON": "true",
+           "RCON_PASSWORD": ctx.secrets.get("rcon", "")}
     if o.get("whitelist"):
         env.update(ENABLE_WHITELIST="TRUE", ENFORCE_WHITELIST="TRUE", WHITELIST=o["whitelist"])
     if o.get("ops"):
         env["OPS"] = o["ops"]
+    if o.get("seed"):
+        env["SEED"] = o["seed"]
+    if o.get("modpack"):  # a Modrinth modpack: the image installs the loader and every mod itself
+        env.update(TYPE="MODRINTH", MODRINTH_MODPACK=o["modpack"])
+    if o.get("modrinth"):
+        env["MODRINTH_PROJECTS"] = ",".join(_words(o["modrinth"]))
+    if o.get("spiget"):
+        env["SPIGET_RESOURCES"] = ",".join(_words(o["spiget"]))
+    urls = ",".join(_words(o.get("urls", "")))
+    if urls:
+        env["PLUGINS" if addon_folder(o["server_type"]) == "plugins" else "MODS"] = urls
+    if o.get("env"):  # last: anything the form does not cover (itzg/minecraft-server variables)
+        env.update(dict(parse_env_lines(o["env"])))
     return {"services": {"minecraft": _service(
         "itzg/minecraft-server:latest", ctx, environment=env, tty=True, stdin_open=True,
         ports=[f"{ctx.ports['game']}:25565/tcp"], volumes=[f"{ctx.data}:/data"], stop_grace_period="60s")}}
+
+
+def _mc_folder(mgr: "StackManager", app: dict, ctx: Ctx) -> str:
+    return addon_folder(ctx.options.get("server_type", "PAPER"))
+
+
+def _mc_console(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
+    command = str(values.get("command", "")).strip().lstrip("/")
+    if not command or len(command) > 300 or not TEXT_RE.fullmatch(command):
+        raise StackError("command: one line, for example say hello or op Steve")
+    return mgr.exec(app, "minecraft", ["rcon-cli", command]).strip() or "(no answer)"
+
+
+def _mc_files(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
+    folder = f"{ctx.files}/{_mc_folder(mgr, app, ctx)}"
+    names = sorted(n for n in mgr.host.listdir(folder)) if mgr.host.is_dir(folder) else []
+    shown = [f"{n}  ({(mgr.host.real(f'{folder}/{n}').stat().st_size / 1048576):.1f} MB)"
+             for n in names if mgr.host.is_file(f"{folder}/{n}")]
+    return "\n".join(shown) or f"No file in {_mc_folder(mgr, app, ctx)}/ yet."
+
+
+def _mc_add_file(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
+    url = str(values.get("url", "")).strip()
+    if not URL_RE.fullmatch(url):
+        raise StackError("link: a direct https:// link to a .jar file")
+    name = str(values.get("name", "")).strip() or url.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+    if not FILE_RE.fullmatch(name):
+        raise StackError("file name: letters, digits and . _ + - ( ), ending with .jar or .zip")
+    folder = _mc_folder(mgr, app, ctx)
+    mgr.host.makedirs(f"{ctx.files}/{folder}")
+    target = mgr.host.real(f"{ctx.files}/{folder}/{name}")
+    res = mgr.host.run(["curl", "-fsSL", "--proto", "=https", "--max-filesize", str(200 * 1048576),
+                        "--max-time", "300", "-o", str(target), "--", url], timeout=330)
+    if res is None or not res.ok:
+        mgr.host.remove(f"{ctx.files}/{folder}/{name}")
+        raise StackError(f"download failed: {((res.stderr if res else '') or 'curl missing').strip()[-200:]}")
+    return f"{name} added to {folder}/. Restart the server to load it."
+
+
+def _mc_remove_file(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
+    name = str(values.get("name", "")).strip()
+    folder = _mc_folder(mgr, app, ctx)
+    if not FILE_RE.fullmatch(name) or not mgr.host.is_file(f"{ctx.files}/{folder}/{name}"):
+        raise StackError(f"file name: not found in {folder}/")
+    mgr.host.remove(f"{ctx.files}/{folder}/{name}")
+    return f"{name} removed from {folder}/. Restart the server to unload it."
 
 
 def _bedrock(ctx: Ctx) -> dict:
@@ -335,16 +412,46 @@ TEMPLATES: dict[str, Template] = {t.id: t for t in (
              _minecraft, image="itzg/minecraft-server",
              fields=[EULA,
                      {"key": "server_type", "label": "Server", "type": "select", "default": "PAPER",
-                      "options": ["PAPER", "VANILLA", "FABRIC", "FORGE", "PURPUR"],
-                      "help": "Paper: fast, with plugins. Fabric or Forge: mods."},
+                      "options": SERVER_TYPES,
+                      "help": "Paper, Purpur, Folia, Spigot: plugins. Fabric, Quilt, Forge, NeoForge: mods. "
+                              "Modrinth: a whole modpack."},
                      {"key": "version", "label": "Minecraft version", "type": "text", "default": "LATEST",
                       "max": 20, "help": "LATEST or a version such as 1.21.4"},
                      {"key": "memory", "label": "Memory", "type": "select", "default": "2G", "options": MEMORY},
                      *GAME_FIELDS,
                      {"key": "ops", "label": "Operators", "type": "text", "default": "", "max": 500,
-                      "help": "Player names with every right, separated by commas"}],
-             ports=[Port("game", 25565, "tcp", "Players connect on")],
-             ram=lambda o: int(str(o.get("memory") or "2G").rstrip("G")) * 1024 + 512, info=_game_info),
+                      "help": "Player names with every right, separated by commas"},
+                     {"key": "seed", "label": "World seed", "type": "text", "default": "", "max": 60,
+                      "help": "Only used when the world is created"},
+                     {"key": "view_distance", "label": "View distance (chunks)", "type": "number", "default": 10,
+                      "min": 3, "max": 32},
+                     {"key": "modrinth", "label": "Mods and plugins from Modrinth", "type": "textarea",
+                      "default": "", "max": 1000,
+                      "help": "Project names (modrinth.com), separated by commas or lines: luckperms, "
+                              "essentialsx, fabric-api, lithium. Downloaded and updated at each start."},
+                     {"key": "spiget", "label": "Plugins from SpigotMC (resource numbers)", "type": "text",
+                      "default": "", "max": 200,
+                      "help": "The number at the end of a spigotmc.org resource link, separated by commas"},
+                     {"key": "urls", "label": "Mods or plugins from a link", "type": "textarea", "default": "",
+                      "max": 2000, "help": "Direct https links to .jar files, one per line"},
+                     {"key": "modpack", "label": "Modrinth modpack", "type": "text", "default": "", "max": 120,
+                      "help": "A modpack name or link from modrinth.com. Replaces the server type above."},
+                     {"key": "env", "label": "Other settings", "type": "textarea", "default": "", "max": 3000,
+                      "help": "KEY=value, one per line: any itzg/minecraft-server variable (RESOURCE_PACK, "
+                              "SPAWN_PROTECTION, ALLOW_FLIGHT…)"}],
+             ports=[Port("game", 25565, "tcp", "Players connect on")], secrets=("rcon",),
+             ram=lambda o: int(str(o.get("memory") or "2G").rstrip("G")) * 1024 + 512, info=_game_info,
+             actions={
+                 "console": {"label": "Server console", "run": _mc_console,
+                             "fields": [{"key": "command", "label": "Command", "type": "text", "max": 300,
+                                         "help": "Without the /: say hello, op Steve, whitelist add Alex, list…"}]},
+                 "files": {"label": "List mods and plugins", "run": _mc_files, "fields": []},
+                 "add-file": {"label": "Add a mod or plugin", "run": _mc_add_file,
+                              "fields": [{"key": "url", "label": "Link to the .jar file", "type": "text", "max": 500},
+                                         {"key": "name", "label": "File name (optional)", "type": "text",
+                                          "max": 120}]},
+                 "remove-file": {"label": "Remove a mod or plugin", "run": _mc_remove_file,
+                                 "fields": [{"key": "name", "label": "File name", "type": "text", "max": 120}]}}),
     Template("minecraft-bedrock", "Minecraft server (Bedrock)", "games",
              "For players on phones, consoles and Windows (Bedrock Edition).",
              _bedrock, image="itzg/minecraft-bedrock-server", fields=[EULA, *GAME_FIELDS],
@@ -426,6 +533,17 @@ def check_options(template: Template, raw: dict, previous: dict | None = None) -
             if f.get("required") and not value:
                 raise StackError(f"{label}: required")
         out[f["key"]] = value
+    if template.id == "minecraft":
+        for key in ("modrinth", "modpack"):
+            if any(not SLUG_RE.fullmatch(w) and not URL_RE.fullmatch(w) for w in _words(out[key])):
+                raise StackError(f"{key}: names from modrinth.com, separated by commas")
+        if len(_words(out["modpack"])) > 1:
+            raise StackError("Modrinth modpack: only one")
+        if any(not w.isdigit() for w in _words(out["spiget"])):
+            raise StackError("SpigotMC resources: numbers separated by commas")
+        if any(not URL_RE.fullmatch(w) for w in _words(out["urls"])):
+            raise StackError("Mods or plugins from a link: https:// links, one per line")
+        parse_env_lines(out["env"])
     if template.id == "mail":
         out["mail_domain"], out["mailbox"] = out["mail_domain"].lower(), out["mailbox"].lower()
         if not DOMAIN_RE.fullmatch(out["mail_domain"]):
@@ -582,6 +700,7 @@ class StackManager:
         import yaml  # pyyaml
 
         template, _ = self.template_of(app)
+        app = self._missing_secrets(app, template)
         ctx = self.ctx(app)
         folder = self.dir(app["id"])
         paths = app_paths(self.config, app["id"])
@@ -626,6 +745,17 @@ class StackManager:
                 if not row.get("secret"):
                     rlog.line(f"{row['label']}: {row['value']}")
         self.deployer._mark_live(app, release["id"], None)
+
+    def _missing_secrets(self, app: dict, template: Template) -> dict:
+        """A service created before its template needed a secret (Minecraft's RCON password) gets it now."""
+        fernet = load_fernet(self.host, self.config.secret_key_path)
+        env = decrypt_env(fernet, app["env"])
+        missing = [n for n in template.secrets if n not in env]
+        if not missing:
+            return app
+        env.update({n: secrets.token_urlsafe(18) for n in missing})
+        self.db.update_app(app["id"], env=encrypt_env(fernet, env))
+        return self.db.get_app(app["id"])
 
     def _wait(self, app: dict, rlog: ReleaseLog, timeout: float = 180, healthy: bool = False) -> None:
         """Every container running; with ``healthy``, its health check passed too (a check still

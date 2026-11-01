@@ -341,7 +341,7 @@ certificate of its address and shows how to use it.
 
 | Service | What you get |
 |---|---|
-| **Minecraft server (Java)** | Paper, Vanilla, Fabric, Forge or Purpur; version, memory, game mode, allowed players, operators |
+| **Minecraft server (Java)** | Paper, Purpur, Folia, Spigot, Vanilla, Fabric, Quilt, Forge, NeoForge or a Modrinth modpack; version, memory, game mode, allowed players, operators, seed. **Mods and plugins**: Modrinth names, SpigotMC resources or direct `.jar` links in the settings, any other `itzg/minecraft-server` variable under *Other settings*; a **server console** (RCON) and *add / list / remove a mod or plugin* actions on the service page |
 | **Minecraft server (Bedrock)** | for phones, consoles and Windows (UDP 19132) |
 | **Mail server** | docker-mailserver: your `@yourdomain` mailboxes in any mail app (IMAP 993, SMTP 465/587), DKIM key created, the DNS records to add (A, MX, SPF, DKIM, DMARC) listed with their values, **Add a mailbox** in one click |
 | **Uptime Kuma**, **Vaultwarden**, **n8n**, **Gitea** | served on their own domain with HTTPS |
