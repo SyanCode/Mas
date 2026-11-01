@@ -274,6 +274,7 @@ def test_addon_search_and_selection(env, monkeypatch):
     monkeypatch.setattr(addons, "_get", fake)
     r = client.get("/api/apps/mc/stack/addons/search?q=lith").json()
     assert r["hits"][0]["id"] == "lithium" and r["version"] == "1.21.4"
+    assert "project_type%3Aplugin" in calls[0]  # plugins (EssentialsX…) are not "mod" projects on Modrinth
     assert "categories%3Apaper" in calls[0] and "versions%3A1.21.4" in calls[0]
     sel = client.get("/api/apps/mc/stack/addons").json()
     assert sel["searchable"] and [a["name"] for a in sel["selected"]] == ["LuckPerms", "Some plugin"]
