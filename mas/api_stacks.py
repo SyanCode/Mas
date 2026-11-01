@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from mas import addons
 from mas.db import Database
 from mas.stack_backups import BackupError, StackBackups
 from mas.stacks import TEMPLATES, StackError, StackManager
@@ -80,6 +82,40 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, manager: 
             raise
         db.audit(s.username, f"stack-{action}", True, service_id=app_id)
         return {"output": output}
+
+    # -- mods and plugins: search and what is selected ------------------------------------
+
+    def minecraft(app_id: str) -> dict:
+        target = stack_app(app_id)
+        template, spec = manager.template_of(target)
+        if template.id != "minecraft":
+            raise HTTPException(404, "not a Minecraft server")
+        return spec.get("options", {})
+
+    @app.get("/api/apps/{app_id}/stack/addons/search")
+    async def addon_search(app_id: str, q: str = "", source: str = "modrinth", _=Depends(current_session)) -> dict:
+        options = minecraft(app_id)
+        q = q.strip()
+        version = str(options.get("version") or "")
+        try:
+            if source == "spiget":
+                hits = await asyncio.to_thread(addons.search_spiget, q)
+            elif source == "modrinth":
+                hits = await asyncio.to_thread(addons.search_modrinth, q, options.get("server_type", ""), version)
+            else:
+                raise HTTPException(400, "unknown source")
+        except addons.AddonError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return {"hits": hits, "server_type": options.get("server_type"), "version": version}
+
+    @app.get("/api/apps/{app_id}/stack/addons")
+    async def addon_selected(app_id: str, _=Depends(current_session)) -> dict:
+        options = minecraft(app_id)
+        words = lambda text: [w for w in re.split(r"[\s,]+", text or "") if w]  # noqa: E731
+        return {"server_type": options.get("server_type"), "version": options.get("version") or "LATEST",
+                "searchable": addons.supports_search(options.get("server_type", "")),
+                "selected": await asyncio.to_thread(addons.describe, words(options.get("modrinth", "")),
+                                                    words(options.get("spiget", "")))}
 
     # -- backups (before /stack/{op}, which would take "backups" for an action) --------
 

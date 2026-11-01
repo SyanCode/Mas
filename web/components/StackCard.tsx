@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { AddonsCard } from "@/components/AddonsCard";
 import { StackFields, type StackValues } from "@/components/StackFields";
 import { Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Spinner } from "@/components/ui";
 import { api, ApiError, type StackTemplate } from "@/lib/api";
@@ -168,6 +169,12 @@ export function StackCard({ appId, onDeployed }: { appId: string; onDeployed: (r
     load();
   });
 
+  const applyAddons = async (modrinth: string[], spiget: string[]) => {
+    const r = await api<{ release_id: number }>(`/apps/${encodeURIComponent(appId)}/stack`, { method: "PUT", body: { options: { modrinth: modrinth.join(", "), spiget: spiget.join(", ") }, ports } });
+    onDeployed(r.release_id);
+    load();
+  };
+
   if (!info) return error ? <Card title={t("Service")}><ErrorText>{error}</ErrorText></Card> : null;
   const editablePorts = info.template.ports.filter((p) => !p.fixed);
 
@@ -217,13 +224,15 @@ export function StackCard({ appId, onDeployed }: { appId: string; onDeployed: (r
 
       {info.template.actions.map((a) => <Action key={a.id} appId={appId} action={a} />)}
 
+      {info.template.id === "minecraft" && <AddonsCard key={JSON.stringify([info.options.modrinth, info.options.spiget, info.options.server_type, info.options.version])} appId={appId} onApply={applyAddons} />}
+
       <BackupsCard appId={appId} />
 
       {(info.template.fields.length > 0 || editablePorts.length > 0) && (
         <details className="glass rounded-2xl p-5">
           <summary className="cursor-pointer text-sm font-semibold">{t("Settings")}</summary>
           <div className="mt-4 space-y-4">
-            <StackFields fields={info.template.fields} values={values} onChange={setValues} />
+            <StackFields fields={info.template.id === "minecraft" ? info.template.fields.filter((f) => f.key !== "modrinth" && f.key !== "spiget") : info.template.fields} values={values} onChange={setValues} />
             {editablePorts.map((p) => (
               <label key={p.name} className="flex items-center gap-3 text-sm">
                 <span className="text-zinc-500">{t(p.label || p.name)}</span>
