@@ -1135,5 +1135,20 @@
   "Server console": "Server-Konsole",
   "List mods and plugins": "Mods und Plugins auflisten",
   "Add a mod or plugin": "Mod oder Plugin hinzufügen",
-  "Remove a mod or plugin": "Mod oder Plugin entfernen"
+  "Remove a mod or plugin": "Mod oder Plugin entfernen",
+  "Mods and plugins": "Mods und Plugins",
+  "plugins": "Plugins",
+  "mods": "Mods",
+  "Apply and reload ({n})": "Anwenden und neu laden ({n})",
+  "Apply and reload": "Anwenden und neu laden",
+  "This server type has no catalog search. Use the settings below to add links or a modpack.": "Für diesen Servertyp gibt es keine Katalogsuche. Nutze die Einstellungen unten für Links oder ein Modpack.",
+  "Search, add what you want, then apply: the server restarts once with your choices. Files are downloaded at start. The world is kept.": "Suche, füge hinzu, was du willst, und wende an: Der Server startet einmal mit deiner Auswahl neu. Dateien werden beim Start heruntergeladen. Die Welt bleibt erhalten.",
+  "Selected": "Ausgewählt",
+  "Nothing selected yet.": "Noch nichts ausgewählt.",
+  "Removed entries stop being downloaded; their files already in the folder stay until you delete them.": "Entfernte Einträge werden nicht mehr geladen; ihre vorhandenen Dateien bleiben, bis du sie löschst.",
+  "Search {kind}…": "{kind} suchen…",
+  "Search": "Suchen",
+  "All Minecraft versions.": "Alle Minecraft-Versionen.",
+  "Compatible with Minecraft {version}.": "Kompatibel mit Minecraft {version}.",
+  "No result.": "Keine Ergebnisse."
 }

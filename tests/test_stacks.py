@@ -253,3 +253,32 @@ def test_minecraft_file_actions():
         _mc_add_file(mgr, {}, c, {"url": "http://x.io/a.jar"})
     with pytest.raises(StackError):
         _mc_add_file(mgr, {}, c, {"url": "https://x.io/a.jar", "name": "../evil.jar"})
+
+
+def test_addon_search_and_selection(env, monkeypatch):
+    from mas import addons
+
+    client, host, db, deployer, h = env
+    options = {"eula": True, "version": "1.21.4", "modrinth": "luckperms", "spiget": "28140"}
+    body = {"template": "minecraft", "id": "mc", "options": options, "ports": {"game": 25565}}
+    assert client.post("/api/stacks", json=body, headers=h).status_code == 200
+    calls = []
+
+    def fake(url, timeout=10):
+        calls.append(url)
+        if "/search?" in url:
+            return {"hits": [{"slug": "lithium", "title": "Lithium", "description": "d", "downloads": 5}]}
+        if "/projects?" in url:
+            return [{"slug": "luckperms", "id": "abc", "title": "LuckPerms", "icon_url": None}]
+        return {"name": "Some plugin", "tag": "tag"}
+    monkeypatch.setattr(addons, "_get", fake)
+    r = client.get("/api/apps/mc/stack/addons/search?q=lith").json()
+    assert r["hits"][0]["id"] == "lithium" and r["version"] == "1.21.4"
+    assert "categories%3Apaper" in calls[0] and "versions%3A1.21.4" in calls[0]
+    sel = client.get("/api/apps/mc/stack/addons").json()
+    assert sel["searchable"] and [a["name"] for a in sel["selected"]] == ["LuckPerms", "Some plugin"]
+    assert client.get("/api/apps/mc/stack/addons/search?source=nope").status_code == 400
+    # applying = the usual settings update, which redeploys (reloads) the server
+    r = client.put("/api/apps/mc/stack", json={"options": {"modrinth": "luckperms, lithium", "spiget": ""}}, headers=h)
+    assert r.status_code == 200
+    assert json.loads(db.get_app("mc")["stack"])["options"]["modrinth"] == "luckperms, lithium"
