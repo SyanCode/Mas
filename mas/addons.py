@@ -47,7 +47,8 @@ def search_modrinth(query: str, server_type: str, version: str = "", limit: int 
     loaders = LOADERS.get(server_type)
     if not loaders:
         raise AddonError("this server type takes no mods or plugins one by one")
-    facets: list[list[str]] = [[f"categories:{name}" for name in loaders], ["project_type:mod"]]
+    # Plugins are a project type of their own on Modrinth: asking for "mod" alone hides EssentialsX & co.
+    facets: list[list[str]] = [[f"categories:{name}" for name in loaders], ["project_type:mod", "project_type:plugin"]]
     if VERSION_RE.fullmatch(version):
         facets.append([f"versions:{version}"])
     params = urlencode({"query": query[:80], "limit": max(1, min(limit, 30)), "facets": json.dumps(facets)})
