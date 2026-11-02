@@ -227,6 +227,22 @@ Every push to the branch then deploys automatically:
 
 The last 5 releases are kept; **Rollback** puts any of them back in one click (`mas rollback <app>`).
 
+**What your app receives.** Mas assigns each instance a loopback port and writes it into the unit as
+`Environment="PORT=<port>"` (plus `HOST`, `HOSTNAME`, `NODE_ENV=production`). Extra instances
+(`mas-app-<app>.2.service`, …) each get their own port. Listen on `process.env.PORT`, bound to
+`127.0.0.1`. Do not set `PORT` in the app's environment variables: the environment file is read
+after the unit and wins, so a different value makes the health check fail.
+The health check is a `GET /` on `http://127.0.0.1:<port>/`; any answer below 500 passes, so a `200` on `/` or `/health` is fine.
+For a Node app the default is `npm ci && npm run build`, then the `start` script (`npm start`).
+
+**Environment variables.** When you pick a repository, Mas reads `.env.example` (or `.env.sample`) at its
+root, as text only: nothing from the repository is executed. `KEY=value` lines become fields of the
+form; a commented `# KEY=value` line is an optional variable; the comments above a variable describe
+it. Empty values and placeholders (`change-me`, `<...>`) are required: the app cannot be created until
+they are filled in. Keys containing `PASS`, `TOKEN`, `SECRET` or `KEY` get a masked field.
+`PORT`, `HOST`, `HOSTNAME` and `NODE_ENV` are skipped, because Mas sets them in the systemd unit (Mas
+warns if you define one yourself). Values are stored encrypted, as before (`/etc/mas/secret.key`).
+
 ### Domains (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun)
 
 Mas can create the DNS records itself. In **Settings → Domains**:
