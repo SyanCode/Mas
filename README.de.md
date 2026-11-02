@@ -227,6 +227,24 @@ Jeder Push auf den Branch wird dann automatisch deployt:
 
 Die letzten 5 Releases werden behalten; **Zurücksetzen** stellt jedes davon mit einem Klick wieder her (`mas rollback <app>`).
 
+**Was Ihre App erhält.** Mas weist jeder Instanz einen Loopback-Port zu und schreibt ihn als
+`Environment="PORT=<port>"` in die Unit (zusammen mit `HOST`, `HOSTNAME`, `NODE_ENV=production`).
+Zusätzliche Instanzen (`mas-app-<app>.2.service`, …) erhalten jeweils einen eigenen Port. Lauschen Sie auf
+`process.env.PORT`, gebunden an `127.0.0.1`. Setzen Sie `PORT` nicht in den Umgebungsvariablen der App:
+Die Umgebungsdatei wird nach der Unit gelesen und gewinnt, ein abweichender Wert lässt den Health-Check
+fehlschlagen.
+Der Health-Check ist ein `GET /` auf `http://127.0.0.1:<port>/`; jede Antwort unter 500 gilt als bestanden, ein `200` auf `/` oder `/health` genügt.
+Für eine Node-App lautet der Standard `npm ci && npm run build`, danach das `start`-Skript (`npm start`).
+
+**Umgebungsvariablen.** Wenn Sie ein Repository wählen, liest Mas `.env.example` (oder `.env.sample`) im
+Stammverzeichnis, nur als Text: Nichts aus dem Repository wird ausgeführt. `KEY=value`-Zeilen werden zu
+Formularfeldern; eine auskommentierte Zeile `# KEY=value` ist eine optionale Variable; die Kommentare über einer
+Variable beschreiben sie. Leere Werte und Platzhalter (`change-me`, `<...>`) sind Pflicht: Die App kann erst
+angelegt werden, wenn sie ausgefüllt sind. Schlüssel mit `PASS`, `TOKEN`, `SECRET` oder `KEY` erhalten ein
+maskiertes Feld. `PORT`, `HOST`, `HOSTNAME` und `NODE_ENV` werden übersprungen, weil Mas sie in der
+systemd-Unit setzt (Mas warnt, wenn Sie eine selbst definieren). Die Werte werden wie bisher verschlüsselt
+gespeichert (`/etc/mas/secret.key`).
+
 ### Domains (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun)
 
 Mas kann die DNS-Einträge selbst anlegen. Unter **Einstellungen → Domains**:

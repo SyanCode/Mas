@@ -227,6 +227,23 @@ A partir de ahí, cada push a la rama despliega automáticamente:
 
 Se conservan las 5 últimas releases; **Volver** restaura cualquiera de ellas en un clic (`mas rollback <app>`).
 
+**Lo que recibe la aplicación.** Mas asigna a cada instancia un puerto loopback y lo escribe en la unidad
+como `Environment="PORT=<port>"` (junto con `HOST`, `HOSTNAME`, `NODE_ENV=production`). Las instancias
+adicionales (`mas-app-<app>.2.service`, …) tienen cada una su propio puerto. Escuche en
+`process.env.PORT`, enlazado a `127.0.0.1`. No defina `PORT` en las variables de entorno de la
+aplicación: el archivo de entorno se lee después de la unidad y prevalece, así que un valor distinto
+hace fallar el health check.
+El health check es un `GET /` en `http://127.0.0.1:<port>/`; cualquier respuesta inferior a 500 pasa, así que un `200` en `/` o `/health` basta.
+Para una app Node, el comando por defecto es `npm ci && npm run build`, y luego el script `start` (`npm start`).
+
+**Variables de entorno.** Al elegir un repositorio, Mas lee `.env.example` (o `.env.sample`) en su raíz,
+solo como texto: no se ejecuta nada del repositorio. Las líneas `CLAVE=valor` se convierten en campos del
+formulario; una línea comentada `# CLAVE=valor` es una variable opcional; los comentarios sobre una variable la
+describen. Los valores vacíos y los placeholders (`change-me`, `<...>`) son obligatorios: la app no puede
+crearse hasta que se rellenen. Las claves que contienen `PASS`, `TOKEN`, `SECRET` o `KEY` usan un campo
+oculto. `PORT`, `HOST`, `HOSTNAME` y `NODE_ENV` se omiten, porque Mas las define en la unidad systemd (Mas
+avisa si define alguna). Los valores se guardan cifrados, como antes (`/etc/mas/secret.key`).
+
 ### Dominios (OVH, Cloudflare, Gandi, Hetzner, DigitalOcean, Porkbun)
 
 Mas puede crear los registros DNS por sí mismo. En **Ajustes → Dominios**:

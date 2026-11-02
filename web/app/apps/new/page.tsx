@@ -30,6 +30,12 @@ interface RepoDatabase {
   seed: boolean;
 }
 
+/** A variable documented by the repository's .env.example (GET /github/detect). */
+interface EnvVarDef { key: string; value: string; example: string; optional: boolean; required: boolean; secret: boolean; description: string }
+
+/** Variables Mas injects itself in the systemd unit. */
+const RESERVED_ENV = ["PORT", "HOST", "HOSTNAME", "NODE_ENV"];
+
 /** A detected site the new app takes over (GET /services/{id}/replacement). */
 interface Replacement { domain: string; aliases: string[]; files: string[]; repo: string | null; branch: string | null; type: string; path: string | null }
 
@@ -47,6 +53,9 @@ function NewApp() {
   const [domainChoice, setDomainChoice] = useState<DomainChoice | null>(null);
   const onDomain = useCallback((c: DomainChoice | null) => setDomainChoice(c), []);
   const [env, setEnv] = useState("");
+  const [envVars, setEnvVars] = useState<EnvVarDef[]>([]);
+  const [envValues, setEnvValues] = useState<Record<string, string>>({});
+  const [envFile, setEnvFile] = useState<string | null>(null);
   const [buildCommand, setBuildCommand] = useState("");
   const [startCommand, setStartCommand] = useState("");
   const [rootDir, setRootDir] = useState("");
@@ -88,11 +97,14 @@ function NewApp() {
   useEffect(() => {
     if (!repo || !branch) return;
     setDetecting(true);
-    api<{ type: string; start_command: string | null }>(
+    api<{ type: string; start_command: string | null; env_file: string | null; env: EnvVarDef[] }>(
       `/github/detect?repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}&ref=${encodeURIComponent(branch)}`,
     ).then((d) => {
       setType(d.type === "unknown" ? (replacement && replacement.type !== "unknown" ? replacement.type : "") : d.type);
       if (d.start_command) setStartCommand(d.start_command);
+      setEnvFile(d.env_file);
+      setEnvVars(d.env ?? []);
+      setEnvValues(Object.fromEntries((d.env ?? []).map((v) => [v.key, v.value])));
     }).catch(() => {}).finally(() => setDetecting(false));
   }, [repo, branch]);
 
@@ -127,9 +139,25 @@ function NewApp() {
   }, [repo, branch, rootDir]);
   const canConnect = !!db?.uses_supabase && (db.instance === "running" || db.instance === "installing");
 
+  // Keys typed in the free text area (they win over the detected fields, as on the server).
+  const typedKeys = useMemo(() => new Set(
+    env.split(/\r?\n/).map((l) => /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l)?.[1]).filter((k): k is string => !!k),
+  ), [env]);
+  const reservedSet = RESERVED_ENV.filter((k) => typedKeys.has(k));
+  const missingEnv = envVars.filter((v) => v.required && !(envValues[v.key] ?? "").trim() && !typedKeys.has(v.key)).map((v) => v.key);
+  const quote = (v: string) => `"${v.replace(/\r?\n/g, " ")}"`;
+  const fullEnv = [
+    ...envVars.filter((v) => (envValues[v.key] ?? "").trim()).map((v) => `${v.key}=${quote(envValues[v.key])}`),
+    env.trim(),
+  ].filter(Boolean).join("\n");
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!repo) return;
+    if (missingEnv.length) {
+      setError(t("Fill in the required variables: {keys}", { keys: missingEnv.join(", ") }));
+      return;
+    }
     if (!replacement && withDomain && !domainChoice) {
       setError(t("Pick a valid domain, or untick “give it an address”."));
       return;
@@ -146,7 +174,8 @@ function NewApp() {
       const created = await api<App & { release_id: number }>("/apps", {
         method: "POST",
         body: {
-          id, repo: repo.full_name, branch, installation_id: repo.installation_id, domain: choice?.domain ?? null, type, env,
+          id, repo: repo.full_name, branch, installation_id: repo.installation_id, domain: choice?.domain ?? null, type, env: fullEnv,
+          required_env: envVars.filter((v) => v.required).map((v) => v.key),
           build_command: buildCommand || null, start_command: startCommand || null, root_dir: rootDir, auto_deploy: autoDeploy,
           supabase: canConnect && connectDb, supabase_seed: seedDb, replace_service: replacement ? replaceId : null,
         },
@@ -258,6 +287,28 @@ function NewApp() {
         )}
       </Card>}
       <Card title={t("Environment variables")}>
+        {envVars.length > 0 && (
+          <div className="mb-3 space-y-3 text-sm">
+            <p className="text-xs text-zinc-500">{t("Detected in {file}. Fill in the required fields.", { file: envFile ?? ".env.example" })}</p>
+            {envVars.map((v) => (
+              <label key={v.key} className="block space-y-1">
+                <span className="flex items-center gap-2">
+                  <span className="mono text-xs">{v.key}</span>
+                  <Badge tone={v.required ? "amber" : "zinc"}>{v.required ? t("required") : t("optional")}</Badge>
+                </span>
+                <Input
+                  type={v.secret ? "password" : "text"}
+                  autoComplete="off"
+                  value={envValues[v.key] ?? ""}
+                  onChange={(e) => setEnvValues((cur) => ({ ...cur, [v.key]: e.target.value }))}
+                  placeholder={v.secret ? "" : v.example}
+                  className="mono text-xs"
+                />
+                {v.description && <span className="block text-xs text-zinc-500">{v.description}</span>}
+              </label>
+            ))}
+          </div>
+        )}
         <textarea
           value={env}
           onChange={(e) => setEnv(e.target.value)}
@@ -266,6 +317,10 @@ function NewApp() {
           className="mono w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
         />
         <p className="mt-1 text-xs text-zinc-500">{t("Stored encrypted. Available at build time and at runtime.")}</p>
+        <p className="mt-1 text-xs text-zinc-500">{t("Mas sets {keys} itself: do not define them.", { keys: RESERVED_ENV.join(", ") })}</p>
+        {reservedSet.length > 0 && (
+          <p className="mt-1 text-xs text-amber-600">{t("Warning: {keys} is set by Mas in the systemd unit; your value would override it and can break the health check.", { keys: reservedSet.join(", ") })}</p>
+        )}
       </Card>
       <Card title={t("Build & run")}>
         <div className="grid gap-3 text-sm sm:grid-cols-2">
@@ -290,7 +345,7 @@ function NewApp() {
         </div>
       </Card>
       <ErrorText>{error}</ErrorText>
-      <Button variant="glow" type="submit" disabled={busy || !type} className="!h-10 px-6">{busy ? t("Creating…") : replacement ? t("Deploy and replace the site") : t("Deploy")}</Button>
+      <Button variant="glow" type="submit" disabled={busy || !type || missingEnv.length > 0} className="!h-10 px-6">{busy ? t("Creating…") : replacement ? t("Deploy and replace the site") : t("Deploy")}</Button>
     </form>
   );
 }
