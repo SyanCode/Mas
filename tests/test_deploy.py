@@ -574,6 +574,20 @@ def test_node_app_runs_its_start_script_without_npm(env):
     assert 'Environment="MALLOC_ARENA_MAX=2"' in unit
 
 
+def test_every_instance_unit_gets_its_own_port_env(env):
+    host, db, deployer = env["host"], env["db"], env["deployer"]
+    deployer.health_check = lambda url, h, t: (True, "HTTP 200")
+    db.update_app("web", extra_ports=json.dumps([7101, 7102]))
+    rid, ok = deploy_once(env, SHA1)
+    assert ok, deployer.log_path("web", rid).read_text()
+    for unit, port in (("mas-app-web.service", 7100), ("mas-app-web.2.service", 7101),
+                       ("mas-app-web.3.service", 7102)):
+        text = host.read_text(f"/etc/systemd/system/{unit}")
+        assert f'Environment="PORT={port}" "HOST=127.0.0.1"' in text
+        assert text.count("PORT=") == 1  # no other instance's port
+        assert "EnvironmentFile=-/etc/mas/apps/web.env" in text  # user variables stay available
+
+
 def test_redeploy_targets_skip_services_and_busy_apps(env):
     db, deployer = env["db"], env["deployer"]
     db.create_app("blog", name="blog", repo="acme/blog", branch="main", type="static")

@@ -1150,5 +1150,11 @@
   "Search": "Buscar",
   "All Minecraft versions.": "Todas las versiones de Minecraft.",
   "Compatible with Minecraft {version}.": "Compatible con Minecraft {version}.",
-  "No result.": "Sin resultados."
+  "No result.": "Sin resultados.",
+  "Detected in {file}. Fill in the required fields.": "Detectado en {file}. Rellene los campos obligatorios.",
+  "required": "obligatoria",
+  "optional": "opcional",
+  "Fill in the required variables: {keys}": "Rellene las variables obligatorias: {keys}",
+  "Mas sets {keys} itself: do not define them.": "Mas define {keys} por sí mismo: no las defina.",
+  "Warning: {keys} is set by Mas in the systemd unit; your value would override it and can break the health check.": "Atención: {keys} lo define Mas en la unidad systemd; su valor lo sobrescribiría y puede hacer fallar el health check."
 }
