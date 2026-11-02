@@ -30,6 +30,7 @@ from mas.deploy import (
 from mas.dns import server_ips
 from mas.domains import aliases_for, check_app
 from mas.envcrypt import EnvError, decrypt_env, encrypt_env, load_fernet, parse_env
+from mas.envdetect import ENV_EXAMPLE_FILES, detect_env
 from mas.github import GitHubApp, GitHubError, convert_manifest, repo_from_remote, verify_signature
 from mas.health import run_checks
 from mas.healthfix import ACTIONS, FixError, HealthFixer
@@ -61,6 +62,7 @@ class CreateApp(BaseModel):
     domain: str | None = Field(default=None, max_length=253)
     type: ServiceType
     env: str = Field(default="", max_length=65536)
+    required_env: list[str] = Field(default_factory=list, max_length=500)  # keys detected as mandatory
     build_command: str | None = Field(default=None, max_length=1000)
     start_command: str | None = Field(default=None, max_length=1000)
     root_dir: str = Field(default="", max_length=200)
@@ -319,7 +321,19 @@ def register(
         gh = require_github()
         detected = await asyncio.to_thread(gh_call, gh.detect_type, installation_id, repo, ref)
         files = {"manage.py"} if detected == ServiceType.PYTHON else set()
-        return {"type": detected.value, "start_command": suggest_start_command(detected, files)}
+        found = {"type": detected.value, "start_command": suggest_start_command(detected, files),
+                 "env_file": None, **detect_env(None)}
+        # Variables the repository documents: read as text through the API, never executed.
+        for name in ENV_EXAMPLE_FILES:
+            try:
+                content, _ = await asyncio.to_thread(gh.read_file, installation_id, repo, name, ref)
+            except GitHubError:
+                log.warning("cannot read %s of %s", name, repo)
+                break
+            if content:
+                found.update(env_file=name, **detect_env(content))
+                break
+        return found
 
     seen_deliveries: dict[str, float] = {}
 
@@ -416,6 +430,13 @@ def register(
 
     @app.post("/api/apps")
     async def create_app(body: CreateApp, s=Depends(current_session)) -> dict:
+        try:
+            given = parse_env(body.env)
+        except EnvError as exc:
+            raise HTTPException(400, str(exc)) from None
+        missing = sorted(k for k in set(body.required_env) if not given.get(k, "").strip())
+        if missing:
+            raise HTTPException(400, f"required variable(s) empty: {', '.join(missing)}")
         domain = (body.domain or "").strip().lower() or None
         aliases: list[str] | None = None
         replaces = None
