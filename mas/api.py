@@ -15,14 +15,16 @@ from urllib.parse import urlparse
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_cluster, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, agent_apps, api_cluster, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
 from mas.resources import Resources
-from mas.deploy import Deployer
+from mas.deploy import Deployer, PendingEnvError
 from mas.github import GitHubApp
 from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
@@ -74,13 +76,16 @@ class LoginBody(BaseModel):
 class TokenBody(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     write: bool = False
+    scope: Literal["read", "write", "create"] | None = None  # wins over ``write``
     days: int = Field(default=90, ge=0, le=3650)  # 0: never expires
     password: str = Field(max_length=1024)
     code: str | None = Field(default=None, max_length=16)
 
 
 class McpBody(BaseModel):
-    enabled: bool
+    enabled: bool | None = None
+    # Repositories a "create" token may turn into apps: "Owner/Repo" or "Owner/*". Empty: none.
+    allowed_repos: list[str] | None = Field(default=None, max_length=200)
 
 
 class SignupBody(BaseModel):
@@ -139,6 +144,8 @@ class SessionInfo:
     csrf: str
     totp_enabled: bool
     role: str = "admin"
+    scope: str | None = None  # API token: read | write | create; None for a dashboard session
+    token_id: int | None = None
 
 
 def default_web_dir(config: Config) -> Path | None:
@@ -282,6 +289,11 @@ def create_app(
 
     app = FastAPI(title="Mas", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
+    @app.exception_handler(PendingEnvError)
+    async def waiting_for_variables(_request: Request, exc: PendingEnvError) -> JSONResponse:
+        """Any route that would build an app still waiting for its variables (see mas.agent)."""
+        return JSONResponse({"detail": str(exc), "pending_env": exc.names}, status_code=409)
+
     app.state.scanner, app.state.db, app.state.host = scanner, db, host
     mcp = mcp_endpoint.Endpoint(app, db, token_limiter, TRUSTED_PROXIES)
     app.state.cms = cms
@@ -348,10 +360,10 @@ def create_app(
             raise HTTPException(401, "invalid API token")
         if not auth.api_token_allowed(request.url.path):
             raise HTTPException(403, "not available with an API token")
-        if row["scope"] != "write" and request.method not in SAFE_METHODS:
+        if row["scope"] not in ("write", "create") and request.method not in SAFE_METHODS:
             raise HTTPException(403, "read-only API token")
         return SessionInfo(f"token:{row['id']}", row["user_id"], f"{row['username']} (token {row['name']})",
-                           "", bool(row["totp_enabled"]), row["role"])
+                           "", bool(row["totp_enabled"]), row["role"], scope=row["scope"], token_id=row["id"])
 
     def current_session(request: Request) -> SessionInfo:
         """Administrators only: every route that touches the server uses this one."""
@@ -684,7 +696,7 @@ def create_app(
             raise HTTPException(403, "wrong two-factor code")
         name = body.name.strip()[:60] or "token"
         token = auth.new_api_token()
-        scope = "write" if body.write else "read"
+        scope = body.scope or ("write" if body.write else "read")
         expires = time.time() + body.days * 86400 if body.days else None
         token_id = db.create_api_token(name, auth.hash_token(token), user["id"], scope, expires)
         db.audit(s.username, "api-token-create", True, detail=f"{name} ({scope})")
@@ -697,15 +709,26 @@ def create_app(
         db.audit(s.username, "api-token-revoke", True, detail=str(token_id))
         return {"ok": True}
 
+    def mcp_payload() -> dict:
+        return {"enabled": db.get_setting(mcp_endpoint.SETTING) == "1", "path": "/mcp",
+                "allowed_repos": agent_apps.allowed_repos(db)}
+
     @app.get("/api/mcp")
     def mcp_status(_: SessionInfo = Depends(current_session)) -> dict:
-        return {"enabled": db.get_setting(mcp_endpoint.SETTING) == "1", "path": "/mcp"}
+        return mcp_payload()
 
     @app.put("/api/mcp")
-    def mcp_toggle(body: McpBody, s: SessionInfo = Depends(current_session)) -> dict:
-        db.set_setting(mcp_endpoint.SETTING, "1" if body.enabled else None)
-        db.audit(s.username, "mcp-enable" if body.enabled else "mcp-disable", True)
-        return {"enabled": body.enabled, "path": "/mcp"}
+    def mcp_settings(body: McpBody, s: SessionInfo = Depends(current_session)) -> dict:
+        if body.enabled is not None:
+            db.set_setting(mcp_endpoint.SETTING, "1" if body.enabled else None)
+            db.audit(s.username, "mcp-enable" if body.enabled else "mcp-disable", True)
+        if body.allowed_repos is not None:
+            try:
+                repos = agent_apps.set_allowed_repos(db, body.allowed_repos)
+            except agent_apps.AgentError as exc:
+                raise HTTPException(400, str(exc)) from None
+            db.audit(s.username, "mcp-allowed-repos", True, detail=", ".join(repos) or "(none)")
+        return mcp_payload()
 
     app.state.deployer = deployer
     api_deploy.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
@@ -716,6 +739,8 @@ def create_app(
     app.state.projects = projects
     api_dns.register(app, host=host, config=config, db=db, current_session=current_session, deployer=deployer,
                      opener=ovh_opener)
+    agent_apps.register(app, host=host, config=config, db=db, current_session=current_session, deployer=deployer,
+                        github_client=github_client, opener=ovh_opener)
     api_supabase.register(app, host=host, db=db, current_session=current_session, deployer=deployer,
                           manager=supabase, appdb=appdb, client_ip=client_ip)
     app.state.appdb = appdb
