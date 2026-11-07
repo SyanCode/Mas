@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Shell, useSession } from "@/components/Shell";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner } from "@/components/ui";
-import { api, ApiError, timeAgo, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
+import { api, ApiError, timeAgo, type ApiToken, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
 function PasswordForm() {
@@ -661,6 +661,141 @@ function PeopleCard() {
   );
 }
 
+function ClaudeCard({ totp }: { totp: boolean }) {
+  const t = useT();
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [tokens, setTokens] = useState<ApiToken[]>([]);
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("claude");
+  const [write, setWrite] = useState(true);
+  const [days, setDays] = useState(90);
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [created, setCreated] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<ApiToken | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const endpoint = typeof window === "undefined" ? "/mcp" : `${window.location.origin}/mcp`;
+
+  const load = () => {
+    api<{ enabled: boolean }>("/mcp").then((r) => setEnabled(r.enabled)).catch((e: ApiError) => setError(e.detail));
+    api<ApiToken[]>("/tokens").then(setTokens).catch(() => {});
+  };
+  useEffect(load, []);
+
+  async function run(label: string, fn: () => Promise<void>) {
+    setBusy(label);
+    setError("");
+    try {
+      await fn();
+      load();
+    } catch (e) {
+      setError((e as ApiError).detail);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const toggle = () => run("toggle", async () => {
+    await api("/mcp", { method: "PUT", body: { enabled: !enabled } });
+  });
+
+  const connect = (e: FormEvent) => {
+    e.preventDefault();
+    run("create", async () => {
+      const r = await api<{ token: string }>("/tokens", {
+        method: "POST", body: { name, write, days, password, code: totp ? code : undefined },
+      });
+      if (!enabled) await api("/mcp", { method: "PUT", body: { enabled: true } });
+      setCreated(r.token);
+      setOpen(false); setPassword(""); setCode("");
+    });
+  };
+
+  const command = (token: string) =>
+    `claude mcp add --transport http mas ${endpoint} --header "Authorization: Bearer ${token}"`;
+  const expiry = (k: ApiToken) => k.expires_at
+    ? t("expires {date}", { date: new Date(k.expires_at * 1000).toLocaleDateString() })
+    : t("never expires");
+
+  return (
+    <Card title={t("Claude")} actions={
+      enabled === null ? <Spinner /> : (
+        <div className="flex items-center gap-2">
+          <Badge tone={enabled ? "emerald" : "zinc"}>{enabled ? t("MCP on") : t("MCP off")}</Badge>
+          <Button variant="ghost" disabled={!!busy} onClick={toggle}>{busy === "toggle" ? <Spinner /> : null}{enabled ? t("Turn off") : t("Turn on")}</Button>
+        </div>
+      )}>
+      <div className="space-y-4 text-sm">
+        <p className="text-zinc-500">
+          {t("Let Claude Code (or any MCP client) look after this server: it reads services and logs, restarts, deploys and rolls back, through Mas. Every action goes into the history under the token's name. Accounts, environment variables and credentials stay out of reach.")}
+        </p>
+        <ErrorText>{error}</ErrorText>
+        {created && (
+          <div className="space-y-2 rounded-xl border border-emerald-400/30 bg-emerald-400/5 p-4">
+            <div>{t("Token shown once. Run this command on your computer to add the server to Claude Code:")}</div>
+            <CopyCode text={command(created)} />
+            <div className="text-xs text-zinc-500">{t("Then ask Claude, for example: what is broken on the server?")}</div>
+            <button className="text-xs text-zinc-500 hover:underline" onClick={() => setCreated(null)}>{t("Done")}</button>
+          </div>
+        )}
+        {!open ? (
+          <Button variant="primary" onClick={() => { setOpen(true); setCreated(null); }}>{t("Connect Claude")}</Button>
+        ) : (
+          <form onSubmit={connect} className="max-w-md space-y-3 rounded-xl border border-zinc-200/80 p-4 dark:border-white/[0.06]">
+            <Label title={t("Name")} hint={t("Shown in the history, for example claude-laptop.")}>
+              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} required />
+            </Label>
+            <Label title={t("Access")}>
+              <Select value={write ? "write" : "read"} onChange={(e) => setWrite(e.target.value === "write")}>
+                <option value="write">{t("Read and act (restart, deploy, roll back)")}</option>
+                <option value="read">{t("Read only (status, logs, health)")}</option>
+              </Select>
+            </Label>
+            <Label title={t("Expires")}>
+              <Select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+                <option value={30}>{t("in 30 days")}</option>
+                <option value={90}>{t("in 90 days")}</option>
+                <option value={365}>{t("in a year")}</option>
+                <option value={0}>{t("never")}</option>
+              </Select>
+            </Label>
+            <Input type="password" placeholder={t("Your password")} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+            {totp && <Input inputMode="numeric" placeholder={t("Two-factor code")} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" required />}
+            <div className="flex gap-2">
+              <Button variant="primary" type="submit" disabled={!!busy}>{busy === "create" ? <Spinner /> : null}{t("Create the token")}</Button>
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
+            </div>
+          </form>
+        )}
+        {enabled && <p className="text-xs text-zinc-500">{t("Endpoint")}: <span className="mono">{endpoint}</span></p>}
+        <ul className="divide-y divide-zinc-200/80 dark:divide-white/[0.06]">
+          {tokens.map((k) => (
+            <li key={k.id} className="flex flex-wrap items-center gap-2 py-2.5">
+              <span className="font-medium">{k.name}</span>
+              <Badge tone={k.scope === "write" ? "amber" : "sky"}>{k.scope === "write" ? t("read and act") : t("read only")}</Badge>
+              <span className="text-xs text-zinc-500">
+                {k.last_used ? t("used {when}", { when: timeAgo(k.last_used) }) : t("never used")} · {expiry(k)}
+              </span>
+              <Button variant="ghost" className="ml-auto" disabled={!!busy} onClick={() => setRevoking(k)}>{t("Revoke")}</Button>
+            </li>
+          ))}
+          {tokens.length === 0 && <li className="py-2.5 text-zinc-500">{t("No token yet.")}</li>}
+        </ul>
+      </div>
+      <ConfirmDialog
+        open={!!revoking}
+        title={t("Revoke {name}?", { name: revoking?.name ?? "" })}
+        message={t("Whatever uses this token loses access right away.")}
+        confirmLabel={t("Revoke")}
+        danger
+        onConfirm={() => { const k = revoking!; setRevoking(null); run(`revoke-${k.id}`, async () => { await api(`/tokens/${k.id}`, { method: "DELETE" }); }); }}
+        onCancel={() => setRevoking(null)}
+      />
+    </Card>
+  );
+}
+
 function AppearanceCard() {
   const t = useT();
   return (
@@ -692,6 +827,7 @@ function Settings() {
       <DomainsCard />
       <GitHubCard />
       <PeopleCard />
+      <ClaudeCard totp={!!session?.totp_enabled} />
       <TwoFactor enabled={!!session?.totp_enabled} />
       <PasswordForm />
       <p className="text-xs text-zinc-500">Mas {session?.version} · {t("signed in as {name}", { name: session?.username ?? "" })}</p>
