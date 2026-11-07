@@ -25,7 +25,7 @@ from mas.db import Database
 from mas.deploy import (
     BRANCH_RE, MAX_INSTANCES, PROXY_TYPES, REPO_RE, DeployError, Deployer, allocate_port, app_backends,
     app_instances, replacement_plan, suggest_start_command, used_ports, validate_app, validate_backends,
-    validate_commands,
+    validate_commands, pending_env, PendingEnvError,
 )
 from mas.dns import server_ips
 from mas.domains import aliases_for, check_app
@@ -379,6 +379,10 @@ def register(
             for target in db.apps_for_push(repo, branch, frozen=True):
                 if target["mode"] == "stack":
                     continue
+                if pending_env(target):  # waits for its variables: the push is built once they are filled
+                    db.audit(f"github:{actor}", "webhook-push", True, service_id=target["id"],
+                             detail=f"{target['id']}: not built, waiting for variables")
+                    continue
                 if target["auto_deploy"] and not frozen_all:
                     deployer.enqueue(target["id"], "push", f"github:{actor}", sha)
                     deployed.append(target["id"])
@@ -589,7 +593,16 @@ def register(
         token = encrypt_env(load_fernet(host, config.secret_key_path), env) if env else None
         db.update_app(app_id, env=token)
         db.audit(s.username, "app-env", True, detail=f"{app_id}: {len(env)} variable(s)")
-        return {"ok": True, "count": len(env)}
+        waiting = pending_env(db.get_app(app_id))
+        if not waiting:
+            return {"ok": True, "count": len(env)}
+        # Created by an agent and waiting for these: once all are filled, the first build starts.
+        missing = [k for k in waiting if not env.get(k, "").strip()]
+        db.update_app(app_id, pending_env=json.dumps(missing) if missing else None)
+        if missing:
+            return {"ok": True, "count": len(env), "pending_env": missing}
+        return {"ok": True, "count": len(env), "pending_env": [], "release_id": deployer.enqueue(app_id, "create",
+                                                                                                s.username)}
 
     @app.put("/api/apps/{app_id}/scaling")
     def set_scaling(app_id: str, body: ScalingBody, s=Depends(current_session)) -> dict:
