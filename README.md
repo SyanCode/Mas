@@ -136,7 +136,17 @@ $ sudo mas user create [name]   # password + 2FA QR code
 $ sudo mas user 2fa [name]      # set up / replace the authenticator app
 $ sudo mas user 2fa-reset [name]  # lost phone: disable 2FA (root only)
 $ sudo mas user passwd [name]
+
+$ sudo mas token create claude [--write] [--days 90]  # API token for scripts / AI agents (shown once)
+$ sudo mas token list
+$ sudo mas token revoke <id>
 ```
+
+API tokens (`Authorization: Bearer mas_pat_…`) are read-only unless created with `--write`,
+expire after 90 days by default, and act as the account they belong to. They never reach account,
+user, invite or token routes, nor environment variables and credentials. Their actions appear in
+the history as `admin (token claude)`. [mas-mcp](https://github.com/SyanCode/mas-mcp) uses them to
+let Claude operate the server through this API, deployed as a regular Mas app.
 
 `<service>` is the id shown by `mas scan` (usually the domain), or any unambiguous part of it.
 
@@ -683,6 +693,10 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   device signs out every other session.
 - **CSRF**: every mutating request needs the per-session `X-CSRF-Token` header, and a foreign
   `Origin` is rejected.
+- **API tokens**: `mas_pat_` + 256 random bits, only their SHA-256 is stored; created from the
+  server only (`mas token create`), read-only by default, expiring, revocable at once. Sent as a
+  bearer header (never a cookie), so CSRF does not apply. Wrong tokens are rate limited per IP.
+  Account, user, invite and token routes, environment variables and credentials refuse them.
 - **Deployments**: the GitHub webhook is rejected unless its `X-Hub-Signature-256` HMAC is valid,
   before the payload is even parsed. Apps run as their own non-root user, listen on loopback, and
   get their secrets from a `0600` environment file; secrets are encrypted at rest in the database.
