@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from mas import __version__, api_cluster, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, api_cluster, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -69,6 +69,18 @@ class LoginBody(BaseModel):
     username: str = Field(max_length=64)
     password: str = Field(max_length=1024)
     otp: str | None = Field(default=None, max_length=16)
+
+
+class TokenBody(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    write: bool = False
+    days: int = Field(default=90, ge=0, le=3650)  # 0: never expires
+    password: str = Field(max_length=1024)
+    code: str | None = Field(default=None, max_length=16)
+
+
+class McpBody(BaseModel):
+    enabled: bool
 
 
 class SignupBody(BaseModel):
@@ -263,13 +275,15 @@ def create_app(
             except Exception:  # noqa: BLE001 - the dashboard must start anyway
                 log.exception("could not refresh the Supabase nginx site")
         task = asyncio.create_task(scan_loop()) if background else None
-        yield
+        async with mcp.session_manager().run():
+            yield
         if task:
             task.cancel()
 
     app = FastAPI(title="Mas", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.scanner, app.state.db, app.state.host = scanner, db, host
+    mcp = mcp_endpoint.Endpoint(app, db, token_limiter, TRUSTED_PROXIES)
     app.state.cms = cms
 
     # -- middleware --------------------------------------------------------
@@ -655,6 +669,44 @@ def create_app(
         db.audit(s.username, "2fa-disable", True)
         return {"ok": True}
 
+    # -- API tokens and the MCP endpoint (Settings → Claude) ------------------
+
+    @app.get("/api/tokens")
+    def list_tokens(_: SessionInfo = Depends(current_session)) -> list[dict]:
+        return db.list_api_tokens()
+
+    @app.post("/api/tokens")
+    def create_token(body: TokenBody, s: SessionInfo = Depends(current_session)) -> dict:
+        """A token lasts beyond the session: it costs the password, and the 2FA code when enabled,
+        so a stolen session cannot mint a lasting one."""
+        user = require_password(s, body.password)
+        if user["totp_secret"] and not auth.verify_totp(db, user, body.code or ""):
+            raise HTTPException(403, "wrong two-factor code")
+        name = body.name.strip()[:60] or "token"
+        token = auth.new_api_token()
+        scope = "write" if body.write else "read"
+        expires = time.time() + body.days * 86400 if body.days else None
+        token_id = db.create_api_token(name, auth.hash_token(token), user["id"], scope, expires)
+        db.audit(s.username, "api-token-create", True, detail=f"{name} ({scope})")
+        return {"id": token_id, "name": name, "scope": scope, "expires_at": expires, "token": token}
+
+    @app.delete("/api/tokens/{token_id}")
+    def revoke_token(token_id: int, s: SessionInfo = Depends(current_session)) -> dict:
+        if not db.delete_api_token(token_id):
+            raise HTTPException(404, "unknown token")
+        db.audit(s.username, "api-token-revoke", True, detail=str(token_id))
+        return {"ok": True}
+
+    @app.get("/api/mcp")
+    def mcp_status(_: SessionInfo = Depends(current_session)) -> dict:
+        return {"enabled": db.get_setting(mcp_endpoint.SETTING) == "1", "path": "/mcp"}
+
+    @app.put("/api/mcp")
+    def mcp_toggle(body: McpBody, s: SessionInfo = Depends(current_session)) -> dict:
+        db.set_setting(mcp_endpoint.SETTING, "1" if body.enabled else None)
+        db.audit(s.username, "mcp-enable" if body.enabled else "mcp-disable", True)
+        return {"enabled": body.enabled, "path": "/mcp"}
+
     app.state.deployer = deployer
     api_deploy.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
                         deployer=deployer, github_client=github_client, reset_github=github_cache.clear,
@@ -683,6 +735,9 @@ def create_app(
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])
     def api_not_found(path: str) -> JSONResponse:
         return JSONResponse({"detail": "not found"}, status_code=404)
+
+    from starlette.routing import Route
+    app.router.routes.append(Route("/mcp", mcp, methods=["GET", "POST", "DELETE"]))
 
     static_dir = web_dir or default_web_dir(config)
     if static_dir is not None:
