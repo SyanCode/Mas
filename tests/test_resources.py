@@ -49,9 +49,26 @@ def visits(host, at: float, count: int, addr: str = "127.0.0.1:7100"):
         fh.write(lines)
 
 
+def site(host, wake: bool):
+    path = host.real("/etc/nginx/sites-available/mas-app-web.conf")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("server {\n    error_page 502 503 504 = @mas_wake;\n}\n" if wake else "server {}\n")
+
+
+def test_no_sleep_without_the_wake_up_in_nginx(res):
+    """nginx refused the wake-up (or the site predates it): stopping the app would take the site down."""
+    r, db, host, _ = res
+    db.update_app("web", resources=json.dumps({"sleep_after_min": 30}))
+    site(host, wake=False)
+    r.started = 1000.0
+    assert r.tick(now=1000.0 + 31 * 60) == [] and not r.asleep("web")
+    assert ["systemctl", "stop", "mas-app-web.service"] not in host.executed
+
+
 def test_sleep_when_idle_and_wake_on_a_visit(res):
     r, db, host, _ = res
     db.update_app("web", resources=json.dumps({"sleep_after_min": 30}))
+    site(host, wake=True)
     r.started = 1000.0
     visits(host, 1000.0, 3)
     assert r.tick(now=1000.0 + 600) == []  # 10 minutes: still awake
