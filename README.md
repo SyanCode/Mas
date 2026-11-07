@@ -145,8 +145,24 @@ $ sudo mas token revoke <id>
 API tokens (`Authorization: Bearer mas_pat_…`) are read-only unless created with `--write`,
 expire after 90 days by default, and act as the account they belong to. They never reach account,
 user, invite or token routes, nor environment variables and credentials. Their actions appear in
-the history as `admin (token claude)`. [mas-mcp](https://github.com/SyanCode/mas-mcp) uses them to
-let Claude operate the server through this API, deployed as a regular Mas app.
+the history as `admin (token claude)`.
+
+### Claude (MCP)
+
+**Settings → Claude → Connect Claude** creates a token (your password and 2FA code are asked) and
+turns on the `/mcp` endpoint of the dashboard, then shows the command to run on your computer:
+
+```console
+$ claude mcp add --transport http mas https://mas.example.com/mcp --header "Authorization: Bearer mas_pat_…"
+```
+
+Claude Code (or any [MCP](https://modelcontextprotocol.io) client) then gets 18 tools: `overview`
+(what runs, what needs attention), services, logs, runtime, usage, health checks, history, apps and
+build logs; and with a write token, service actions, `nginx_reload`, `deploy_app`, `rollback_app`,
+`update_app` and `apply_health_fix`. Each tool is a call to this API with the token, so the
+whitelists, `nginx -t`, automatic rollbacks and the audit log apply. Logs reach the model marked
+as untrusted data. The endpoint is off by default and answers 404 while off. Mas itself contains
+no AI: `/mcp` is only a protocol in front of the API.
 
 `<service>` is the id shown by `mas scan` (usually the domain), or any unambiguous part of it.
 
