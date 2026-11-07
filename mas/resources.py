@@ -23,6 +23,7 @@ from mas.config import Config
 from mas.db import Database
 from mas.deploy import (
     MAX_INSTANCES, PROXY_TYPES, DeployError, Deployer, ReleaseLog, app_instances, app_resources, unit_name,
+    vhost_paths,
 )
 from mas.host import Host
 from mas.models import ServiceType
@@ -109,6 +110,10 @@ class Resources:
             return None
         seen = self.last_seen.get(app["id"], self.started)  # after a restart of Mas: counted from then
         if now - seen < minutes * 60 or now - self.last_change.get(app["id"], 0) < COOLDOWN:
+            return None
+        # Only when nginx can wake it up: without @mas_wake in its site (a vhost refused by nginx -t,
+        # an old deploy), stopping the app would just take the site down until someone notices.
+        if "@mas_wake" not in (self.host.read_text(vhost_paths(app["id"])[0]) or ""):
             return None
         units = [u for u, _ in app_instances(app)]
         self.db.set_setting(ASLEEP + app["id"], "1")

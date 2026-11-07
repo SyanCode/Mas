@@ -215,7 +215,9 @@ def upstream_block(app_id: str, servers: list[str]) -> str:
 # answers a "starting" page that refreshes until the app answers.
 WAKE_LOCATION = """
     location @mas_wake {
-        proxy_pass http://127.0.0.1:@@MAS_PORT@@/api/wake/@@APP@@;
+        # A named location takes no URI in proxy_pass (nginx -t refuses it): rewrite, then pass.
+        rewrite ^ /api/wake/@@APP@@ break;
+        proxy_pass http://127.0.0.1:@@MAS_PORT@@;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }

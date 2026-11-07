@@ -738,7 +738,9 @@ def test_memory_limit_sleep_and_scaling_without_a_rebuild(env):
     unit = host.read_text("/etc/systemd/system/mas-app-web.service")
     assert "MemoryHigh=460M\nMemoryMax=512M\n" in unit and '"NODE_OPTIONS=--max-old-space-size=384"' in unit
     vhost = host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
-    assert "error_page 502 503 504 = @mas_wake;" in vhost and "/api/wake/web;" in vhost
+    assert "error_page 502 503 504 = @mas_wake;" in vhost and "rewrite ^ /api/wake/web break;" in vhost
+    wake = vhost[vhost.index("location @mas_wake"):]
+    assert "proxy_pass http://127.0.0.1:7070;" in wake  # no URI: nginx refuses one in a named location
 
     log = ReleaseLog(Path(db.path).parent / "scale.log")
     clones = sum(1 for a, _ in env["calls"] if a[:2] == ["git", "clone"])
