@@ -93,7 +93,7 @@ def env(tmp_path, monkeypatch):
     allow = client.put("/api/mcp", headers=csrf, json={"allowed_repos": ["SyanCode/*"]})
     assert allow.status_code == 200, allow.text
     agent = TestClient(app)  # no cookie: like the MCP endpoint
-    return {"client": client, "csrf": csrf, "agent": agent, "tokens": tokens, "db": db, "gh": gh, "ovh": ovh,
+    return {"app": app, "client": client, "csrf": csrf, "agent": agent, "tokens": tokens, "db": db, "gh": gh, "ovh": ovh,
             "host": host, "resolved": resolved}
 
 
@@ -246,3 +246,41 @@ def test_plan_only_reads_text_files(env):
     plan(env)
     assert set(env["gh"].calls) <= {".env.example", ".env.sample"}
     assert json.dumps(plan(env).json()).count(SECRET_DEFAULT) == 0
+
+
+def test_through_mcp(env):
+    """The agent's path: plan_app, create_app, deploy_app refused with the names, get_app shows them."""
+    from test_mcp_endpoint import MCP_HEADERS
+
+    env["client"].put("/api/mcp", headers=env["csrf"], json={"enabled": True})
+    token = env["tokens"]["create"]["Authorization"]
+
+    def tool(live, name, args):
+        r = live.post("/mcp", headers={**MCP_HEADERS, "Authorization": token},
+                      json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}})
+        assert r.status_code == 200, r.text
+        res = r.json()["result"]
+        return res, "\n".join(c.get("text", "") for c in res["content"])
+
+    with TestClient(env["app"]) as live:
+        tools = live.post("/mcp", headers={**MCP_HEADERS, "Authorization": token},
+                          json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).json()["result"]["tools"]
+        names = {t["name"] for t in tools}
+        assert {"plan_app", "create_app", "domain_status"} <= names
+        create_schema = next(t for t in tools if t["name"] == "create_app")["inputSchema"]["properties"]
+        assert not any("env" in k or "secret" in k for k in create_schema)  # no field for values
+
+        res, text = tool(live, "plan_app", {"repo": "SyanCode/Indiepolis", "branch": "main",
+                                            "app_id": "indiepolis", "domain": "indiepolis.com"})
+        assert not res.get("isError") and '"can_create": true' in text
+        res, text = tool(live, "create_app", {"repo": "SyanCode/Indiepolis", "branch": "main",
+                                              "app_id": "indiepolis", "domain": "indiepolis.com"})
+        assert not res.get("isError") and "waiting_for_variables" in text
+        no_value_in(text)
+        res, text = tool(live, "deploy_app", {"app_id": "indiepolis"})
+        assert res["isError"] and "SIGNING_SECRET" in text and "Variables" in text
+        res, text = tool(live, "get_app", {"app_id": "indiepolis"})
+        assert "waiting_for_variables" in text and "SMTP_PASS" in text
+        no_value_in(text)
+        res, text = tool(live, "domain_status", {"app_id": "indiepolis"})
+        assert not res.get("isError") and "indiepolis.com" in text
