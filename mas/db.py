@@ -124,6 +124,16 @@ CREATE TABLE IF NOT EXISTS cluster_tokens (  -- join tokens: another Mas uses on
     created_at TEXT NOT NULL,
     last_used TEXT
 );
+CREATE TABLE IF NOT EXISTS api_tokens (      -- personal API tokens: scripts and agents (MCP) acting as a user
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL DEFAULT 'read',        -- read | write
+    created_at TEXT NOT NULL,
+    expires_at REAL,                           -- NULL: never
+    last_used TEXT
+);
 CREATE TABLE IF NOT EXISTS cluster_servers ( -- the other Mas servers this one drives
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -195,6 +205,7 @@ MIGRATIONS = [
     ("apps", "pending TEXT"),      # frozen app: JSON {sha, message, author, commits, at} of the pushes not built
 ]
 ROLES = ("admin", "editor")
+API_TOKEN_SCOPES = ("read", "write")
 FOLDER_COLORS = ("zinc", "red", "orange", "amber", "emerald", "teal", "sky", "indigo", "violet", "pink")
 FOLDER_KINDS = ("app", "service")
 
@@ -412,6 +423,39 @@ class Database:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (_now(), actor, service_id, action, command, int(ok), (detail or "")[:4000]),
             )
+
+    # -- API tokens ------------------------------------------------------
+
+    def create_api_token(self, name: str, token_hash: str, user_id: int, scope: str,
+                         expires_at: float | None = None) -> int:
+        if scope not in API_TOKEN_SCOPES:
+            raise ValueError(f"invalid scope {scope}")
+        with self.tx() as c:
+            return int(c.execute(
+                "INSERT INTO api_tokens (name, token_hash, user_id, scope, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)", (name, token_hash, user_id, scope, _now(), expires_at)).lastrowid)
+
+    def use_api_token(self, token_hash: str) -> sqlite3.Row | None:
+        """The token with its user, or None if unknown or expired. Records the use."""
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT t.*, u.username, u.role, u.totp_secret IS NOT NULL AS totp_enabled "
+                "FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ?",
+                (token_hash,)).fetchone()
+            if row is None or (row["expires_at"] is not None and row["expires_at"] < time.time()):
+                return None
+            c.execute("UPDATE api_tokens SET last_used = ? WHERE id = ?", (_now(), row["id"]))
+            return row
+
+    def list_api_tokens(self) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute(
+                "SELECT t.id, t.name, t.scope, t.created_at, t.expires_at, t.last_used, u.username "
+                "FROM api_tokens t JOIN users u ON u.id = t.user_id ORDER BY t.id")]
+
+    def delete_api_token(self, token_id: int) -> bool:
+        with self.tx() as c:
+            return c.execute("DELETE FROM api_tokens WHERE id = ?", (token_id,)).rowcount > 0
 
     # -- supabase --------------------------------------------------------
 

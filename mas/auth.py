@@ -133,6 +133,26 @@ def create_session(db: Database, user_id: int, ttl_seconds: float, ip: str | Non
     return NewSession(token, csrf)
 
 
+# -- API tokens ----------------------------------------------------------------
+
+API_TOKEN_PREFIX = "mas_pat_"
+# Routes an API token never reaches, whatever its scope: accounts, credentials and secrets.
+# A leaked token (or an agent fed a malicious log line) must not lock the owner out or read secrets.
+API_TOKEN_FORBIDDEN = (
+    "/api/account/", "/api/users", "/api/invites", "/api/logout", "/api/signup",
+    "/api/cluster/tokens", "/api/github/manifest", "/api/supabase/credentials", "/api/dns/providers",
+)
+API_TOKEN_FORBIDDEN_RE = re.compile(r"^/api/apps/[^/]+/env$")
+
+
+def new_api_token() -> str:
+    return API_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def api_token_allowed(path: str) -> bool:
+    return not path.startswith(API_TOKEN_FORBIDDEN) and not API_TOKEN_FORBIDDEN_RE.match(path)
+
+
 # -- rate limiting -------------------------------------------------------------
 
 
