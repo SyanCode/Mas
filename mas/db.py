@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (      -- personal API tokens: scripts and
     name TEXT NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    scope TEXT NOT NULL DEFAULT 'read',        -- read | write
+    scope TEXT NOT NULL DEFAULT 'read',        -- read | write | create (write + new apps)
     created_at TEXT NOT NULL,
     expires_at REAL,                           -- NULL: never
     last_used TEXT
@@ -202,17 +202,18 @@ MIGRATIONS = [
     ("apps", "replica_of TEXT"),   # copy driven by another Mas: its name
     ("apps", "resources TEXT"),    # JSON {memory_mb, sleep_after_min, autoscale: {min, max}} (mas.resources)
     ("apps", "project TEXT"),      # id of the project (mas.projects) the app belongs to
-    ("apps", "pending TEXT"),      # frozen app: JSON {sha, message, author, commits, at} of the pushes not built
+    ("apps", "pending TEXT"),
+    ("apps", "pending_env TEXT"),  # JSON names of the variables a human must fill before the first build      # frozen app: JSON {sha, message, author, commits, at} of the pushes not built
 ]
 ROLES = ("admin", "editor")
-API_TOKEN_SCOPES = ("read", "write")
+API_TOKEN_SCOPES = ("read", "write", "create")  # create: write + new apps (allowed repositories)
 FOLDER_COLORS = ("zinc", "red", "orange", "amber", "emerald", "teal", "sky", "indigo", "violet", "pink")
 FOLDER_KINDS = ("app", "service")
 
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
               "current_release", "extra_ports", "backends", "stack", "aliases", "replaces", "cluster",
-              "cluster_backends", "bind", "replica_of", "resources", "project", "pending"}
+              "cluster_backends", "bind", "replica_of", "resources", "project", "pending", "pending_env"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
 
 

@@ -68,6 +68,24 @@ class DeployError(Exception):
     pass
 
 
+class PendingEnvError(DeployError):
+    """The app waits for variables only a human may fill (see mas.agent): nothing is built."""
+
+    def __init__(self, app_id: str, names: list[str]) -> None:
+        self.app_id, self.names = app_id, names
+        super().__init__(f"app {app_id} is waiting for variables: {', '.join(names)}. A human must fill them in "
+                         f"the dashboard (Apps → {app_id} → Variables), which then deploys it")
+
+
+def pending_env(app: dict | None) -> list[str]:
+    """Names of the variables an app waits for before its first build (empty: none)."""
+    try:
+        names = json.loads((app or {}).get("pending_env") or "[]")
+    except ValueError:
+        return []
+    return [n for n in names if isinstance(n, str)]
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -357,8 +375,11 @@ class Deployer:
 
     def enqueue(self, app_id: str, trigger: str, actor: str | None, sha: str | None = None,
                 rollback_to: int | None = None) -> int:
-        if self.db.get_app(app_id) is None:
+        app = self.db.get_app(app_id)
+        if app is None:
             raise DeployError(f"unknown app {app_id}")
+        if missing := pending_env(app):
+            raise PendingEnvError(app_id, missing)
         rid = self.db.create_release(app_id, trigger, actor, sha)
         if rollback_to is not None:
             target = self.db.get_release(rollback_to)
@@ -377,7 +398,7 @@ class Deployer:
         (no deployment on push) are left out too unless ``include_frozen``."""
         busy = {"queued", "building"}
         return [a["id"] for a in self.db.list_apps() if a["mode"] in ("managed", "adopted")
-                and (include_frozen or a["auto_deploy"])
+                and (include_frozen or a["auto_deploy"]) and not pending_env(a)
                 and not any(r["status"] in busy for r in self.db.list_releases(a["id"], 5))]
 
     def _start_worker(self) -> None:
