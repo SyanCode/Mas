@@ -1184,5 +1184,14 @@
   "read only": "solo lectura",
   "No token yet.": "Todavía no hay ningún token.",
   "Revoke {name}?": "¿Revocar {name}?",
-  "Whatever uses this token loses access right away.": "Lo que use este token pierde el acceso al instante."
+  "Whatever uses this token loses access right away.": "Lo que use este token pierde el acceso al instante.",
+  "waiting for variables": "esperando variables",
+  "{n} variable(s) saved, encrypted. The first deploy starts.": "{n} variable(s) guardada(s), cifrada(s). Empieza el primer despliegue.",
+  "{n} variable(s) saved. Still missing: {names}": "{n} variable(s) guardada(s). Aún faltan: {names}",
+  "Waiting for variables": "Esperando variables",
+  "This app was created by an agent, which never sees secrets. Fill these in Environment variables below: saving them starts the first deploy.": "Esta app la creó un agente, que nunca ve los secretos. Rellénalas en Variables de entorno más abajo: al guardarlas empieza el primer despliegue.",
+  "Read, act and create apps (allowed repositories)": "Leer, actuar y crear apps (repositorios permitidos)",
+  "Repositories agents may create apps from": "Repositorios desde los que un agente puede crear apps",
+  "One per line: Owner/Repo, or Owner/* for all of an account. Empty: no creation. Variables only a human may fill (secrets) keep the app waiting.": "Uno por línea: Owner/Repo, u Owner/* para toda una cuenta. Vacío: ninguna creación. Las variables que solo un humano puede rellenar (secretos) dejan la app en espera.",
+  "creates apps": "crea apps"
 }

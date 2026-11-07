@@ -150,10 +150,7 @@ def _app(a: dict) -> dict:
         out["last_release"] = _release(last)
     if a.get("pending"):
         out["pending_push"] = a["pending"]
-    try:
-        waiting = json.loads(a.get("pending_env") or "[]")
-    except (TypeError, ValueError):
-        waiting = []
+    waiting = a.get("pending_env") or []
     if waiting:
         out["waiting_for_variables"] = waiting
         out["note"] = "nothing is built until a human fills these in the dashboard (Apps → app → Variables)"
