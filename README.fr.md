@@ -136,7 +136,67 @@ $ sudo mas user create [name]   # password + 2FA QR code
 $ sudo mas user 2fa [name]      # set up / replace the authenticator app
 $ sudo mas user 2fa-reset [name]  # lost phone: disable 2FA (root only)
 $ sudo mas user passwd [name]
+$ sudo mas token create claude [--write|--create] [--days 90]  # jeton d'API pour scripts et agents IA
+$ sudo mas token list
+$ sudo mas token revoke <id>
 ```
+
+Les jetons d'API (`Authorization: Bearer mas_pat_…`) sont en lecture seule sauf avec `--write` (ou
+`--create`, qui y ajoute la création d'apps), expirent au bout de 90 jours par défaut et agissent au nom
+de leur compte. Ils n'atteignent jamais les routes des comptes, des utilisateurs, des invitations ou des
+jetons, ni les variables d'environnement et les identifiants. Leurs actions apparaissent dans
+l'historique sous la forme `admin (token claude)`.
+
+### Claude (MCP)
+
+**Paramètres → Claude → Connecter Claude** crée un jeton (mot de passe et code 2FA demandés), active le
+point d'accès `/mcp` du tableau de bord et affiche la commande à lancer sur votre ordinateur :
+
+```console
+$ claude mcp add --transport http mas https://mas.example.com/mcp --header "Authorization: Bearer mas_pat_…"
+```
+
+Claude Code (ou tout client [MCP](https://modelcontextprotocol.io)) dispose alors de 21 outils : `overview`
+(ce qui tourne, ce qui demande de l'attention), services, logs, état, consommation, vérifications de
+santé, historique, apps et journaux de build ; avec un jeton en écriture, les actions sur les services,
+`nginx_reload`, `deploy_app`, `rollback_app`, `update_app` et `apply_health_fix` ; avec un jeton
+« création », `plan_app` et `create_app`. Chaque outil est un appel à cette API avec le jeton : listes
+blanches, `nginx -t`, retours arrière automatiques et historique s'appliquent. Les logs arrivent au modèle
+marqués comme données non fiables. Le point d'accès est désactivé par défaut (404). Mas ne contient aucune
+IA : `/mcp` n'est qu'un protocole devant l'API.
+
+### Créer une app depuis MCP
+
+Un agent peut aussi installer un nouveau projet, sans jamais toucher à un secret. Donnez-lui un jeton
+**Lire, agir et créer des apps** (`mas token create claude --create`), puis listez les dépôts autorisés
+dans **Paramètres → Claude** (`Owner/Repo`, ou `Owner/*` pour tout un compte ; vide, par défaut : aucune
+création). Ensuite :
+
+```text
+plan_app(repo="SyanCode/Indiepolis", branch="main", app_id="indiepolis", domain="indiepolis.com")
+  → type node (script start), build npm ci && npm run build ; variables SIGNING_SECRET, ADMIN_KEY et
+    SMTP_PASS obligatoires, les autres avec leur valeur par défaut ; domaine libre chez OVH
+create_app(repo="SyanCode/Indiepolis", branch="main", app_id="indiepolis", domain="indiepolis.com")
+  → app créée, en attente de SIGNING_SECRET, ADMIN_KEY, SMTP_PASS ; enregistrements A d'indiepolis.com et www ajoutés
+```
+
+Vous renseignez les trois secrets dans **Apps → indiepolis → Variables** : l'enregistrement lance le premier
+déploiement. L'agent déploie ensuite avec `deploy_app`.
+
+- `plan_app` ne modifie rien : accès de l'App GitHub, type détecté et commandes par défaut, variables de
+  `.env.example` (nom, description, obligatoire ou non, valeur par défaut ou non : jamais une valeur), état
+  du domaine et conflits.
+- `create_app` valide comme le tableau de bord et ne reprend que les valeurs par défaut **non secrètes** de
+  `.env.example`. Une variable sans valeur utilisable, ou dont le nom ressemble à un secret (`PASS`, `TOKEN`,
+  `SECRET`, `KEY`) même avec une valeur dans le fichier, attend un humain : d'ici là rien n'est construit, et
+  `deploy_app`, les pushs et *Tout redéployer* ignorent l'app en donnant les noms des variables manquantes.
+- **DNS** : via un registrar connecté, les enregistrements sont ajoutés, jamais remplacés ni supprimés ; un
+  nom qui pointe ailleurs, un CNAME, un domaine pris par une autre app ou servi par un autre site nginx est
+  refusé. Sans registrar connecté, `create_app` renvoie les enregistrements à créer (comme Vercel) et
+  `domain_status` les vérifie ; le certificat vient avec le premier déploiement une fois le nom résolu.
+- Jamais via MCP : les secrets, la suppression d'une app, d'un domaine ou d'un enregistrement DNS, l'adoption
+  ou le remplacement d'un site existant. Au plus 5 apps par heure et par jeton ; chaque tentative est dans
+  l'historique.
 
 `<service>` est l'identifiant affiché par `mas scan` (en général le domaine), ou toute partie non ambiguë de celui-ci.
 
@@ -702,6 +762,14 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   2FA déconnecte toutes les autres sessions.
 - **CSRF** : chaque requête qui modifie quelque chose exige l'en-tête `X-CSRF-Token` propre à la session, et une
   `Origin` étrangère est rejetée.
+- **Jetons d'API** : `mas_pat_` + 256 bits aléatoires, seule leur empreinte SHA-256 est stockée ; créés sur
+  le serveur (`mas token create`) ou dans Paramètres → Claude (mot de passe et 2FA demandés), en lecture seule
+  par défaut, avec expiration, révocables immédiatement. Envoyés en en-tête (jamais en cookie) : le CSRF ne
+  s'applique pas. Les mauvais jetons sont limités par IP. Les routes des comptes, utilisateurs, invitations et
+  jetons, les variables d'environnement et les identifiants les refusent.
+- **Agents (MCP)** : créer une app exige un jeton `create` et un dépôt de la liste autorisée (vide par
+  défaut). Un agent ne lit ni n'écrit jamais la valeur d'une variable ; les apps qu'il crée attendent les
+  secrets qu'un humain renseigne dans le tableau de bord. Les enregistrements DNS sont seulement ajoutés.
 - **Déploiements** : le webhook GitHub est rejeté si son HMAC `X-Hub-Signature-256` n'est pas valide,
   avant même l'analyse de son contenu. Les apps tournent sous leur propre utilisateur non root, écoutent sur le loopback et
   reçoivent leurs secrets depuis un fichier d'environnement en `0600` ; les secrets sont chiffrés au repos dans la base de données.
