@@ -446,6 +446,17 @@ export function daysUntil(iso: string): number {
   return Math.floor((new Date(iso).getTime() - Date.now()) / 86_400_000);
 }
 
+/** Personal API token (GET /tokens): never its value, shown once at creation. */
+export interface ApiToken {
+  id: number;
+  name: string;
+  scope: "read" | "write";
+  username: string;
+  created_at: string;
+  expires_at: number | null;
+  last_used: string | null;
+}
+
 export function timeAgo(iso: string): string {
   const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return tr("{n}s ago", { n: Math.max(s, 0) });

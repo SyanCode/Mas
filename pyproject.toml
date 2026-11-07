@@ -20,6 +20,7 @@ dependencies = [
     "pyotp>=2.9",
     "segno>=1.6",
     "pyyaml>=6",
+    "mcp>=2.3,<3",  # the optional /mcp endpoint (off by default)
 ]
 
 [project.optional-dependencies]
