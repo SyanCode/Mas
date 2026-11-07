@@ -774,7 +774,7 @@ function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void })
   );
 }
 
-function EnvCard({ appId }: { appId: string }) {
+function EnvCard({ appId, onSaved }: { appId: string; onSaved?: () => void }) {
   const t = useT();
   const [text, setText] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -791,8 +791,11 @@ function EnvCard({ appId }: { appId: string }) {
   async function save() {
     setError("");
     try {
-      const r = await api<{ count: number }>(`/apps/${encodeURIComponent(appId)}/env`, { method: "PUT", body: { text: text ?? "" } });
-      setMsg(t("{n} variable(s) saved, encrypted. Redeploy to apply.", { n: r.count }));
+      const r = await api<{ count: number; pending_env?: string[]; release_id?: number }>(`/apps/${encodeURIComponent(appId)}/env`, { method: "PUT", body: { text: text ?? "" } });
+      if (r.release_id) setMsg(t("{n} variable(s) saved, encrypted. The first deploy starts.", { n: r.count }));
+      else if (r.pending_env?.length) setMsg(t("{n} variable(s) saved. Still missing: {names}", { n: r.count, names: r.pending_env.join(", ") }));
+      else setMsg(t("{n} variable(s) saved, encrypted. Redeploy to apply.", { n: r.count }));
+      onSaved?.();
     } catch (e) {
       setError((e as ApiError).detail);
     }
@@ -910,6 +913,14 @@ function AppView() {
 
       <ErrorText>{error}</ErrorText>
 
+      {!!app.pending_env?.length && (
+        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          <span className="font-medium">{t("Waiting for variables")}: </span>
+          <code className="text-xs">{app.pending_env.join(", ")}</code>
+          <div className="mt-1 opacity-80">{t("This app was created by an agent, which never sees secrets. Fill these in Environment variables below: saving them starts the first deploy.")}</div>
+        </div>
+      )}
+
       {app.pending && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
           <span className="text-lg">❄</span>
@@ -999,7 +1010,7 @@ function AppView() {
           {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && <ResourcesCard app={app} />}
           {app.mode === "managed" && <DatabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           {app.installation_id && <CmsCard appId={app.id} />}
-          {app.mode === "managed" && <EnvCard appId={app.id} />}
+          {app.mode === "managed" && <EnvCard appId={app.id} onSaved={load} />}
         </div>
       </div>
 

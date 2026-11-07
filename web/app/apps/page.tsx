@@ -27,6 +27,7 @@ function AppFlags({ a, frozenAll }: { a: App; frozenAll: boolean }) {
   return (
     <>
       {(!a.auto_deploy || frozenAll) && <span title={t("Pushes do not deploy this app")}><Badge tone="sky">❄ {t("frozen")}</Badge></span>}
+      {!!a.pending_env?.length && <Badge tone="amber">{t("waiting for variables")}</Badge>}
       {a.pending && <span title={a.pending.message}><Badge tone="amber">{t("{n} commit(s) waiting", { n: a.pending.commits })}</Badge></span>}
       {a.project && <Badge tone="violet">◆ {a.project}</Badge>}
     </>
