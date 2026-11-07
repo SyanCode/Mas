@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Shell, useSession } from "@/components/Shell";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
-import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
 import { api, ApiError, timeAgo, type ApiToken, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -667,7 +667,8 @@ function ClaudeCard({ totp }: { totp: boolean }) {
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("claude");
-  const [write, setWrite] = useState(true);
+  const [scope, setScope] = useState<"read" | "write" | "create">("write");
+  const [repos, setRepos] = useState<string | null>(null);
   const [days, setDays] = useState(90);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -678,7 +679,10 @@ function ClaudeCard({ totp }: { totp: boolean }) {
   const endpoint = typeof window === "undefined" ? "/mcp" : `${window.location.origin}/mcp`;
 
   const load = () => {
-    api<{ enabled: boolean }>("/mcp").then((r) => setEnabled(r.enabled)).catch((e: ApiError) => setError(e.detail));
+    api<{ enabled: boolean; allowed_repos: string[] }>("/mcp").then((r) => {
+      setEnabled(r.enabled);
+      setRepos((current) => current ?? r.allowed_repos.join("\n"));
+    }).catch((e: ApiError) => setError(e.detail));
     api<ApiToken[]>("/tokens").then(setTokens).catch(() => {});
   };
   useEffect(load, []);
@@ -704,7 +708,7 @@ function ClaudeCard({ totp }: { totp: boolean }) {
     e.preventDefault();
     run("create", async () => {
       const r = await api<{ token: string }>("/tokens", {
-        method: "POST", body: { name, write, days, password, code: totp ? code : undefined },
+        method: "POST", body: { name, scope, days, password, code: totp ? code : undefined },
       });
       if (!enabled) await api("/mcp", { method: "PUT", body: { enabled: true } });
       setCreated(r.token);
@@ -747,8 +751,9 @@ function ClaudeCard({ totp }: { totp: boolean }) {
               <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} required />
             </Label>
             <Label title={t("Access")}>
-              <Select value={write ? "write" : "read"} onChange={(e) => setWrite(e.target.value === "write")}>
+              <Select value={scope} onChange={(e) => setScope(e.target.value as "read" | "write" | "create")}>
                 <option value="write">{t("Read and act (restart, deploy, roll back)")}</option>
+                <option value="create">{t("Read, act and create apps (allowed repositories)")}</option>
                 <option value="read">{t("Read only (status, logs, health)")}</option>
               </Select>
             </Label>
@@ -769,11 +774,22 @@ function ClaudeCard({ totp }: { totp: boolean }) {
           </form>
         )}
         {enabled && <p className="text-xs text-zinc-500">{t("Endpoint")}: <span className="mono">{endpoint}</span></p>}
+        <div className="max-w-md space-y-2">
+          <Label title={t("Repositories agents may create apps from")} hint={t("One per line: Owner/Repo, or Owner/* for all of an account. Empty: no creation. Variables only a human may fill (secrets) keep the app waiting.")}>
+            <Textarea rows={3} value={repos ?? ""} onChange={(e) => setRepos(e.target.value)} placeholder="SyanCode/Indiepolis" />
+          </Label>
+          <Button disabled={!!busy || repos === null} onClick={() => run("repos", async () => {
+            const r = await api<{ allowed_repos: string[] }>("/mcp", { method: "PUT", body: { allowed_repos: (repos ?? "").split(/\s+/).filter(Boolean) } });
+            setRepos(r.allowed_repos.join("\n"));
+          })}>{busy === "repos" ? <Spinner /> : null}{t("Save")}</Button>
+        </div>
         <ul className="divide-y divide-zinc-200/80 dark:divide-white/[0.06]">
           {tokens.map((k) => (
             <li key={k.id} className="flex flex-wrap items-center gap-2 py-2.5">
               <span className="font-medium">{k.name}</span>
-              <Badge tone={k.scope === "write" ? "amber" : "sky"}>{k.scope === "write" ? t("read and act") : t("read only")}</Badge>
+              <Badge tone={k.scope === "create" ? "violet" : k.scope === "write" ? "amber" : "sky"}>
+                {k.scope === "create" ? t("creates apps") : k.scope === "write" ? t("read and act") : t("read only")}
+              </Badge>
               <span className="text-xs text-zinc-500">
                 {k.last_used ? t("used {when}", { when: timeAgo(k.last_used) }) : t("never used")} · {expiry(k)}
               </span>

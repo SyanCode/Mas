@@ -152,6 +152,7 @@ def app_payload(app: dict, db: Database) -> dict:
     data = {k: v for k, v in app.items() if k != "env"}
     data["auto_deploy"] = bool(app["auto_deploy"])
     data["pending"] = json.loads(app["pending"]) if app.get("pending") else None
+    data["pending_env"] = pending_env(app)  # names only: variables a human must fill before the first build
     data["has_env"] = bool(app["env"])
     data["instances"] = len(app_instances(app)) or 1
     data["instance_ports"] = [p for _, p in app_instances(app)]

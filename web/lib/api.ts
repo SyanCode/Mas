@@ -235,6 +235,8 @@ export interface App {
   project: string | null;
   /** Frozen app (auto_deploy off): the pushes recorded since, not built. */
   pending: { sha: string; message: string; author: string; commits: number; at: string } | null;
+  /** Created by an agent: names of the variables a human must fill before the first build. */
+  pending_env?: string[];
 }
 
 /** GET /deploy/freeze */
@@ -450,7 +452,7 @@ export function daysUntil(iso: string): number {
 export interface ApiToken {
   id: number;
   name: string;
-  scope: "read" | "write";
+  scope: "read" | "write" | "create";
   username: string;
   created_at: string;
   expires_at: number | null;
