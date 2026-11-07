@@ -159,6 +159,7 @@ def create_app(
     ip_limiter = auth.RateLimiter(max_hits=10, window_seconds=15 * 60)
     user_limiter = auth.RateLimiter(max_hits=5, window_seconds=15 * 60)
     signup_limiter = auth.RateLimiter(max_hits=5, window_seconds=3600)
+    token_limiter = auth.RateLimiter(max_hits=20, window_seconds=15 * 60)  # wrong API tokens, per IP
     session_ttl = config.session_hours * 3600
     # "__Host-" cookies are only accepted over HTTPS, for this exact host, path "/":
     # a sibling sub-domain cannot plant or overwrite the session.
@@ -302,6 +303,9 @@ def create_app(
         """Any signed-in user, CMS editors included."""
         token = request.cookies.get(cookie_name)
         if not token:
+            bearer = request.headers.get("authorization", "")
+            if bearer[:7].lower() == "bearer " and bearer[7:].strip().startswith(auth.API_TOKEN_PREFIX):
+                return token_session(request, bearer[7:].strip())
             raise HTTPException(401, "not authenticated")
         token_hash = auth.hash_token(token)
         row = db.get_session(token_hash)
@@ -318,6 +322,22 @@ def create_app(
             if not hmac.compare_digest(sent, session.csrf):
                 raise HTTPException(403, "invalid CSRF token")
         return session
+
+    def token_session(request: Request, token: str) -> SessionInfo:
+        """Personal API token (scripts, MCP agents). No cookie, so no CSRF to check."""
+        ip = client_ip(request)
+        if token_limiter.blocked(ip):
+            raise HTTPException(429, "too many attempts")
+        row = db.use_api_token(auth.hash_token(token))
+        if row is None:
+            token_limiter.hit(ip)
+            raise HTTPException(401, "invalid API token")
+        if not auth.api_token_allowed(request.url.path):
+            raise HTTPException(403, "not available with an API token")
+        if row["scope"] != "write" and request.method not in SAFE_METHODS:
+            raise HTTPException(403, "read-only API token")
+        return SessionInfo(f"token:{row['id']}", row["user_id"], f"{row['username']} (token {row['name']})",
+                           "", bool(row["totp_enabled"]), row["role"])
 
     def current_session(request: Request) -> SessionInfo:
         """Administrators only: every route that touches the server uses this one."""
