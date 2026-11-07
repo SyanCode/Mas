@@ -455,6 +455,8 @@ def token_create(
     name: Annotated[str, typer.Argument(help="What uses it, e.g. claude.")],
     user: Annotated[str, typer.Option("--user", help="Account the token acts as.")] = "admin",
     write: Annotated[bool, typer.Option("--write", help="Allow actions (restart, deploy...). Default: read-only.")] = False,
+    create: Annotated[bool, typer.Option("--create", help="--write, plus creating apps from the repositories "
+                                                          "allowed in Settings → Claude.")] = False,
     days: Annotated[int, typer.Option("--days", help="Expires after N days (0: never).")] = 90,
 ) -> None:
     """Create a token. It is shown once: Mas only keeps its hash."""
@@ -467,7 +469,7 @@ def token_create(
     name = name.strip()[:60] or "token"
     token = auth.new_api_token()
     expires = time.time() + days * 86400 if days > 0 else None
-    scope = "write" if write else "read"
+    scope = "create" if create else "write" if write else "read"
     env.db.create_api_token(name, auth.hash_token(token), account["id"], scope, expires)
     env.db.audit(actor(), "api-token-create", True, detail=f"{name} ({scope}, {user})")
     console.print(f"[green]✓[/] token [bold]{name}[/] ({scope}"
