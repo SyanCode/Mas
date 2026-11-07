@@ -137,7 +137,7 @@ $ sudo mas user 2fa [name]      # set up / replace the authenticator app
 $ sudo mas user 2fa-reset [name]  # lost phone: disable 2FA (root only)
 $ sudo mas user passwd [name]
 
-$ sudo mas token create claude [--write] [--days 90]  # API token for scripts / AI agents (shown once)
+$ sudo mas token create claude [--write|--create] [--days 90]  # API token for scripts / AI agents (shown once)
 $ sudo mas token list
 $ sudo mas token revoke <id>
 ```
@@ -156,13 +156,45 @@ turns on the `/mcp` endpoint of the dashboard, then shows the command to run on 
 $ claude mcp add --transport http mas https://mas.example.com/mcp --header "Authorization: Bearer mas_pat_…"
 ```
 
-Claude Code (or any [MCP](https://modelcontextprotocol.io) client) then gets 18 tools: `overview`
+Claude Code (or any [MCP](https://modelcontextprotocol.io) client) then gets 21 tools: `overview`
 (what runs, what needs attention), services, logs, runtime, usage, health checks, history, apps and
 build logs; and with a write token, service actions, `nginx_reload`, `deploy_app`, `rollback_app`,
-`update_app` and `apply_health_fix`. Each tool is a call to this API with the token, so the
+`update_app` and `apply_health_fix`; with a create token, `plan_app` and `create_app`. Each tool is a call to this API with the token, so the
 whitelists, `nginx -t`, automatic rollbacks and the audit log apply. Logs reach the model marked
 as untrusted data. The endpoint is off by default and answers 404 while off. Mas itself contains
 no AI: `/mcp` is only a protocol in front of the API.
+
+### Creating an app from MCP
+
+An agent can also set up a new project, without ever touching a secret. Give it a token with
+**Read, act and create apps** (`mas token create claude --create`), then list the repositories it may
+use in **Settings → Claude** (`Owner/Repo`, or `Owner/*` for a whole account; empty, the default: no
+creation). Then:
+
+```text
+plan_app(repo="SyanCode/Indiepolis", branch="main", app_id="indiepolis", domain="indiepolis.com")
+  → type node (start script), build npm ci && npm run build; variables SIGNING_SECRET, ADMIN_KEY and
+    SMTP_PASS required, the others with their default; domain free at OVH
+create_app(repo="SyanCode/Indiepolis", branch="main", app_id="indiepolis", domain="indiepolis.com")
+  → app created, waiting for SIGNING_SECRET, ADMIN_KEY, SMTP_PASS; A records of indiepolis.com and www added
+```
+
+You fill the three secrets in **Apps → indiepolis → Variables**; saving them starts the first deploy.
+The agent then deploys with `deploy_app`.
+
+- `plan_app` changes nothing: GitHub App access, detected type and default commands, the variables of
+  `.env.example` (names, description, required or not, default or not: never a value), the state of the
+  domain and every conflict.
+- `create_app` validates like the dashboard and only fills **non-secret** defaults from `.env.example`.
+  A variable without a usable value, or whose name looks secret (`PASS`, `TOKEN`, `SECRET`, `KEY`) even
+  with a value in the file, waits for a human: until then nothing is built, and `deploy_app`, pushes and
+  *Redeploy all* skip the app with the names of the missing variables.
+- **DNS**: through a connected registrar, records are added, never replaced or deleted; a name that
+  points elsewhere, a CNAME, a domain used by another app or served by another nginx site is refused.
+  Without a connected registrar, `create_app` returns the records to create (like Vercel) and
+  `domain_status` checks them; the certificate comes with the first deploy once the name resolves.
+- Never through MCP: secrets, deleting an app, a domain or a DNS record, adopting or replacing an
+  existing site. At most 5 apps per hour per token; every attempt is in the history.
 
 `<service>` is the id shown by `mas scan` (usually the domain), or any unambiguous part of it.
 
@@ -713,6 +745,9 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   server only (`mas token create`), read-only by default, expiring, revocable at once. Sent as a
   bearer header (never a cookie), so CSRF does not apply. Wrong tokens are rate limited per IP.
   Account, user, invite and token routes, environment variables and credentials refuse them.
+- **Agents (MCP)**: creating an app needs a `create` token and a repository in the allowed list
+  (empty by default). Agents never read nor write a variable value; apps they create wait for the
+  secrets a human fills in the dashboard. DNS records are only added, never replaced or deleted.
 - **Deployments**: the GitHub webhook is rejected unless its `X-Hub-Signature-256` HMAC is valid,
   before the payload is even parsed. Apps run as their own non-root user, listen on loopback, and
   get their secrets from a `0600` environment file; secrets are encrypted at rest in the database.
