@@ -38,6 +38,8 @@ app.add_typer(nginx_app, name="nginx")
 router_app = typer.Typer(help="Router port forwarding for temporary replacements (UPnP IGD).",
                          no_args_is_help=True)
 app.add_typer(router_app, name="router")
+token_app = typer.Typer(help="Personal API tokens for scripts and AI agents (MCP).", no_args_is_help=True)
+app.add_typer(token_app, name="token")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -442,6 +444,61 @@ def user_delete(ctx: typer.Context, username: Annotated[str, typer.Argument()]) 
     env.db.delete_user(username)
     env.db.audit(actor(), "user-delete", True, detail=username)
     console.print(f"[green]✓[/] user {username} deleted")
+
+
+# -- API tokens --------------------------------------------------------------------
+
+
+@token_app.command("create")
+def token_create(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="What uses it, e.g. claude.")],
+    user: Annotated[str, typer.Option("--user", help="Account the token acts as.")] = "admin",
+    write: Annotated[bool, typer.Option("--write", help="Allow actions (restart, deploy...). Default: read-only.")] = False,
+    days: Annotated[int, typer.Option("--days", help="Expires after N days (0: never).")] = 90,
+) -> None:
+    """Create a token. It is shown once: Mas only keeps its hash."""
+    import time
+
+    env: Env = ctx.obj
+    account = _get_user(env, user)
+    if account["role"] != "admin":
+        fail(f"{user} is not an administrator: its token could not reach the server routes")
+    name = name.strip()[:60] or "token"
+    token = auth.new_api_token()
+    expires = time.time() + days * 86400 if days > 0 else None
+    scope = "write" if write else "read"
+    env.db.create_api_token(name, auth.hash_token(token), account["id"], scope, expires)
+    env.db.audit(actor(), "api-token-create", True, detail=f"{name} ({scope}, {user})")
+    console.print(f"[green]✓[/] token [bold]{name}[/] ({scope}"
+                  f"{f', {days} days' if expires else ', no expiry'}). Copy it now, it will not be shown again:")
+    console.print(token, soft_wrap=True, highlight=False)
+
+
+@token_app.command("list")
+def token_list(ctx: typer.Context) -> None:
+    """List tokens (never their value)."""
+    env: Env = ctx.obj
+    rows = env.db.list_api_tokens()
+    if not rows:
+        console.print("no API token")
+        return
+    table = Table("id", "name", "scope", "user", "created", "expires", "last used")
+    for r in rows:
+        exp = datetime.fromtimestamp(r["expires_at"], timezone.utc).strftime("%Y-%m-%d") if r["expires_at"] else "never"
+        table.add_row(str(r["id"]), r["name"], r["scope"], r["username"], r["created_at"][:10], exp,
+                      (r["last_used"] or "never")[:16])
+    console.print(table)
+
+
+@token_app.command("revoke")
+def token_revoke(ctx: typer.Context, token_id: Annotated[int, typer.Argument(help="Id from `mas token list`.")]) -> None:
+    """Revoke a token immediately."""
+    env: Env = ctx.obj
+    if not env.db.delete_api_token(token_id):
+        fail(f"no token {token_id}")
+    env.db.audit(actor(), "api-token-revoke", True, detail=str(token_id))
+    console.print(f"[green]✓[/] token {token_id} revoked")
 
 
 # -- health (phase 2.5) ------------------------------------------------------------
