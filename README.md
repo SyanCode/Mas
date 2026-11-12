@@ -37,7 +37,7 @@ enough, other servers join as agents and run copies of your apps behind the same
 | 🌐 **Domains** | DNS records created at OVH, Cloudflare, Gandi, Hetzner, DigitalOcean or Porkbun, then HTTPS. |
 | 🗄️ **Supabase** | The official stack self-hosted in one click, apps connected from their repository, migrations at deploy. |
 | 📦 **Ready-made services** | Mail server, Minecraft, Uptime Kuma, Vaultwarden, n8n, Gitea or any Docker image, with nightly backups. |
-| ✏️ **CMS** | Your clients edit the texts, images and articles of their site; every save is a commit and a deploy. |
+| ✏️ **CMS** | A WordPress-style back-office for your clients: dashboard with stats, articles with drafts and scheduling, media library, history. Every save is a commit and a deploy. |
 | 📊 **Traffic** | Requests, page views and visitors per day for every site, from the nginx logs, without cookies. |
 | 🧠 **Resources** | Memory and CPU of everything on one page; memory limits, sleep when idle, instances that follow the traffic, advice applied in one click. |
 | 🛠️ **Operations** | Health checks with fixes, restart every service identical, maintenance pages, redeploy everything. |

@@ -96,6 +96,8 @@ export interface CmsField {
   integer?: boolean;
   options?: { value: string; label: string }[];
   max_kb?: number;
+  dir?: string;
+  url?: string;
   fields?: CmsField[];
   min_items?: number;
   max_items?: number;
@@ -134,14 +136,62 @@ export interface CmsCollection {
   fields: CmsField[];
   title_field: string;
   sort_field: string | null;
+  drafts: boolean;
   entries: CmsEntrySummary[];
   error: string | null;
 }
+
+export type CmsStatus = "published" | "draft" | "scheduled";
 
 export interface CmsEntry {
   slug: string;
   values: Record<string, unknown>;
   sha: string | null;
+  status?: CmsStatus;
+  publish_at?: string | null;
+}
+
+export interface TrafficDay { day: string; requests: number; pageviews: number; visitors: number }
+export interface TrafficReport {
+  days: TrafficDay[];
+  totals: { requests: number; pageviews: number; visitors: number } | null;
+  top_pages: { path: string; views: number }[];
+}
+
+export interface CmsActivity {
+  id: number;
+  at: string;
+  actor: string;
+  action: string;
+  ok: boolean;
+  detail: string | null;
+  site: string | null;
+  app_id: string | null;
+}
+
+export interface CmsDashboard {
+  sites: (CmsSite & { visits: TrafficReport | null; scheduled: { cid: string; slug: string; publish_at: string }[] })[];
+  totals: { pageviews: number; visitors: number; requests: number };
+  days: { day: string; pageviews: number; visitors: number }[];
+  scheduled: number;
+  activity: CmsActivity[];
+  editors: number | null;
+}
+
+export interface CmsOverview {
+  pages: { id: string; label: string }[];
+  collections: {
+    id: string; label: string; item_label: string; drafts: boolean; title_field: string;
+    total: number; published: number; draft: number; scheduled: number;
+    recent: CmsEntrySummary[]; error: string | null;
+  }[];
+}
+
+export interface CmsMedia {
+  items: { name: string; dir: string; value: string; size: number | null; used_in: string[] }[];
+  folders: string[];
+  max_kb: number;
+  supabase: boolean;
 }
 
 export interface CmsSite {

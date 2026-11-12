@@ -672,7 +672,7 @@ function CmsCard({ appId }: { appId: string }) {
                 <p className="text-xs text-amber-500">{t("The GitHub App can only read this repository. On GitHub: Settings → Developer settings → GitHub Apps → your Mas app → Permissions → Contents: Read and write, then accept the new permissions on the installation.")}</p>
               )}
               <div className="flex flex-wrap items-center gap-3">
-                <Link href={`/cms/edit/?app=${encodeURIComponent(appId)}`} className="inline-flex font-medium text-indigo-500 hover:underline">{t("Open the editor")} →</Link>
+                <Link href={`/cms/?app=${encodeURIComponent(appId)}`} className="inline-flex font-medium text-indigo-500 hover:underline">{t("Open the editor")} →</Link>
                 {!generating && <button className="text-xs text-zinc-500 hover:underline" onClick={() => setGenerating(true)}>{t("Regenerate {file}", { file: info.schema_file })}</button>}
               </div>
               {generating && <SchemaGenerator appId={appId} replacing onDone={() => { setGenerating(false); load(); }} />}
