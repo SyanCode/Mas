@@ -143,7 +143,7 @@ export function Stat({ label, value, hint, tone = "zinc" }: { label: string; val
     <div className="glass relative overflow-hidden rounded-2xl p-4">
       <div className={`pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-gradient-to-br ${accent} to-transparent blur-2xl`} />
       <div className="text-xs font-medium text-zinc-500">{label}</div>
-      <div className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
+      <div className="mas-figure mt-1 text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
       {hint && <div className="mt-1 text-xs text-zinc-500">{hint}</div>}
     </div>
   );

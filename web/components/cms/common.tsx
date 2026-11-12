@@ -19,7 +19,7 @@ export function StatCard({ label, value, numeric, format, trend, trendColor, tre
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[13px] font-medium text-muted-foreground">{label}</p>
-            <p className="mt-2 font-display text-[48px] leading-none tracking-[-0.02em] tabular-nums">{numeric !== undefined ? <RollingNumber value={numeric} format={fmt} /> : value}</p>
+            <p className="mt-2 text-[44px] font-light leading-none tracking-[-0.035em] tabular-nums">{numeric !== undefined ? <RollingNumber value={numeric} format={fmt} /> : value}</p>
             {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
           </div>
           <div className="text-muted-foreground/70 transition-colors group-hover:text-brand [&_svg]:size-[18px]">{icon}</div>

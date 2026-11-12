@@ -57,7 +57,7 @@ export default function SignupPage() {
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
       <Backdrop />
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-tr from-indigo-600/30 via-sky-500/20 to-fuchsia-500/30 blur-3xl" />
+      <div className="mas-halo pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-tr from-indigo-600/30 via-sky-500/20 to-fuchsia-500/30 blur-3xl" />
       <form onSubmit={submit} className="glass ring-gradient relative w-full max-w-sm animate-fade-up space-y-5 rounded-3xl p-8 shadow-[0_40px_120px_-30px_rgba(99,102,241,0.6)] dark:bg-zinc-950/60">
         <div className="flex flex-col items-center gap-3 text-center">
           <Logo className="h-12 w-12" />

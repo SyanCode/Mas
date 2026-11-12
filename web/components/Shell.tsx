@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { Activity, Database, Gauge, HeartPulse, LayoutDashboard, Menu, Newspaper, Rocket, Search, Server, Settings, type LucideIcon } from "lucide-react";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
@@ -28,21 +29,32 @@ export function Logo({ className = "h-6 w-6" }: { className?: string }) {
   );
 }
 
-const NAV = [
-  { href: "/", label: msg("Overview"), match: (p: string) => p === "/" || p.startsWith("/service") },
-  { href: "/apps/", label: msg("Apps"), match: (p: string) => p.startsWith("/apps") || p.startsWith("/projects") },
-  { href: "/databases/", label: msg("Databases"), match: (p: string) => p.startsWith("/databases") },
-  { href: "/resources/", label: msg("Resources"), match: (p: string) => p.startsWith("/resources") },
-  { href: "/cluster/", label: msg("Servers"), match: (p: string) => p.startsWith("/cluster") },
-  { href: "/health/", label: msg("Health"), match: (p: string) => p.startsWith("/health") },
-  { href: "/history/", label: msg("Activity"), match: (p: string) => p.startsWith("/history") },
-  { href: "/settings/", label: msg("Settings"), match: (p: string) => p.startsWith("/settings") },
+interface NavEntry { href: string; label: string; icon: LucideIcon; match: (p: string) => boolean }
+
+const NAV_GROUPS: { title: string; items: NavEntry[] }[] = [
+  { title: "", items: [
+    { href: "/", label: msg("Overview"), icon: LayoutDashboard, match: (p) => p === "/" || p.startsWith("/service") },
+    { href: "/apps/", label: msg("Apps"), icon: Rocket, match: (p) => p.startsWith("/apps") || p.startsWith("/projects") },
+    { href: "/databases/", label: msg("Databases"), icon: Database, match: (p) => p.startsWith("/databases") },
+  ] },
+  { title: msg("Server"), items: [
+    { href: "/resources/", label: msg("Resources"), icon: Gauge, match: (p) => p.startsWith("/resources") },
+    { href: "/cluster/", label: msg("Servers"), icon: Server, match: (p) => p.startsWith("/cluster") },
+    { href: "/health/", label: msg("Health"), icon: HeartPulse, match: (p) => p.startsWith("/health") },
+    { href: "/history/", label: msg("Activity"), icon: Activity, match: (p) => p.startsWith("/history") },
+  ] },
+  { title: msg("Content"), items: [
+    { href: "/cms/", label: msg("CMS"), icon: Newspaper, match: (p) => p.startsWith("/cms") },
+  ] },
+  { title: msg("Account"), items: [
+    { href: "/settings/", label: msg("Settings"), icon: Settings, match: (p) => p.startsWith("/settings") },
+  ] },
 ];
 
 // CMS editors (client accounts) only see their sites and their own account.
-const EDITOR_NAV = [
-  { href: "/cms/", label: msg("My sites"), match: (p: string) => p.startsWith("/cms") },
-  { href: "/settings/", label: msg("Account"), match: (p: string) => p.startsWith("/settings") },
+const EDITOR_NAV: NavEntry[] = [
+  { href: "/cms/", label: msg("My sites"), icon: Newspaper, match: (p) => p.startsWith("/cms") },
+  { href: "/settings/", label: msg("Account"), icon: Settings, match: (p) => p.startsWith("/settings") },
 ];
 const EDITOR_PATHS = ["/cms", "/settings"];
 
@@ -88,88 +100,19 @@ function UserMenu({ session }: { session: Session }) {
   );
 }
 
-type NavItem = (typeof NAV)[number];
-
-/** The tabs that fit in the header, the others in "More": measured, so it holds with every theme and font. */
-function PriorityNav({ items, pathname }: { items: NavItem[]; pathname: string }) {
-  const t = useT();
-  const box = useRef<HTMLDivElement>(null);
-  const ruler = useRef<HTMLDivElement>(null);
-  const [shown, setShown] = useState(items.length);
-  const [open, setOpen] = useState(false);
-
-  useLayoutEffect(() => {
-    const fit = () => {
-      if (!box.current || !ruler.current) return;
-      const widths = [...ruler.current.children].map((c) => (c as HTMLElement).offsetWidth);
-      const moreWidth = widths.pop() ?? 0;
-      const room = box.current.clientWidth;
-      let used = widths.reduce((a, b) => a + b, 0);
-      if (used <= room) return setShown(widths.length);
-      let n = widths.length;
-      while (n > 0 && used + moreWidth > room) used -= widths[--n];
-      setShown(n);
-    };
-    fit();
-    const observer = new ResizeObserver(fit);
-    if (box.current) observer.observe(box.current);
-    if (ruler.current) observer.observe(ruler.current);  // a theme with another font
-    document.fonts?.ready.then(fit).catch(() => {});
-    return () => observer.disconnect();
-  }, [items, t]);
-
-  useEffect(() => setOpen(false), [pathname]);
-
-  const tab = (active: boolean) => `relative flex shrink-0 items-center whitespace-nowrap px-3 text-[13px] transition ${active ? "font-medium text-zinc-900 dark:text-white" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"}`;
-  const line = <span className="mas-accent-line absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-gradient-to-r from-indigo-400 via-sky-400 to-fuchsia-400" />;
-  const hidden = items.slice(shown);
-  const hiddenActive = hidden.find((i) => i.match(pathname));
-  return (
-    <div ref={box} className="relative hidden h-14 min-w-0 flex-1 md:block">
-      <div ref={ruler} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 flex h-0 overflow-hidden">
-        {items.map((item) => <span key={item.href} className={tab(true)}>{t(item.label)}</span>)}
-        <span className={tab(true)}>{t("More")} ▾</span>
-      </div>
-      <nav className="-mb-px flex h-14 items-stretch">
-        {items.slice(0, shown).map((item) => {
-          const active = item.match(pathname);
-          return <Link key={item.href} href={item.href} className={tab(active)}>{t(item.label)}{active && line}</Link>;
-        })}
-        {hidden.length > 0 && (
-          <div className="relative flex" onMouseLeave={() => setOpen(false)}>
-            <button type="button" onClick={() => setOpen((o) => !o)} className={tab(!!hiddenActive)} aria-expanded={open}>
-              {hiddenActive ? t(hiddenActive.label) : t("More")} ▾{hiddenActive && line}
-            </button>
-            {open && (
-              <div className="panel absolute left-0 top-12 z-40 min-w-44 rounded-xl p-1">
-                {hidden.map((item) => (
-                  <Link key={item.href} href={item.href}
-                    className={`block whitespace-nowrap rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06] ${item.match(pathname) ? "font-medium" : ""}`}>
-                    {t(item.label)}
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </nav>
-    </div>
-  );
-}
-
 export function Backdrop() {
   return <div className="mas-backdrop" aria-hidden />;
 }
 
-/** Authenticated layout: loads the session, then renders the page. */
+/** Authenticated layout: a sidebar shared by the whole dashboard (the CMS has the same), then the page. */
 export function Shell({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [palette, setPalette] = useState(false);
+  const [drawer, setDrawer] = useState(false);
   const t = useT();
   const pathname = usePathname();
   const router = useRouter();
   const editor = session?.role === "editor";
-  const nav = editor ? EDITOR_NAV : NAV;
 
   useEffect(() => {
     api<Session>("/session").then((s) => {
@@ -177,6 +120,8 @@ export function Shell({ children }: { children: ReactNode }) {
       setSession(s);
     }).catch(() => {});
   }, []);
+
+  useEffect(() => setDrawer(false), [pathname]);
 
   useEffect(() => {
     if (editor && !EDITOR_PATHS.some((p) => pathname.startsWith(p))) router.replace("/cms/");
@@ -207,41 +152,74 @@ export function Shell({ children }: { children: ReactNode }) {
     <SessionContext.Provider value={session}>
       <Backdrop />
       <div className="min-h-screen">
-        <header className="mas-header sticky top-0 z-30 border-b border-zinc-200/70 bg-white/60 backdrop-blur-xl dark:border-white/[0.06] dark:bg-[#050608]/60">
-          <div className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:gap-6">
-            <Link href={editor ? "/cms/" : "/"} className="flex shrink-0 items-center gap-2.5">
-              <Logo />
-              <span className="text-[15px] font-semibold tracking-tight">mas</span>
-            </Link>
-            <PriorityNav items={nav} pathname={pathname} />
+        <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 lg:block"><SideNav editor={editor} pathname={pathname} version={session.version} /></aside>
+        {drawer && (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDrawer(false)} />
+            <aside className="absolute inset-y-0 left-0 w-64"><SideNav editor={editor} pathname={pathname} version={session.version} /></aside>
+          </div>
+        )}
+        <div className="lg:pl-60">
+          <header className="mas-header sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-zinc-200/70 px-5 backdrop-blur-xl sm:px-8 dark:border-white/[0.06]">
+            <button type="button" onClick={() => setDrawer(true)} aria-label={t("Menu")} className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-900/[0.05] lg:hidden dark:text-zinc-300 dark:hover:bg-white/[0.07]">
+              <Menu className="size-5" />
+            </button>
+            <Link href={editor ? "/cms/" : "/"} className="flex items-center gap-2 lg:hidden"><Logo /><span className="text-[15px] font-semibold tracking-tight">mas</span></Link>
             <div className="ml-auto flex shrink-0 items-center gap-3">
               {!session.totp_enabled && (
-                <Link href="/settings/" className="hidden whitespace-nowrap rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-xs text-amber-600 xl:inline dark:text-amber-300">
+                <Link href="/settings/" className="hidden whitespace-nowrap rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-xs text-amber-600 sm:inline dark:text-amber-300">
                   {t("Enable 2FA")}
                 </Link>
               )}
               {!editor && <button
                 onClick={() => setPalette(true)}
-                className="glass hidden h-8 items-center gap-6 whitespace-nowrap rounded-lg px-3 text-xs text-zinc-500 transition hover:text-zinc-800 sm:flex dark:hover:text-zinc-200"
+                className="glass hidden h-9 items-center gap-8 whitespace-nowrap rounded-lg px-3 text-xs text-zinc-500 transition hover:text-zinc-800 sm:flex dark:hover:text-zinc-200"
                 title={t("Search…")}
               >
-                <span className="hidden lg:inline">{t("Search…")}</span>
+                <span className="flex items-center gap-2"><Search className="size-3.5" />{t("Search…")}</span>
                 <Kbd>⌘K</Kbd>
               </button>}
               <UserMenu session={session} />
             </div>
-          </div>
-          <nav className="no-scrollbar flex gap-1 overflow-x-auto px-4 pb-2 md:hidden">
-            {nav.map((item) => (
-              <Link key={item.href} href={item.href} className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-xs ${item.match(pathname) ? "bg-zinc-200 dark:bg-white/10" : "text-zinc-500"}`}>
-                {t(item.label)}
-              </Link>
-            ))}
-          </nav>
-        </header>
-        <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">{children}</main>
+          </header>
+          <main className="mx-auto max-w-6xl px-5 py-10 sm:px-10">{children}</main>
+        </div>
       </div>
       {!editor && <CommandPalette open={palette} onClose={() => setPalette(false)} />}
     </SessionContext.Provider>
+  );
+}
+
+function SideLink({ href, active, icon: Icon, children }: { href: string; active: boolean; icon: LucideIcon; children: ReactNode }) {
+  return (
+    <Link href={href}
+      className={`group flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] transition ${active
+        ? "bg-zinc-900/[0.05] font-medium text-zinc-900 dark:bg-white/[0.08] dark:text-white"
+        : "text-zinc-500 hover:bg-zinc-900/[0.04] hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/[0.05] dark:hover:text-white"}`}>
+      <Icon className={`size-4 shrink-0 transition ${active ? "text-indigo-500" : "opacity-70 group-hover:opacity-100"}`} />
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+    </Link>
+  );
+}
+
+function SideNav({ editor, pathname, version }: { editor: boolean; pathname: string; version: string }) {
+  const t = useT();
+  const groups = editor ? [{ title: "", items: EDITOR_NAV }] : NAV_GROUPS;
+  return (
+    <div className="flex h-full flex-col border-r border-zinc-200/70 bg-[var(--bg)] dark:border-white/[0.06]">
+      <Link href={editor ? "/cms/" : "/"} className="flex h-16 shrink-0 items-center gap-2.5 px-5">
+        <Logo className="h-7 w-7" />
+        <span className="text-[17px] font-semibold tracking-tight">mas</span>
+      </Link>
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+        {groups.map((g, i) => (
+          <div key={i} className="space-y-0.5">
+            {g.title && <div className="px-3 pb-1.5 pt-6 text-[10.5px] font-medium uppercase tracking-[0.12em] text-zinc-400">{t(g.title)}</div>}
+            {g.items.map((item) => <SideLink key={item.href} href={item.href} icon={item.icon} active={item.match(pathname)}>{t(item.label)}</SideLink>)}
+          </div>
+        ))}
+      </nav>
+      <div className="border-t border-zinc-200/70 px-5 py-3 text-[11px] text-zinc-400 dark:border-white/[0.06]">Mas v{version}</div>
+    </div>
   );
 }
