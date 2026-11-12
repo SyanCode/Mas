@@ -46,6 +46,17 @@ class SaveBody(BaseModel):
     values: dict
     sha: str | None = Field(default=None, max_length=64)  # blob sha the editor started from
     note: str = Field(default="", max_length=200)
+    status: str | None = Field(default=None, max_length=20)  # collections with drafts
+    publish_at: str | None = Field(default=None, max_length=20)  # UTC, YYYY-MM-DDTHH:MM
+
+
+class StatusBody(BaseModel):
+    status: str = Field(max_length=20)
+    publish_at: str | None = Field(default=None, max_length=20)
+
+
+class MediaRef(BaseModel):
+    value: str = Field(max_length=500)
 
 
 class RepoRef(BaseModel):
@@ -63,6 +74,8 @@ class NewEntryBody(BaseModel):
     values: dict
     slug: str | None = Field(default=None, max_length=80)  # address wanted, otherwise from the title
     note: str = Field(default="", max_length=200)
+    status: str | None = Field(default=None, max_length=20)
+    publish_at: str | None = Field(default=None, max_length=20)
 
 
 def register(app: FastAPI, *, db: Database, any_session: Callable, current_session: Callable,
@@ -274,12 +287,13 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         return result
 
     async def save_entry(s, app_id: str, cid: str, slug: str | None, values: dict, sha: str | None, note: str,
-                         new_slug: str | None = None) -> dict:
+                         new_slug: str | None = None, status: str | None = None,
+                         publish_at: str | None = None) -> dict:
         site(s, app_id)
         what = f"{cid}/{slug or new_slug or 'new'}"
         try:
             result = await asyncio.to_thread(call, manager.save_entry, app_id, cid, slug, values, sha, s.user_id,
-                                             s.username, note, new_slug)
+                                             s.username, note, new_slug, status, publish_at)
         except HTTPException as exc:
             db.audit(s.username, "cms-save", False, service_id=app_id, detail=f"{what}: {exc.detail}"[:500])
             raise
@@ -295,11 +309,101 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.post("/api/cms/sites/{app_id}/collections/{cid}/entries")
     async def create_entry(app_id: str, cid: str, body: NewEntryBody, s=Depends(any_session)) -> dict:
-        return await save_entry(s, app_id, cid, None, body.values, None, body.note, (body.slug or "").strip() or None)
+        return await save_entry(s, app_id, cid, None, body.values, None, body.note, (body.slug or "").strip() or None,
+                                 body.status, body.publish_at)
 
     @app.put("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}")
     async def update_entry(app_id: str, cid: str, slug: str, body: SaveBody, s=Depends(any_session)) -> dict:
-        return await save_entry(s, app_id, cid, slug, body.values, body.sha, body.note)
+        return await save_entry(s, app_id, cid, slug, body.values, body.sha, body.note, None, body.status,
+                                body.publish_at)
+
+    @app.post("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}/status")
+    async def entry_status(app_id: str, cid: str, slug: str, body: StatusBody, s=Depends(any_session)) -> dict:
+        """Publish, unpublish or schedule an entry from the list, without opening it."""
+        site(s, app_id)
+        try:
+            result = await asyncio.to_thread(call, manager.set_status, app_id, cid, slug, body.status,
+                                             body.publish_at, s.username)
+        except HTTPException as exc:
+            db.audit(s.username, "cms-status", False, service_id=app_id, detail=f"{cid}/{slug}: {exc.detail}"[:500])
+            raise
+        db.audit(s.username, "cms-status", True, service_id=app_id,
+                 detail=f"{cid}/{slug}: {body.status} → {(result['commit'] or '')[:8]}")
+        return result
+
+    # -- back-office: dashboard, activity, media ----------------------------------
+
+    def visible_apps(s) -> list[dict]:
+        apps = db.list_apps() if s.role == "admin" else [a for a in (db.get_app(i) for i in db.user_apps(s.user_id)) if a]
+        return [a for a in apps if a["repo"] and a["installation_id"]]
+
+    @app.get("/api/cms/dashboard")
+    async def dashboard(s=Depends(any_session)) -> dict:
+        """One card per site: visits of the last 7 days, last deployment, scheduled entries."""
+        apps = visible_apps(s)
+        scheduled = db.cms_scheduled([a["id"] for a in apps])
+
+        def one(a: dict) -> dict:
+            report = stats.report(a, 7) if stats is not None and a["domain"] else None
+            return {**site_payload(a), "visits": report, "scheduled": [r for r in scheduled if r["app_id"] == a["id"]]}
+        sites_ = await asyncio.gather(*(asyncio.to_thread(one, a) for a in apps))
+        names = {a["id"]: a["name"] for a in apps}
+        activity = [dict(r) | {"site": names.get(r["service_id"])} for r in db.cms_activity(list(names), 12)]
+        totals = {k: sum((x["visits"] or {}).get("totals", {}).get(k, 0) for x in sites_ if x["visits"])
+                  for k in ("pageviews", "visitors", "requests")}
+        daily: dict[str, dict] = {}
+        for x in sites_:
+            for d in (x["visits"] or {}).get("days", []):
+                row = daily.setdefault(d["day"], {"day": d["day"], "pageviews": 0, "visitors": 0})
+                row["pageviews"] += d["pageviews"]
+                row["visitors"] += d["visitors"]
+        return {"sites": sites_, "totals": totals, "days": sorted(daily.values(), key=lambda r: r["day"]),
+                "scheduled": len(scheduled), "activity": activity,
+                "editors": len([u for u in db.list_users() if u["role"] == "editor"]) if s.role == "admin" else None}
+
+    @app.get("/api/cms/activity")
+    def activity(app_id: str | None = Query(None, max_length=100), limit: int = Query(100, ge=1, le=500),
+                 s=Depends(any_session)) -> list[dict]:
+        apps = visible_apps(s)
+        ids = [a["id"] for a in apps if app_id in (None, a["id"])]
+        names = {a["id"]: a["name"] for a in apps}
+        rows = db.cms_activity(ids, limit)
+        if s.role == "admin" and app_id is None:  # accounts and access changes have no site
+            rows = sorted(rows + [r for r in db.cms_activity(None, limit) if not r["service_id"]],
+                          key=lambda r: -r["id"])[:limit]
+        return [{"id": r["id"], "at": r["at"], "actor": r["actor"], "action": r["action"], "ok": r["ok"],
+                 "detail": r["detail"], "site": names.get(r["service_id"]), "app_id": r["service_id"]} for r in rows]
+
+    @app.get("/api/cms/sites/{app_id}/overview")
+    async def overview(app_id: str, s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        return await asyncio.to_thread(call, manager.overview, app_id)
+
+    @app.get("/api/cms/sites/{app_id}/media")
+    async def media(app_id: str, s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        return await asyncio.to_thread(call, manager.media, app_id)
+
+    @app.post("/api/cms/sites/{app_id}/media")
+    async def media_add(app_id: str, request: Request, folder: str = Query(max_length=300),
+                        name: str = Query("image", max_length=200), s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        limit = MAX_UPLOAD_KB * 1024
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > limit:
+                raise HTTPException(413, f"image larger than {MAX_UPLOAD_KB // 1024} MB")
+        result = await asyncio.to_thread(call, manager.add_media, app_id, folder, name, bytes(data), s.username)
+        db.audit(s.username, "cms-media", True, service_id=app_id, detail=f"add {result['name']}")
+        return result
+
+    @app.post("/api/cms/sites/{app_id}/media/delete")
+    async def media_delete(app_id: str, body: MediaRef, s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        result = await asyncio.to_thread(call, manager.delete_media, app_id, body.value, s.username)
+        db.audit(s.username, "cms-media", True, service_id=app_id, detail=f"delete {body.value.rsplit('/', 1)[-1]}")
+        return result
 
     @app.delete("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}")
     async def delete_entry(app_id: str, cid: str, slug: str, sha: str = Query(max_length=64),

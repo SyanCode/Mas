@@ -146,7 +146,7 @@ class GitHubApp:
             raise
         if not isinstance(items, list):
             return []
-        return [{"name": i["name"], "path": i["path"], "sha": i["sha"]} for i in items if i.get("type") == "file"]
+        return [{"name": i["name"], "path": i["path"], "sha": i["sha"], "size": i.get("size")} for i in items if i.get("type") == "file"]
 
     def read_file(self, installation_id: int, repo: str, path: str, ref: str) -> tuple[bytes | None, str | None]:
         """(content, blob sha) of a file, (None, None) when it does not exist."""

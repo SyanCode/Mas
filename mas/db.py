@@ -152,6 +152,13 @@ CREATE TABLE IF NOT EXISTS site_stats (      -- daily totals read from nginx acc
     updated_at TEXT NOT NULL,
     PRIMARY KEY (app_id, day)
 );
+CREATE TABLE IF NOT EXISTS cms_schedule (    -- entries waiting for their publication date (CMS drafts)
+    app_id TEXT NOT NULL,
+    cid TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    publish_at TEXT NOT NULL,                  -- UTC, YYYY-MM-DDTHH:MM
+    PRIMARY KEY (app_id, cid, slug)
+);
 CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday (hashes): counted once per day
     app_id TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -730,6 +737,40 @@ class Database:
         with self.tx() as c:
             c.execute("UPDATE apps SET project = NULL WHERE project = ?", (project_id,))
             c.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+    # -- CMS schedule and activity ---------------------------------------
+
+    def cms_schedule_set(self, app_id: str, cid: str, slug: str, publish_at: str | None) -> None:
+        with self.tx() as c:
+            if publish_at is None:
+                c.execute("DELETE FROM cms_schedule WHERE app_id = ? AND cid = ? AND slug = ?", (app_id, cid, slug))
+            else:
+                c.execute("INSERT INTO cms_schedule (app_id, cid, slug, publish_at) VALUES (?, ?, ?, ?) "
+                          "ON CONFLICT(app_id, cid, slug) DO UPDATE SET publish_at = excluded.publish_at",
+                          (app_id, cid, slug, publish_at))
+
+    def cms_schedule_due(self, now: str) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute(
+                "SELECT * FROM cms_schedule WHERE publish_at <= ? ORDER BY publish_at", (now,))]
+
+    def cms_scheduled(self, app_ids: list[str] | None = None) -> list[dict]:
+        with self.tx() as c:
+            rows = [dict(r) for r in c.execute("SELECT * FROM cms_schedule ORDER BY publish_at")]
+        return rows if app_ids is None else [r for r in rows if r["app_id"] in app_ids]
+
+    def cms_activity(self, app_ids: list[str] | None, limit: int = 100) -> list[dict]:
+        """CMS changes (saves, deletions, publications), newest first; ``app_ids`` None: every site."""
+        sql = "SELECT * FROM audit_log WHERE (action LIKE 'cms-%' OR action LIKE 'editor-%')"
+        args: list = []
+        if app_ids is not None:
+            if not app_ids:
+                return []
+            sql += f" AND service_id IN ({','.join('?' * len(app_ids))})"
+            args += app_ids
+        with self.tx() as c:
+            rows = c.execute(sql + " ORDER BY id DESC LIMIT ?", (*args, limit)).fetchall()
+        return [dict(r) | {"ok": bool(r["ok"])} for r in rows]
 
     def history(self, service_id: str | None = None, limit: int = 100) -> list[dict]:
         sql, args = "SELECT * FROM audit_log", []
