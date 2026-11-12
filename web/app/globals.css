@@ -307,6 +307,75 @@ pre,
 :root.dark[data-style="paper"] .mas-header { background: rgba(23, 20, 18, 0.85); }
 [data-style="paper"] .mas-accent-line { background: var(--color-indigo-500); }
 
+/* Studio: warm paper and ink, one indigo accent, Geist, serif titles, cards that float on soft shadows.
+   The default style; the same identity as the CMS back-office (.cms tokens below). */
+:root[data-style="studio"] {
+  --bg: #f6f5f1;
+  --grid: transparent;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.125rem;
+  --color-zinc-50: #faf9f6; --color-zinc-100: #efede7; --color-zinc-200: #e6e3da; --color-zinc-300: #d9d5ca;
+  --color-zinc-400: #a8a69d; --color-zinc-500: #77746b; --color-zinc-600: #5a5850; --color-zinc-700: #3d3b35;
+  --color-zinc-800: #26251f; --color-zinc-900: #17171a; --color-zinc-950: #101011;
+  --color-indigo-300: #b9b9f2; --color-indigo-400: #8b8bf0; --color-indigo-500: #5b5bd6; --color-indigo-600: #4a4ac2;
+  --color-sky-300: #c4c4f5; --color-sky-400: #9d9df2; --color-sky-500: #6a6ae0; --color-sky-600: #5555cf;
+  --color-fuchsia-400: #9d9df2; --color-fuchsia-500: #6a6ae0;
+  --color-violet-300: #c4c4f5; --color-violet-400: #9d9df2; --color-violet-500: #6a6ae0;
+}
+:root.dark[data-style="studio"] {
+  --bg: #0c0c0d;
+  --color-zinc-950: #0c0c0d;
+  --color-indigo-400: #8b8bf0; --color-indigo-500: #8b8bf0; --color-indigo-600: #a3a3f5;
+}
+[data-style="studio"] body { font-feature-settings: "ss01", "cv11"; }
+[data-style="studio"] .mas-backdrop { display: none; }
+[data-style="studio"] .glass {
+  @apply backdrop-blur-none;
+  background: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.045), 0 1px 2px rgb(0 0 0 / 0.04), 0 16px 36px -20px rgb(0 0 0 / 0.14);
+}
+:root.dark[data-style="studio"] .glass { background: #141415; box-shadow: 0 0 0 1px rgb(255 255 255 / 0.07); }
+[data-style="studio"] .panel {
+  background: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 0 1px var(--color-zinc-200), 0 24px 60px -16px rgb(0 0 0 / 0.3);
+}
+:root.dark[data-style="studio"] .panel { background: #181819; box-shadow: 0 0 0 1px #2a2a2d, 0 24px 60px -16px rgb(0 0 0 / 0.6); }
+[data-style="studio"] .mas-cta { background: #17171a; color: #fafaf8; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14), 0 1px 2px rgb(0 0 0 / 0.25); }
+:root.dark[data-style="studio"] .mas-cta { background: #f3f2ed; color: #121213; box-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }
+[data-style="studio"] .mas-header { background: rgb(246 245 241 / 0.78); }
+:root.dark[data-style="studio"] .mas-header { background: rgb(12 12 13 / 0.78); }
+[data-style="studio"] .mas-accent-line { background: var(--color-indigo-500); }
+[data-style="studio"] .text-gradient { background: none; color: inherit; -webkit-text-fill-color: currentColor; }
+[data-style="studio"] h1 {
+  font-family: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  font-weight: 400 !important;
+  font-size: 2.6rem !important;
+  line-height: 1.05 !important;
+  letter-spacing: -0.02em !important;
+}
+[data-style="studio"] .blur-2xl, [data-style="studio"] .blur-3xl, [data-style="studio"] .mas-halo, [data-style="studio"] .ring-gradient::before { display: none; }
+[data-style="studio"] .mas-figure { font-weight: 300; letter-spacing: -0.035em; font-size: 2.4rem; line-height: 1.1; }
+/* Fields: filled, no heavy border, a soft indigo ring on focus. */
+[data-style="studio"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+[data-style="studio"] textarea,
+[data-style="studio"] select {
+  background-color: var(--color-zinc-100);
+  border-color: transparent;
+  border-radius: 0.65rem;
+}
+:root.dark[data-style="studio"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+:root.dark[data-style="studio"] textarea,
+:root.dark[data-style="studio"] select { background-color: #1b1b1d; }
+[data-style="studio"] input:focus, [data-style="studio"] textarea:focus, [data-style="studio"] select:focus {
+  background-color: #ffffff;
+  border-color: color-mix(in srgb, var(--color-indigo-500) 40%, transparent);
+}
+:root.dark[data-style="studio"] input:focus, :root.dark[data-style="studio"] textarea:focus, :root.dark[data-style="studio"] select:focus { background-color: #141415; }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

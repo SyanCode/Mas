@@ -11,7 +11,7 @@ import { msg } from "@/lib/i18n";
 
 export type Mode = "dark" | "light" | "system";
 export type Layout = "cards" | "bento" | "list";
-export type StyleId = "aurora" | "geist" | "bento" | "terminal" | "nord" | "paper";
+export type StyleId = "studio" | "aurora" | "geist" | "bento" | "terminal" | "nord" | "paper";
 
 export interface ThemeStyle {
   id: StyleId;
@@ -27,6 +27,8 @@ export interface ThemeStyle {
 }
 
 export const STYLES: ThemeStyle[] = [
+  { id: "studio", label: msg("Studio"), description: msg("Warm paper, ink and serif titles. The new Mas."), layout: "cards", banner: false,
+    swatch: { bg: "#f6f5f1", surface: "#ffffff", text: "#17171a", accents: ["#17171a", "#5b5bd6", "#2f9e6f"] } },
   { id: "aurora", label: msg("Aurora"), description: msg("Glass and soft glowing gradients. The original Mas."), layout: "cards", banner: true,
     swatch: { bg: "#050608", surface: "#11131a", text: "#f4f4f5", accents: ["#818cf8", "#38bdf8", "#e879f9"] } },
   { id: "geist", label: msg("Geist"), description: msg("Black and white, sharp and quiet, like Vercel."), layout: "cards", banner: false,
@@ -47,7 +49,7 @@ const MODE_KEY = "mas-theme";  // the dark / light / system choice, kept under i
 const isStyle = (v: string | null): v is StyleId => STYLES.some((s) => s.id === v);
 
 /** Runs before the first paint (layout.tsx) so the page never flashes another theme. */
-export const themeScript = `try{var s=localStorage.getItem("${STYLE_KEY}")||"aurora";var f={terminal:"dark"}[s];var t=f||localStorage.getItem("${MODE_KEY}")||"dark";var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);var e=document.documentElement;e.classList.toggle("dark",d);e.dataset.style=s}catch(e){}`;
+export const themeScript = `try{var s=localStorage.getItem("${STYLE_KEY}")||"studio";var f={terminal:"dark"}[s];var t=f||localStorage.getItem("${MODE_KEY}")||"dark";var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);var e=document.documentElement;e.classList.toggle("dark",d);e.dataset.style=s}catch(e){}`;
 
 function apply(style: ThemeStyle, mode: Mode) {
   const forced = style.mode;
@@ -79,7 +81,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       saved = localStorage.getItem(STYLE_KEY);
       setModeState((localStorage.getItem(MODE_KEY) as Mode) || "dark");
     } catch {}
-    setStyleId(isStyle(saved) ? saved : "aurora");
+    setStyleId(isStyle(saved) ? saved : "studio");
   }, []);
 
   useEffect(() => {
