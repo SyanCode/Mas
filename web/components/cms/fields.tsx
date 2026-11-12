@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
-import { ArrowDown, ArrowUp, ImagePlus, Library, Plus, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, Bold, Code, Heading2, Heading3, ImagePlus, Italic, Library, Link2, List, ListOrdered, Plus, Quote, Trash2, Upload, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/cms/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/cms/ui/dialog";
 import { Input, Textarea } from "@/components/cms/ui/input";
+import { FormItem } from "@/components/cms/ui/form-item";
 import { Label } from "@/components/cms/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Switch } from "@/components/cms/ui/switch";
@@ -45,11 +46,11 @@ function Counter({ value, max }: { value: string; max?: number }) {
 
 function Field({ title, hint, extra, children }: { title: string; hint?: ReactNode; extra?: ReactNode; children: ReactNode }) {
   return (
-    <div className="space-y-1.5">
+    <FormItem>
       <div className="flex items-center justify-between gap-2"><Label>{title}</Label>{extra}</div>
       {children}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
+    </FormItem>
   );
 }
 
@@ -141,19 +142,69 @@ function ImageInput({ appId, field, value, onChange, previews, addPreview }: Inp
   );
 }
 
-function MarkdownInput({ field, text, onChange }: { field: CmsField; text: string; onChange: (v: string) => void }) {
+/** Markdown with a toolbar (bold, italic, headings, lists, quote, link, image from the library) and a preview. */
+function MarkdownInput({ appId, field, text, onChange }: { appId: string; field: CmsField; text: string; onChange: (v: string) => void }) {
   const t = useT();
+  const area = useRef<HTMLTextAreaElement>(null);
+  const [library, setLibrary] = useState(false);
+
+  /** Wrap the selection (or insert the placeholder) and put the cursor back on it. */
+  function wrap(before: string, after = "", placeholder = "") {
+    const el = area.current;
+    if (!el) return;
+    const { selectionStart: a, selectionEnd: b } = el;
+    const chosen = text.slice(a, b) || placeholder;
+    onChange(text.slice(0, a) + before + chosen + after + text.slice(b));
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(a + before.length, a + before.length + chosen.length); });
+  }
+  /** Prefix every selected line (lists, headings, quotes). */
+  function prefix(mark: (i: number) => string) {
+    const el = area.current;
+    if (!el) return;
+    const start = text.lastIndexOf("\n", el.selectionStart - 1) + 1;
+    let end = text.indexOf("\n", el.selectionEnd);
+    if (end === -1) end = text.length;
+    const lines = text.slice(start, end).split("\n").map((l, i) => mark(i) + l);
+    onChange(text.slice(0, start) + lines.join("\n") + text.slice(end));
+    requestAnimationFrame(() => el.focus());
+  }
+  const tools: [typeof Bold, string, () => void][] = [
+    [Bold, t("Bold"), () => wrap("**", "**", t("bold text"))],
+    [Italic, t("Italic"), () => wrap("*", "*", t("italic text"))],
+    [Heading2, t("Heading"), () => prefix(() => "## ")],
+    [Heading3, t("Subheading"), () => prefix(() => "### ")],
+    [List, t("Bulleted list"), () => prefix(() => "- ")],
+    [ListOrdered, t("Numbered list"), () => prefix((i) => `${i + 1}. `)],
+    [Quote, t("Quote"), () => prefix(() => "> ")],
+    [Code, t("Code"), () => wrap("`", "`", "code")],
+    [Link2, t("Link"), () => wrap("[", "](https://)", t("link text"))],
+  ];
   return (
-    <Field title={`${field.label}${field.required ? " *" : ""}`} extra={<Counter value={text} max={field.max} />} hint={field.help || t("Markdown: **bold**, *italic*, [link](https://…), blank line = new paragraph")}>
+    <Field title={`${field.label}${field.required ? " *" : ""}`} extra={<Counter value={text} max={field.max} />} hint={field.help}>
       <Tabs defaultValue="write">
-        <TabsList className="h-8"><TabsTrigger value="write" className="py-0.5">{t("Write")}</TabsTrigger><TabsTrigger value="preview" className="py-0.5">{t("Preview")}</TabsTrigger></TabsList>
-        <TabsContent value="write"><Textarea value={text} maxLength={field.max} placeholder={field.placeholder} rows={14} className="font-mono text-[13px]" onChange={(e) => onChange(e.target.value)} /></TabsContent>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TabsList className="h-8"><TabsTrigger value="write" className="py-0.5">{t("Write")}</TabsTrigger><TabsTrigger value="preview" className="py-0.5">{t("Preview")}</TabsTrigger></TabsList>
+          <div className="flex flex-wrap gap-0.5" role="toolbar" aria-label={t("Formatting")}>
+            {tools.map(([Icon, label, run]) => <Button key={label} type="button" variant="ghost" size="icon" className="size-8" title={label} aria-label={label} onClick={run}><Icon /></Button>)}
+            <Button type="button" variant="ghost" size="icon" className="size-8" title={t("Image from the library")} aria-label={t("Image from the library")} onClick={() => setLibrary(true)}><ImageIcon /></Button>
+          </div>
+        </div>
+        <TabsContent value="write">
+          <Textarea ref={area} aria-label={field.label} value={text} maxLength={field.max} placeholder={field.placeholder} rows={14} className="font-mono text-[13px]" onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") { e.preventDefault(); wrap("**", "**", t("bold text")); }
+              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") { e.preventDefault(); wrap("*", "*", t("italic text")); }
+            }} />
+        </TabsContent>
         <TabsContent value="preview">
-          <div className="prose-cms min-h-40 rounded-md border bg-background p-4 text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:mb-3 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted [&_pre]:p-3">
-            {text.trim() ? <Markdown>{text}</Markdown> : <p className="text-muted-foreground">{t("Nothing to preview.")}</p>}
+          <div className="prose-cms min-h-40 rounded-md border bg-background p-4 text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold [&_img]:max-h-64 [&_li]:ml-5 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:mb-3 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted [&_pre]:p-3">
+            {text.trim() ? <Markdown components={{ img: ({ src, alt }) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img alt={alt ?? ""} src={typeof src === "string" && src.startsWith("/") ? imageUrl(appId, src) : typeof src === "string" ? src : undefined} />) }}>{text}</Markdown> : <p className="text-muted-foreground">{t("Nothing to preview.")}</p>}
           </div>
         </TabsContent>
       </Tabs>
+      <MediaPicker appId={appId} open={library} onClose={() => setLibrary(false)} onPick={(value) => wrap(`![`, `](${value})`, t("description"))} />
     </Field>
   );
 }
@@ -175,7 +226,7 @@ export function FieldInput(props: InputProps) {
     case "textarea":
       return <Field title={title} hint={hint} extra={<Counter value={text} max={field.max} />}><Textarea value={text} maxLength={field.max} placeholder={field.placeholder} rows={4} onChange={(e) => onChange(e.target.value)} /></Field>;
     case "markdown":
-      return <MarkdownInput field={field} text={text} onChange={onChange} />;
+      return <MarkdownInput appId={props.appId} field={field} text={text} onChange={onChange} />;
     case "number":
       return (
         <Field title={title} hint={hint}>
@@ -215,7 +266,7 @@ export function FieldInput(props: InputProps) {
       return (
         <Field title={title} hint={hint}>
           <div className="flex items-center gap-2">
-            <input type="color" value={text || "#000000"} onChange={(e) => onChange(e.target.value)} className="h-9 w-12 cursor-pointer rounded-md border border-input bg-transparent p-1" />
+            <input type="color" aria-label={field.label} value={text || "#000000"} onChange={(e) => onChange(e.target.value)} className="h-9 w-12 cursor-pointer rounded-md border border-input bg-transparent p-1" />
             <Input value={text} onChange={(e) => onChange(e.target.value)} placeholder="#1a2b3c" className="max-w-[8rem]" />
           </div>
         </Field>

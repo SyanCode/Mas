@@ -7,6 +7,7 @@ import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout
 import { Button } from "@/components/cms/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { Input } from "@/components/cms/ui/input";
+import { FormItem } from "@/components/cms/ui/form-item";
 import { Label } from "@/components/cms/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Skeleton } from "@/components/cms/ui/skeleton";
@@ -61,20 +62,20 @@ function Notifications() {
             {!smtp ? <Skeleton className="h-48" /> : (
               <>
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2 space-y-1.5"><Label>{t("Server")}</Label><Input value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} placeholder="smtp.example.com" /></div>
-                  <div className="space-y-1.5"><Label>{t("Port")}</Label><Input type="number" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })} /></div>
+                  <FormItem className="col-span-2 space-y-1.5"><Label>{t("Server")}</Label><Input value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} placeholder="smtp.example.com" /></FormItem>
+                  <FormItem className="space-y-1.5"><Label>{t("Port")}</Label><Input type="number" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })} /></FormItem>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5"><Label>{t("Security")}</Label>
+                  <FormItem className="space-y-1.5"><Label>{t("Security")}</Label>
                     <Select value={smtp.security} onValueChange={(v) => setSmtp({ ...smtp, security: v })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent><SelectItem value="starttls">STARTTLS (587)</SelectItem><SelectItem value="ssl">SSL/TLS (465)</SelectItem><SelectItem value="none">{t("None")} (25)</SelectItem></SelectContent>
-                    </Select></div>
-                  <div className="space-y-1.5"><Label>{t("Sender address")}</Label><Input value={smtp.from} onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} placeholder="noreply@example.com" /></div>
+                    </Select></FormItem>
+                  <FormItem className="space-y-1.5"><Label>{t("Sender address")}</Label><Input value={smtp.from} onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} placeholder="noreply@example.com" /></FormItem>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5"><Label>{t("Username")}</Label><Input value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} /></div>
-                  <div className="space-y-1.5"><Label>{t("Password")}</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={smtp.has_password ? "••••••••" : ""} /></div>
+                  <FormItem className="space-y-1.5"><Label>{t("Username")}</Label><Input value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} /></FormItem>
+                  <FormItem className="space-y-1.5"><Label>{t("Password")}</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={smtp.has_password ? "••••••••" : ""} /></FormItem>
                 </div>
                 <Button disabled={busy === "smtp"} onClick={() => run("smtp", async () => { setSmtp(await api<Smtp>("/notify/smtp", { method: "PUT", body: { ...smtp, password } })); setPassword(""); toast.success(t("Saved.")); })}>
                   {busy === "smtp" && <Loader2 className="animate-spin" />}{t("Save")}
@@ -89,9 +90,9 @@ function Notifications() {
           <CardContent className="space-y-4">
             {!cfg ? <Skeleton className="h-48" /> : (
               <>
-                <div className="space-y-1.5"><Label>{t("E-mail addresses")}</Label><Input value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="client@example.com, me@example.com" /></div>
-                <div className="space-y-1.5"><Label>{t("Webhook")}</Label><Input value={webhook} onChange={(e) => setWebhook(e.target.value)} placeholder={cfg.has_webhook ? t("A webhook is saved (type a new address to replace it)") : "https://hooks.slack.com/services/…"} />
-                  <p className="text-xs text-muted-foreground">{t("Slack, Discord or any address that accepts JSON. https only. Stored encrypted.")}</p></div>
+                <FormItem className="space-y-1.5"><Label>{t("E-mail addresses")}</Label><Input value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="client@example.com, me@example.com" /></FormItem>
+                <FormItem className="space-y-1.5"><Label>{t("Webhook")}</Label><Input value={webhook} onChange={(e) => setWebhook(e.target.value)} placeholder={cfg.has_webhook ? t("A webhook is saved (type a new address to replace it)") : "https://hooks.slack.com/services/…"} />
+                  <p className="text-xs text-muted-foreground">{t("Slack, Discord or any address that accepts JSON. https only. Stored encrypted.")}</p></FormItem>
                 <div className="space-y-2.5">
                   <Label>{t("Tell me when")}</Label>
                   {Object.keys(EVENT_LABEL).map((ev) => (
