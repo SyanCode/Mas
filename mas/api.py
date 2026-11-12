@@ -28,6 +28,7 @@ from mas.deploy import Deployer, PendingEnvError
 from mas.github import GitHubApp
 from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
+from mas import cookies as cookies_mod
 from mas import goals as goals_mod
 from mas.geo import Geo
 from mas.sitestats import SiteStats, service_target
@@ -790,6 +791,32 @@ def create_app(
                 goal = str(json.loads(body).get("g", ""))
                 await asyncio.to_thread(goals_mod.record, db, request.headers.get("origin", ""), ip,
                                         request.headers.get("user-agent", ""), goal)
+        except (ValueError, AttributeError):
+            pass
+        return Response(status_code=204)
+
+    @app.get("/cookies.js", include_in_schema=False)
+    def cookies_script() -> Response:
+        """The cookie consent banner a site embeds (see mas.cookies)."""
+        return Response(cookies_mod.SCRIPT, media_type="text/javascript",
+                        headers={"Cache-Control": "public, max-age=600"})
+
+    @app.get("/t/c", include_in_schema=False)
+    def cookies_config(h: str = Query("", max_length=253)) -> JSONResponse:
+        """Banner settings of the site served at host ``h``; read by the script from another origin."""
+        data = cookies_mod.public_config(db, h.strip().lower()) if h else {"enabled": False}
+        return JSONResponse(data, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=60"})
+
+    @app.post("/t/k", include_in_schema=False)
+    async def cookies_decision(request: Request) -> Response:
+        """A visitor's choice on the banner, counted per day (accept, reject, custom). Always 204."""
+        try:
+            body = await request.body()
+            ip = client_ip(request)
+            if len(body) <= goals_mod.MAX_BODY and not goal_limiter.blocked(ip):
+                goal_limiter.hit(ip)
+                host = urlparse(request.headers.get("origin", "")).hostname or ""
+                await asyncio.to_thread(cookies_mod.record, db, host.lower(), str(json.loads(body).get("d", "")))
         except (ValueError, AttributeError):
             pass
         return Response(status_code=204)
