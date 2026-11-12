@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -276,6 +277,22 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
                     "tracked_since": None}
         report = await asyncio.to_thread(stats.report, target, days)
         return {**report, "attribution": ATTRIBUTION}
+
+    @app.put("/api/cms/sites/{app_id}/goals")
+    def goals_config(app_id: str, body: dict, s=Depends(any_session)) -> dict:
+        """Pages that count as a goal ("/merci", "/blog/*") and the steps of the funnel."""
+        site(s, app_id)
+
+        def clean(items, pattern) -> list[str]:
+            items = items if isinstance(items, list) else []
+            if len(items) > 20 or any(not isinstance(i, str) or not pattern.fullmatch(i) for i in items):
+                raise HTTPException(400, "invalid goals")
+            return list(dict.fromkeys(items))
+        paths = clean(body.get("paths"), re.compile(r"^/[A-Za-z0-9._~%/\-]{0,100}\*?$"))
+        funnel = clean(body.get("funnel"), re.compile(r"^(page:/[A-Za-z0-9._~%/\-]{0,100}\*?|[a-z0-9_.:-]{1,40})$"))
+        db.set_setting(f"goals:{app_id}", json.dumps({"paths": paths, "funnel": funnel}))
+        db.audit(s.username, "cms-goals", True, service_id=app_id, detail=f"{len(paths)} page(s), {len(funnel)} step(s)")
+        return {"paths": paths, "funnel": funnel}
 
     @app.post("/api/cms/geo/install")
     async def geo_install(s=Depends(current_session)) -> dict:

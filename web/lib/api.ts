@@ -159,6 +159,12 @@ export interface TrafficReport {
   countries?: { code: string; visitors: number }[];
   goals?: { goal: string; hits: number; visitors: number; rate: number }[];
   cdn?: { share: number; snippet: string } | null;
+  sources?: { kind: string; name: string; visitors: number }[];
+  devices?: Record<string, number>;
+  browsers?: { name: string; visitors: number }[];
+  funnel?: { step: string; visitors: number }[];
+  goal_paths?: string[];
+  funnel_steps?: string[];
   conversion?: { visitors: number; rate: number };
   geo?: boolean;
   attribution?: string;

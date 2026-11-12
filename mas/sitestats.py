@@ -26,7 +26,7 @@ from mas.models import Service
 
 # 1.2.3.4 - - [21/Oct/2026:20:14:25 +0200] "GET /path HTTP/2.0" 200 568 "ref" "agent"
 LINE_RE = re.compile(r'^(\S+) \S+ \S+ \[(\d{2})/(\w{3})/(\d{4}):[^\]]*\] "(\S+) ([^" ]*)[^"]*" (\d{3}) \S+'
-                     r'(?: "[^"]*" "([^"]*)")?')
+                     r'(?: "([^"]*)" "([^"]*)")?')
 MONTHS = {m: i for i, m in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
                                        "Dec"), 1)}
 BOT_RE = re.compile(r"bot|crawl|spider|slurp|curl|wget|python|go-http|java/|httpclient|okhttp|scrapy|headless|"
@@ -80,17 +80,68 @@ def for_hosts(lines, hosts: list[str] | None):
             yield rest
 
 
-def tally(lines, geo=None) -> dict[str, dict]:
+SEARCH = {"google": "google", "bing": "bing", "duckduckgo": "duckduckgo", "ecosia": "ecosia", "qwant": "qwant",
+          "yahoo": "yahoo", "baidu": "baidu", "yandex": "yandex", "brave": "brave"}
+SOCIAL = {"facebook": "facebook", "fb.com": "facebook", "instagram": "instagram", "t.co": "x", "twitter": "x", "x.com": "x",
+          "linkedin": "linkedin", "lnkd.in": "linkedin", "youtube": "youtube", "tiktok": "tiktok", "pinterest": "pinterest",
+          "reddit": "reddit", "whatsapp": "whatsapp", "snapchat": "snapchat"}
+
+
+def classify_source(referrer: str, query: str, own_hosts: set[str]) -> str:
+    """Where a visitor came from: "utm|newsletter", "search|google", "social|instagram", "ref|example.com", "direct|"."""
+    for part in query.split("&"):
+        if part.startswith("utm_source=") and len(part) > 11:
+            return "utm|" + unquote(part[11:]).lower()[:40]
+    host = (urlsplit(referrer).hostname or "").lower().removeprefix("www.") if referrer and referrer != "-" else ""
+    if not host or host in own_hosts:
+        return "direct|"
+    for key, name in SEARCH.items():
+        if key in host:
+            return f"search|{name}"
+    for key, name in SOCIAL.items():
+        if host == key or key in host and key != "t.co" and key != "x.com":
+            return f"social|{name}"
+    return "ref|" + host[:60]
+
+
+def classify_device(agent: str) -> tuple[str, str]:
+    """(device, browser) from a user agent: mobile / tablet / desktop and a browser family."""
+    a = agent or ""
+    if re.search(r"iPad|Tablet|Android(?!.*Mobile)", a):
+        device = "tablet"
+    elif re.search(r"Mobi|iPhone|Android", a):
+        device = "mobile"
+    else:
+        device = "desktop"
+    for rx, name in ((r"Edg(e|A|iOS)?/", "Edge"), (r"OPR/|Opera", "Opera"), (r"SamsungBrowser", "Samsung"),
+                     (r"Firefox/|FxiOS", "Firefox"), (r"Chrome/|CriOS", "Chrome"), (r"Safari/", "Safari")):
+        if re.search(rx, a):
+            return device, name
+    return device, "Other"
+
+
+def matches_goal_path(path: str, goal_paths: list[str]) -> str | None:
+    """The configured goal path a visited path counts for ("/merci" exact, "/blog/*" prefix)."""
+    for g in goal_paths:
+        if (g.endswith("*") and path.startswith(g[:-1])) or path.rstrip("/") == g.rstrip("/") or (g == "/" and path == "/"):
+            return g
+    return None
+
+
+def tally(lines, geo=None, own_hosts: set[str] | None = None, goal_paths: list[str] | None = None) -> dict[str, dict]:
     """{day: {requests, pageviews, visitors (set of hashes), pages (Counter), geo {hash: country}}}.
 
-    ``geo`` (mas.geo.Geo) gives the country of a visitor; the address itself is never kept."""
+    ``geo`` (mas.geo.Geo) gives the country of a visitor; the address itself is never kept. For each new
+    visitor the first page they open also gives their source, device and browser; ``reached`` lists, per
+    goal path, the visitors who opened it."""
+    own = own_hosts or set()
     days: dict[str, dict] = defaultdict(lambda: {"requests": 0, "pageviews": 0, "visitors": set(),
-                                                 "pages": Counter(), "geo": {}})
+                                                 "pages": Counter(), "geo": {}, "traits": {}, "reached": defaultdict(set)})
     for line in lines:
         m = LINE_RE.match(line)
         if not m or m.group(3) not in MONTHS:
             continue
-        ip, dd, mon, yyyy, method, target, status, agent = m.groups()
+        ip, dd, mon, yyyy, method, target, status, referrer, agent = m.groups()
         day = f"{yyyy}-{MONTHS[mon]:02d}-{dd}"
         d = days[day]
         d["requests"] += 1
@@ -100,7 +151,13 @@ def tally(lines, geo=None) -> dict[str, dict]:
             continue
         d["pageviews"] += 1
         who = hashlib.blake2b(f"{day}|{ip}|{agent}".encode(), digest_size=8).digest()
+        if who not in d["visitors"]:  # the first page of a visitor tells where they came from
+            device, browser = classify_device(agent or "")
+            d["traits"][who] = {"source": classify_source(referrer or "", urlsplit(target).query, own),
+                                "device": device, "browser": browser}
         d["visitors"].add(who)
+        if goal_paths and (hit := matches_goal_path(path, goal_paths)):
+            d["reached"][hit].add(who)
         if geo is not None and who not in d["geo"]:
             code = "_cdn" if is_cdn(ip) else geo.country(ip)  # a CDN edge says nothing about the visitor
             if code:
@@ -109,11 +166,23 @@ def tally(lines, geo=None) -> dict[str, dict]:
     return days
 
 
-def count(lines, geo=None) -> dict[str, dict]:
-    """{day: {requests, pageviews, visitors, pages, countries}} from access log lines."""
-    return {day: {"day": day, "requests": d["requests"], "pageviews": d["pageviews"], "visitors": len(d["visitors"]),
-                  "pages": dict(d["pages"].most_common(TOP_PAGES)), "countries": dict(Counter(d["geo"].values()))}
-            for day, d in tally(lines, geo).items()}
+def trait_counts(d: dict) -> tuple[dict, dict]:
+    """(sources, devices) counted per visitor of a day from the traits read in the logs."""
+    sources = Counter(t["source"] for t in d["traits"].values())
+    devices = Counter(f"device:{t['device']}" for t in d["traits"].values()) + \
+        Counter(f"browser:{t['browser']}" for t in d["traits"].values())
+    return dict(sources), dict(devices)
+
+
+def count(lines, geo=None, own_hosts=None, goal_paths=None) -> dict[str, dict]:
+    """{day: {requests, pageviews, visitors, pages, countries, sources, devices}} from access log lines."""
+    out = {}
+    for day, d in tally(lines, geo, own_hosts, goal_paths).items():
+        sources, devices = trait_counts(d)
+        out[day] = {"day": day, "requests": d["requests"], "pageviews": d["pageviews"], "visitors": len(d["visitors"]),
+                    "pages": dict(d["pages"].most_common(TOP_PAGES)), "countries": dict(Counter(d["geo"].values())),
+                    "sources": sources, "devices": devices, "reached": {k: len(v) for k, v in d["reached"].items()}}
+    return out
 
 
 def own_access_logs(service: Service) -> list[str]:
@@ -186,17 +255,41 @@ class SiteStats:
         end = self.host.file_id(base) or now_id
         self.db.set_setting(key, json.dumps({"file": base, "inode": end[0], "offset": self._read_to.get(base, end[1])}))
 
+    def goal_paths(self, app_id: str) -> list[str]:
+        try:
+            return [p for p in json.loads(self.db.get_setting(f"goals:{app_id}") or "{}").get("paths", []) if isinstance(p, str)]
+        except ValueError:
+            return []
+
+    @staticmethod
+    def own_hosts(app: dict) -> set[str]:
+        names = [app.get("domain")]
+        try:
+            names += json.loads(app["aliases"]) if isinstance(app.get("aliases"), str) else (app.get("aliases") or [])
+        except ValueError:
+            pass
+        return {n.lower().removeprefix("www.") for n in names if isinstance(n, str)}
+
     def _recount(self, app: dict, files: list[str]) -> None:
         budget = [MAX_BYTES]
+        paths = self.goal_paths(app["id"])
         days = tally(for_hosts((line for path in files for line in _lines(self.host, path, budget)), app.get("hosts")),
-                     self.geo)
+                     self.geo, self.own_hosts(app), paths)
         self._read_to = {}
         if days:
-            self.db.save_site_stats(app["id"], [
-                {"day": day, "requests": d["requests"], "pageviews": d["pageviews"], "visitors": len(d["visitors"]),
-                 "pages": dict(d["pages"].most_common(TOP_PAGES)), "countries": dict(Counter(d["geo"].values()))}
-                for day, d in days.items()])
+            rows = []
+            for day, d in days.items():
+                sources, devices = trait_counts(d)
+                rows.append({"day": day, "requests": d["requests"], "pageviews": d["pageviews"], "visitors": len(d["visitors"]),
+                             "pages": dict(d["pages"].most_common(TOP_PAGES)), "countries": dict(Counter(d["geo"].values())),
+                             "sources": sources, "devices": devices})
+            self.db.save_site_stats(app["id"], rows)
         recent = (date.today() - timedelta(days=1)).isoformat()
+        for day, d in days.items():  # page goals: only days whose visitors are still remembered, to never count twice
+            if day >= recent:
+                for goal, hashes in d["reached"].items():
+                    for h in hashes:
+                        self.db.add_goal(app["id"], day, f"page:{goal}", h, 30)
         self.db.keep_site_visitors(app["id"], recent, {day: d["visitors"] for day, d in days.items() if day >= recent})
 
     def _add(self, app: dict, chunks: list[tuple[str, int]]) -> None:
@@ -206,9 +299,13 @@ class SiteStats:
             cut = data.rfind(b"\n") + 1  # a line still being written stays for next time
             self._read_to[path] = offset + cut
             lines = for_hosts(data[:cut].decode("utf-8", "replace").splitlines(), app.get("hosts"))
-            for day, d in tally(lines, self.geo).items():
+            for day, d in tally(lines, self.geo, self.own_hosts(app), self.goal_paths(app["id"])).items():
+                traits = {h: {**t, **({"country": d["geo"][h]} if h in d["geo"] else {})} for h, t in d["traits"].items()}
                 self.db.add_site_counts(app["id"], day, d["requests"], d["pageviews"], d["visitors"], dict(d["pages"]),
-                                        TOP_PAGES, d["geo"])
+                                        TOP_PAGES, traits)
+                for goal, hashes in d["reached"].items():
+                    for h in hashes:
+                        self.db.add_goal(app["id"], day, f"page:{goal}", h, 30)
         self.db.keep_site_visitors(app["id"], (date.today() - timedelta(days=1)).isoformat())
 
     def refresh_all(self, services: list[Service] = ()) -> None:
@@ -228,7 +325,7 @@ class SiteStats:
         stored = {r["day"]: r for r in self.db.site_stats(app["id"], first.isoformat())}
         goal_rows = self.db.site_goals(app["id"], first.isoformat())
         converted = {r["day"]: r["visitors"] for r in goal_rows if r["goal"] == "_any"}
-        series, pages, countries = [], Counter(), Counter()
+        series, pages, countries, sources, devices = [], Counter(), Counter(), Counter(), Counter()
         for i in range(days):
             day = (first + timedelta(days=i)).isoformat()
             row = stored.get(day)
@@ -239,6 +336,10 @@ class SiteStats:
                 pages.update(json.loads(row["pages"]))
             if row and row["countries"]:
                 countries.update(json.loads(row["countries"]))
+            if row and row["sources"]:
+                sources.update(json.loads(row["sources"]))
+            if row and row["devices"]:
+                devices.update(json.loads(row["devices"]))
         total = lambda key: sum(d[key] for d in series)  # noqa: E731
         visitors = total("visitors")
         per_goal: dict[str, dict] = {}
@@ -250,7 +351,14 @@ class SiteStats:
         rate = lambda n: round(100 * n / visitors, 2) if visitors else 0.0  # noqa: E731
         goals = sorted(({**g, "rate": rate(g["visitors"])} for g in per_goal.values()), key=lambda g: -g["visitors"])
         reached = sum(converted.values())
-        return {"days": series, "goals": goals, "conversion": {"visitors": reached, "rate": rate(reached)},
+        try:
+            wanted = [x for x in json.loads(self.db.get_setting(f"goals:{app['id']}") or "{}").get("funnel", []) if isinstance(x, str)]
+        except ValueError:
+            wanted = []
+        funnel = [{"step": "visitors", "visitors": visitors}] + [
+            {"step": g, "visitors": per_goal.get(g, {}).get("visitors", 0)} for g in wanted] if wanted else []
+        return {"days": series, "goals": goals, "funnel": funnel,
+                "goal_paths": self.goal_paths(app["id"]), "funnel_steps": wanted, "conversion": {"visitors": reached, "rate": rate(reached)},
                 "since": first.isoformat(), "tracked_since": min(stored) if stored else None,
                 "totals": {"requests": total("requests"), "pageviews": total("pageviews"),
                            "visitors": total("visitors")},
@@ -259,4 +367,8 @@ class SiteStats:
                 "cdn": ({"share": round(countries["_cdn"] / max(1, sum(countries.values())), 2), "snippet": REALIP_SNIPPET}
                         if countries.get("_cdn") else None),
                 "geo": bool(self.geo and self.geo.available()),
+                "sources": [{"kind": k.split("|")[0], "name": k.split("|", 1)[1], "visitors": v}
+                            for k, v in sources.most_common(20)],
+                "devices": {k[7:]: v for k, v in devices.items() if k.startswith("device:")},
+                "browsers": [{"name": k[8:], "visitors": v} for k, v in devices.most_common() if k.startswith("browser:")][:8],
                 "updated_at": datetime.now().isoformat(timespec="seconds")}
