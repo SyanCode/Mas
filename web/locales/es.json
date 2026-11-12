@@ -1547,5 +1547,13 @@
   "Reason": "Motivo",
   "No incident in the last 30 days.": "Ningún incidente en los últimos 30 días.",
   "Resolved": "Resuelto",
-  "Ongoing": "En curso"
+  "Ongoing": "En curso",
+  "Change undone. The site is being rebuilt.": "Cambio deshecho. El sitio se está reconstruyendo.",
+  "Changes you can undo": "Cambios que puede deshacer",
+  "Each change is a commit. Undoing adds a new commit that puts the previous content back; nothing is lost.": "Cada cambio es un commit. Deshacer añade un nuevo commit que restaura el contenido anterior; no se pierde nada.",
+  "Undone": "Deshecho",
+  "Undo": "Deshacer",
+  "An undo": "Una reversión",
+  "Undo “{name}”?": "¿Deshacer «{name}»?",
+  "The site goes back to what it was before this change. It is refused if the same content was changed since.": "El sitio vuelve a como estaba antes de este cambio. Se rechaza si el mismo contenido cambió después."
 }

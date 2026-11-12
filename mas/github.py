@@ -183,6 +183,14 @@ class GitHubApp:
                               {"sha": commit["sha"], "force": False})
         return commit["sha"]
 
+    def get_commit(self, installation_id: int, repo: str, sha: str) -> dict:
+        """{parents: [sha], files: [{filename, status, sha}]} of a commit (``sha`` is the blob after the change)."""
+        c = self._as_installation(installation_id, f"/repos/{repo}/commits/{quote(sha, safe='')}")
+        return {"parents": [p["sha"] for p in c.get("parents", [])],
+                "files": [{"filename": f["filename"], "status": f["status"], "sha": f.get("sha"),
+                           "previous_filename": f.get("previous_filename")} for f in c.get("files", [])],
+                "truncated": len(c.get("files", [])) >= 300}
+
     def app_info(self) -> dict:
         return self._as_app("GET", "/app")
 

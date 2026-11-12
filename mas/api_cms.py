@@ -477,6 +477,23 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         return {"latest": compliance.latest(app_id), "history": compliance.history(app_id),
                 "domain": target["domain"], "manual": MANUAL_CHECKS}
 
+    @app.get("/api/cms/sites/{app_id}/changes")
+    def changes(app_id: str, s=Depends(any_session)) -> list[dict]:
+        site(s, app_id)
+        return manager.changes(app_id)
+
+    @app.post("/api/cms/sites/{app_id}/changes/{change_id}/revert")
+    async def revert(app_id: str, change_id: int, s=Depends(any_session)) -> dict:
+        """Undo a change with a new commit (the history keeps both)."""
+        site(s, app_id)
+        try:
+            result = await asyncio.to_thread(call, manager.revert, app_id, change_id, s.username)
+        except HTTPException as exc:
+            db.audit(s.username, "cms-revert", False, service_id=app_id, detail=f"#{change_id}: {exc.detail}"[:500])
+            raise
+        db.audit(s.username, "cms-revert", True, service_id=app_id, detail=f"#{change_id} → {result['commit'][:8]}")
+        return result
+
     @app.get("/api/cms/sites/{app_id}/uptime")
     async def uptime_get(app_id: str, days: int = Query(30, ge=1, le=35), s=Depends(any_session)) -> dict:
         site(s, app_id)

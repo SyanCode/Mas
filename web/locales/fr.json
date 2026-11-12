@@ -1551,5 +1551,13 @@
   "Reason": "Raison",
   "No incident in the last 30 days.": "Aucun incident ces 30 derniers jours.",
   "Resolved": "Résolu",
-  "Ongoing": "En cours"
+  "Ongoing": "En cours",
+  "Change undone. The site is being rebuilt.": "Modification annulée. Le site se reconstruit.",
+  "Changes you can undo": "Modifications annulables",
+  "Each change is a commit. Undoing adds a new commit that puts the previous content back; nothing is lost.": "Chaque modification est un commit. Annuler ajoute un nouveau commit qui remet le contenu précédent ; rien n'est perdu.",
+  "Undone": "Annulée",
+  "Undo": "Annuler",
+  "An undo": "Une annulation",
+  "Undo “{name}”?": "Annuler « {name} » ?",
+  "The site goes back to what it was before this change. It is refused if the same content was changed since.": "Le site revient à ce qu'il était avant cette modification. C'est refusé si le même contenu a été modifié depuis."
 }

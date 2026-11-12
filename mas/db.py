@@ -224,6 +224,17 @@ CREATE TABLE IF NOT EXISTS uptime_incidents (
     ended TEXT,
     reason TEXT
 );
+CREATE TABLE IF NOT EXISTS cms_commits (     -- every commit made by the CMS, to show and undo it
+    id INTEGER PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    sha TEXT NOT NULL,
+    at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    scope TEXT NOT NULL,                       -- cms(articles), cms(media), revert…
+    summary TEXT NOT NULL,
+    reverted_by TEXT                           -- sha of the commit that undid it
+);
+CREATE INDEX IF NOT EXISTS cms_commits_app ON cms_commits(app_id, id);
 CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday (hashes): counted once per day
     app_id TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -788,6 +799,26 @@ class Database:
             return [dict(r) for r in c.execute("SELECT * FROM uptime_incidents WHERE app_id = ? AND (ended IS NULL OR ended >= ?) "
                                                "ORDER BY started DESC", (app_id, since))]
 
+    def add_cms_commit(self, app_id: str, sha: str, actor: str, scope: str, summary: str) -> int:
+        with self.tx() as c:
+            cur = c.execute("INSERT INTO cms_commits (app_id, sha, at, actor, scope, summary) VALUES (?, ?, ?, ?, ?, ?)",
+                            (app_id, sha, _now(), actor, scope, summary[:300]))
+            return int(cur.lastrowid)
+
+    def cms_commits(self, app_id: str, limit: int = 50) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM cms_commits WHERE app_id = ? ORDER BY id DESC LIMIT ?",
+                                               (app_id, limit))]
+
+    def get_cms_commit(self, app_id: str, change_id: int) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM cms_commits WHERE app_id = ? AND id = ?", (app_id, change_id)).fetchone()
+        return dict(row) if row else None
+
+    def mark_reverted(self, change_id: int, sha: str) -> None:
+        with self.tx() as c:
+            c.execute("UPDATE cms_commits SET reverted_by = ? WHERE id = ?", (sha, change_id))
+
     def site_goals(self, app_id: str, since: str) -> list[dict]:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM site_goals WHERE app_id = ? AND day >= ? ORDER BY day",
@@ -853,6 +884,7 @@ class Database:
             c.execute("DELETE FROM site_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM site_goals WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM consent_stats WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM cms_commits WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM uptime_checks WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM uptime_incidents WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM consent_log WHERE app_id = ?", (app_id,))
