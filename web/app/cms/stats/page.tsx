@@ -16,9 +16,10 @@ import { Label } from "@/components/cms/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { Skeleton } from "@/components/cms/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/cms/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/cms/ui/tabs";
+import { PillTabs } from "@/components/cms/premium";
 import { api, type ApiError, type TrafficReport } from "@/lib/api";
 import { msg, useI18n, useT } from "@/lib/i18n";
+import { GOOD, WARN, MUTED } from "@/lib/brand";
 
 function Snippet({ code }: { code: string }) {
   const t = useT();
@@ -111,7 +112,7 @@ function Stats() {
   return (
     <>
       <PageTitle title={t("Statistics")} description={`${site.name}${site.domain ? ` · ${site.domain}` : ""}`}
-        actions={<Tabs value={days} onValueChange={setDays}><TabsList><TabsTrigger value="7">7 {t("days")}</TabsTrigger><TabsTrigger value="30">30 {t("days")}</TabsTrigger><TabsTrigger value="90">90 {t("days")}</TabsTrigger></TabsList></Tabs>} />
+        actions={<PillTabs value={days} onChange={setDays} items={[{ value: "7", label: `7 ${t("days")}` }, { value: "30", label: `30 ${t("days")}` }, { value: "90", label: `90 ${t("days")}` }]} />} />
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
       {empty ? (
         <Card className="p-10 text-center text-sm text-muted-foreground">{t("No traffic data yet. Counting starts once the site has a domain and receives visits.")}</Card>
@@ -120,10 +121,11 @@ function Stats() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {!data ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28" />) : (
               <>
-                <StatCard label={t("Page views")} value={nf(data.totals!.pageviews)} icon={<Eye />} />
-                <StatCard label={t("Visitors")} value={nf(data.totals!.visitors)} icon={<Users />} hint={t("Sum of the daily visitors")} />
-                <StatCard label={t("Requests")} value={nf(data.totals!.requests)} icon={<Globe />} hint={t("Bots and files included")} />
+                <StatCard label={t("Page views")} numeric={data.totals!.pageviews} icon={<Eye />} trend={data.days.map((d) => d.pageviews)} />
+                <StatCard label={t("Visitors")} numeric={data.totals!.visitors} icon={<Users />} hint={t("Sum of the daily visitors")} trend={data.days.map((d) => d.visitors)} trendColor={GOOD} />
+                <StatCard label={t("Requests")} numeric={data.totals!.requests} icon={<Globe />} hint={t("Bots and files included")} trend={data.days.map((d) => d.requests)} trendColor={MUTED} />
                 <StatCard label={t("Conversion rate")} icon={<Target />}
+                  trend={data.goals && data.goals.length > 0 ? data.days.map((d) => (d.visitors ? Math.round(((d.converted ?? 0) / d.visitors) * 1000) / 10 : 0)) : undefined} trendColor={WARN} trendFormat={(n) => `${n}%`}
                   value={data.goals && data.goals.length > 0 ? `${data.conversion?.rate ?? 0}%` : "—"}
                   hint={data.goals && data.goals.length > 0 ? t("{n} visitors reached a goal", { n: nf(data.conversion?.visitors ?? 0) }) : t("No goal tracked yet")} />
               </>
@@ -144,7 +146,7 @@ function Stats() {
                       <YAxis hide domain={[0, "dataMax"]} />
                       <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, color: "var(--popover-foreground)" }}
                         labelFormatter={(d) => new Date(`${d}T12:00:00`).toLocaleDateString(lang, { day: "numeric", month: "short" })} formatter={(v) => [`${v}%`, t("Conversion rate")]} />
-                      <Line type="monotone" dataKey="rate" stroke="#10b981" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="rate" stroke={GOOD} strokeWidth={2} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -158,7 +160,7 @@ function Stats() {
                         <TableCell><span className="inline-flex items-center gap-2 font-medium"><MousePointerClick className="size-4 text-muted-foreground" />{g.goal}</span></TableCell>
                         <TableCell className="text-right tabular-nums">{nf(g.hits)}</TableCell>
                         <TableCell className="text-right tabular-nums">{nf(g.visitors)}</TableCell>
-                        <TableCell><div className="flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, g.rate)}%` }} /></div><span className="w-12 text-right tabular-nums">{g.rate}%</span></div></TableCell>
+                        <TableCell><div className="flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(100, g.rate)}%` }} /></div><span className="w-12 text-right tabular-nums">{g.rate}%</span></div></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -172,7 +174,7 @@ function Stats() {
                     return (
                       <div key={f.step} className="space-y-1">
                         <div className="flex justify-between text-sm"><span>{f.step === "visitors" ? t("Visitors") : f.step}</span><span className="tabular-nums text-muted-foreground">{nf(f.visitors)} · {Math.round((f.visitors / top) * 100)}%{i > 0 && data.funnel![i - 1].visitors > 0 ? ` (${Math.round((f.visitors / data.funnel![i - 1].visitors) * 100)}% ${t("of the previous step")})` : ""}</span></div>
-                        <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(f.visitors / top) * 100}%` }} /></div>
+                        <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-brand" style={{ width: `${(f.visitors / top) * 100}%` }} /></div>
                       </div>
                     );
                   })}
@@ -193,7 +195,7 @@ function Stats() {
                       return (
                         <li key={src.kind + src.name} className="space-y-1">
                           <div className="flex items-center justify-between gap-2 text-sm"><span className="flex min-w-0 items-center gap-2"><Badge variant="secondary">{t(SOURCE_KIND[src.kind] ?? src.kind)}</Badge><span className="truncate">{src.name || t("Direct")}</span></span><span className="tabular-nums text-muted-foreground">{nf(src.visitors)}</span></div>
-                          <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(src.visitors / top) * 100}%` }} /></div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-brand" style={{ width: `${(src.visitors / top) * 100}%` }} /></div>
                         </li>
                       );
                     })}
@@ -209,7 +211,7 @@ function Stats() {
                     <div className="space-y-2">
                       {Object.entries(data.devices).sort((a, b) => b[1] - a[1]).map(([name, n]) => {
                         const total = Object.values(data.devices!).reduce((x, y) => x + y, 0) || 1;
-                        return <div key={name} className="space-y-1"><div className="flex justify-between text-sm"><span className="flex items-center gap-2"><Smartphone className="size-4 text-muted-foreground" />{t(DEVICE[name] ?? name)}</span><span className="tabular-nums text-muted-foreground">{Math.round((n / total) * 100)}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(n / total) * 100}%` }} /></div></div>;
+                        return <div key={name} className="space-y-1"><div className="flex justify-between text-sm"><span className="flex items-center gap-2"><Smartphone className="size-4 text-muted-foreground" />{t(DEVICE[name] ?? name)}</span><span className="tabular-nums text-muted-foreground">{Math.round((n / total) * 100)}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-brand" style={{ width: `${(n / total) * 100}%` }} /></div></div>;
                       })}
                     </div>
                     <div className="flex flex-wrap gap-2">{data.browsers?.map((b) => <Badge key={b.name} variant="outline">{b.name} · {nf(b.visitors)}</Badge>)}</div>

@@ -13,6 +13,7 @@ import { api, timeAgo, type ApiError, type ComplianceAudit, type ComplianceFindi
 import { translateFinding } from "@/lib/complianceTexts";
 import { msg, useI18n, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { BRAND, GOOD, WARN } from "@/lib/brand";
 
 const MANUAL: Record<string, string> = {
   register: msg("A register of processing activities (GDPR art. 30)"),
@@ -34,7 +35,7 @@ const LEVEL_STYLE = {
 
 function Score({ audit }: { audit: ComplianceAudit }) {
   const t = useT();
-  const color = audit.verdict === "ok" ? "#10b981" : audit.verdict === "attention" ? "#f59e0b" : "#ef4444";
+  const color = audit.verdict === "ok" ? GOOD : audit.verdict === "attention" ? WARN : "#d92d20";
   const r = 52, c = 2 * Math.PI * r;
   return (
     <div className="flex items-center gap-6">
@@ -141,7 +142,7 @@ function Compliance() {
               return (
                 <button key={lvl} type="button" onClick={() => setFilter(filter === lvl ? "all" : lvl)} className="text-left">
                   <StatCard label={lvl === "critical" ? t("Blocking") : lvl === "warning" ? t("To improve") : lvl === "info" ? t("Advice") : t("Passed")}
-                    value={audit.counts[lvl]} icon={<Icon className={LEVEL_STYLE[lvl]} />} hint={filter === lvl ? t("Showing only these") : undefined} />
+                    numeric={audit.counts[lvl]} icon={<Icon className={LEVEL_STYLE[lvl]} />} hint={filter === lvl ? t("Showing only these") : undefined} />
                 </button>
               );
             })}
@@ -163,7 +164,7 @@ function Compliance() {
                           <YAxis hide domain={[0, 100]} />
                           <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, color: "var(--popover-foreground)" }}
                             labelFormatter={(_, p) => (p?.[0] ? formatDate(p[0].payload.at, lang) : "")} formatter={(v) => [`${v}/100`, t("Score")]} />
-                          <Line type="monotone" dataKey="score" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                          <Line type="monotone" dataKey="score" stroke={BRAND} strokeWidth={2} dot={{ r: 3 }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>

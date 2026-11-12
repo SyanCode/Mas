@@ -1662,5 +1662,12 @@
   "link text": "texto del enlace",
   "Formatting": "Formato",
   "Image from the library": "Imagen de la biblioteca",
-  "description": "descripción"
+  "description": "descripción",
+  "Press Enter after each address.": "Pulse Intro tras cada dirección.",
+  "The site is down": "El sitio está caído",
+  "Blocking compliance issues": "Problemas de conformidad bloqueantes",
+  "Compliance points to improve": "Puntos de conformidad a mejorar",
+  "{n} blocking": "{n} bloqueante(s)",
+  "Inbox": "Bandeja de entrada",
+  "Mark all read": "Marcar todo como leído"
 }

@@ -78,6 +78,7 @@ def open_page(live, path):
 def test_dashboard_sidebar_and_command_palette(live):
     page, errors = open_page(live, "/cms/?app=site")
     page.get_by_role("heading", name="Dashboard").wait_for()
+    page.get_by_role("link", name="Articles").first.wait_for()  # the sidebar fills once the site overview is loaded
     for name in ("Articles", "Media", "Statistics", "Availability", "Compliance", "Legal pages", "Cookie banner", "History", "Users"):
         assert page.get_by_role("link", name=name).first.is_visible(), name
     page.keyboard.press("Control+k")
@@ -148,4 +149,28 @@ def test_statistics_cookie_banner_preview_compliance_and_media(live):
     page.goto(live[1] + "/cms/media/?app=site")
     page.get_by_role("heading", name="Media").wait_for()
     page.get_by_text("old.png").wait_for()
+    assert not errors, errors
+
+
+def test_inbox_bell_and_scheduling_with_the_time_picker(live):
+    ctx, base, db, gh = live
+    page, errors = open_page(live, "/cms/?app=site")
+    page.get_by_role("heading", name="Dashboard").wait_for()
+    page.get_by_role("button", name="Notifications").click()
+    page.get_by_text("Inbox").first.wait_for()  # the Ruixen inbox, labels coming from Mas
+    page.keyboard.press("Escape")
+
+    page.goto(base + "/cms/entry/?app=site&c=articles&slug=hand")
+    page.get_by_label("Title *").wait_for()
+    page.get_by_label("Status").click()
+    page.get_by_role("option", name="Scheduled").click()
+    page.get_by_label("Publish on").wait_for()  # date + Ruixen time picker, filled with a default hour from now
+    page.get_by_role("button", name="Schedule").wait_for()
+    assert page.get_by_role("button", name="Schedule").is_enabled()
+    page.get_by_role("button", name="Schedule").click()
+    deadline = time.time() + 6
+    while time.time() < deadline and not db.cms_scheduled(["site"]):
+        time.sleep(0.1)
+    scheduled = db.cms_scheduled(["site"])
+    assert scheduled and scheduled[0]["slug"] == "hand"
     assert not errors, errors

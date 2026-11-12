@@ -5,6 +5,7 @@ import { Copy, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout";
 import { StatCard, formatDate } from "@/components/cms/common";
+import { ColorField } from "@/components/cms/premium";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/cms/ui/table";
 import { Button } from "@/components/cms/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
@@ -58,7 +59,7 @@ function Cookies() {
 
   useEffect(() => {
     if (!site) return;
-    api<{ config: Config; stats: Stats; log: LogRow[] }>(base).then((r) => { setConfig(r.config); setSaved(JSON.stringify(r.config)); setStats(r.stats); setLog(r.log); }).catch((e: ApiError) => setError(e.detail));
+    api<{ config: Config; stats: Stats; log: LogRow[] }>(base).then((r) => { setConfig(r.config); setSaved(JSON.stringify(r.config)); setStats(r.stats); setLog(r.log ?? []); }).catch((e: ApiError) => setError(e.detail));
   }, [site, base]);
 
   if (!site) return <NoSite />;
@@ -135,12 +136,7 @@ function Cookies() {
                     </Select>
                   </Row>
                 </div>
-                <Row label={t("Accent colour")}>
-                  <div className="flex items-center gap-2">
-                    <input type="color" value={config.accent} onChange={(e) => set({ accent: e.target.value })} className="h-9 w-12 cursor-pointer rounded-md border border-input bg-transparent p-1" />
-                    <Input value={config.accent} onChange={(e) => set({ accent: e.target.value })} className="max-w-[8rem]" />
-                  </div>
-                </Row>
+                <Row label={t("Accent colour")}><ColorField value={config.accent} onChange={(hex) => set({ accent: hex })} /></Row>
                 <Row label={t("Cookies your site uses")} hint={t("Strictly necessary cookies are always allowed. Pick the others the site sets.")}>
                   <div className="space-y-2.5">
                     {CATEGORIES.map((c) => (

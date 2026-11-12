@@ -15,6 +15,7 @@ import { Switch } from "@/components/cms/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/cms/ui/table";
 import { api, timeAgo, type ApiError, type UptimeReport } from "@/lib/api";
 import { useI18n, useT } from "@/lib/i18n";
+import { BRAND } from "@/lib/brand";
 
 function Uptime() {
   const t = useT();
@@ -70,7 +71,7 @@ function Uptime() {
                         <XAxis dataKey="hour" tickFormatter={(h: string) => `${h.slice(11, 13)}h`} tick={{ fontSize: 11, fill: "currentColor", opacity: 0.6 }} axisLine={false} tickLine={false} />
                         <YAxis tick={{ fontSize: 11, fill: "currentColor", opacity: 0.6 }} axisLine={false} tickLine={false} unit=" ms" width={56} />
                         <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12, color: "var(--popover-foreground)" }} formatter={(v) => [`${v} ms`, t("Response")]} />
-                        <Area type="monotone" dataKey="ms" stroke="#3b82f6" strokeWidth={2} fill="#3b82f6" fillOpacity={0.15} />
+                        <Area type="monotone" dataKey="ms" stroke={BRAND} strokeWidth={2} fill={BRAND} fillOpacity={0.15} />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>

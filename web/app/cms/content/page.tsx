@@ -15,7 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/cms/ui/input";
 import { Skeleton } from "@/components/cms/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/cms/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/cms/ui/tabs";
+import { Pager, SegmentTabs } from "@/components/cms/premium";
 import { api, type ApiError, type CmsCollection, type CmsEntry, type CmsEntrySummary } from "@/lib/api";
 import { useI18n, useT } from "@/lib/i18n";
 
@@ -136,14 +136,9 @@ function List() {
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         {collection?.drafts ? (
-          <Tabs value={status} onValueChange={setStatus}>
-            <TabsList>
-              <TabsTrigger value="all">{t("All")} ({counts.all})</TabsTrigger>
-              <TabsTrigger value="published">{t("Published")} ({counts.published})</TabsTrigger>
-              <TabsTrigger value="draft">{t("Drafts")} ({counts.draft})</TabsTrigger>
-              <TabsTrigger value="scheduled">{t("Scheduled")} ({counts.scheduled})</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <SegmentTabs key={`${counts.all}-${counts.published}-${counts.draft}-${counts.scheduled}`} value={status} onChange={setStatus} items={[
+            { value: "all", label: `${t("All")} (${counts.all})` }, { value: "published", label: `${t("Published")} (${counts.published})` },
+            { value: "draft", label: `${t("Drafts")} (${counts.draft})` }, { value: "scheduled", label: `${t("Scheduled")} (${counts.scheduled})` }]} />
         ) : <span />}
         <div className="relative w-full sm:w-64">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -175,10 +170,7 @@ function List() {
             {table.getPageCount() > 1 && (
               <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
                 <span>{t("Page {n} of {total}", { n: table.getState().pagination.pageIndex + 1, total: table.getPageCount() })}</span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>{t("Previous")}</Button>
-                  <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>{t("Next")}</Button>
-                </div>
+                <Pager page={table.getState().pagination.pageIndex + 1} pages={table.getPageCount()} onPage={(p) => table.setPageIndex(p - 1)} />
               </div>
             )}
           </>

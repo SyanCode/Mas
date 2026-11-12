@@ -16,7 +16,7 @@ const DialogContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.C
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="cms fixed inset-0 z-50 bg-black/60" />
       <DialogPrimitive.Content ref={ref}
-        className={cn("cms fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg border bg-background p-6 text-foreground shadow-lg", className)}
+        className={cn("cms fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-2xl bg-background p-6 text-foreground shadow-[0_0_0_1px_var(--border),0_24px_60px_-16px_rgb(0_0_0/0.35)]", className)}
         {...props}>
         {children}
         <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring">
@@ -53,7 +53,7 @@ function ConfirmDialog({ open, title, description, confirmLabel, cancelLabel, de
     <AlertPrimitive.Root open={open} onOpenChange={(o) => !o && onCancel()}>
       <AlertPrimitive.Portal>
         <AlertPrimitive.Overlay className="cms fixed inset-0 z-50 bg-black/60" />
-        <AlertPrimitive.Content className="cms fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 text-foreground shadow-lg">
+        <AlertPrimitive.Content className="cms fixed left-1/2 top-1/2 z-50 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-2xl bg-background p-6 text-foreground shadow-[0_0_0_1px_var(--border),0_24px_60px_-16px_rgb(0_0_0/0.35)]">
           <DialogHeader>
             <AlertPrimitive.Title className="text-lg font-semibold">{title}</AlertPrimitive.Title>
             {description && <AlertPrimitive.Description className="text-sm text-muted-foreground">{description}</AlertPrimitive.Description>}

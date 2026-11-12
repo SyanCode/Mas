@@ -197,7 +197,7 @@ function MarkdownInput({ appId, field, text, onChange }: { appId: string; field:
             }} />
         </TabsContent>
         <TabsContent value="preview">
-          <div className="prose-cms min-h-40 rounded-md border bg-background p-4 text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold [&_img]:max-h-64 [&_li]:ml-5 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:mb-3 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted [&_pre]:p-3">
+          <div className="prose-cms min-h-40 rounded-md border bg-background p-4 text-sm leading-relaxed [&_a]:text-brand [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold [&_img]:max-h-64 [&_li]:ml-5 [&_li]:list-disc [&_ol_li]:list-decimal [&_p]:mb-3 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted [&_pre]:p-3">
             {text.trim() ? <Markdown components={{ img: ({ src, alt }) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img alt={alt ?? ""} src={typeof src === "string" && src.startsWith("/") ? imageUrl(appId, src) : typeof src === "string" ? src : undefined} />) }}>{text}</Markdown> : <p className="text-muted-foreground">{t("Nothing to preview.")}</p>}

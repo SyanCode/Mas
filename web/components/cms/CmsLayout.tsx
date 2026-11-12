@@ -13,6 +13,7 @@ import { Button } from "@/components/cms/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/cms/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Skeleton } from "@/components/cms/ui/skeleton";
+import { SiteInbox } from "@/components/cms/Inbox";
 import { Palette } from "@/components/cms/Palette";
 import { Toaster } from "sonner";
 import { api, rememberSession, type CmsOverview, type CmsSite, type Session } from "@/lib/api";
@@ -39,11 +40,11 @@ const SITE_KEY = "mas-cms-site";
 function NavLink({ href, active, icon: Icon, children, count }: { href: string; active: boolean; icon: typeof FileText; children: ReactNode; count?: number }) {
   return (
     <Link href={href}
-      className={cn("flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
-        active ? "bg-sidebar-accent font-medium text-white" : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-white")}>
-      <Icon className="size-4 shrink-0 opacity-80" />
+      className={cn("group flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] transition-all",
+        active ? "bg-sidebar-accent font-medium text-foreground shadow-[0_0_0_1px_var(--border),0_1px_2px_rgb(0_0_0/0.04)]" : "text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-foreground")}>
+      <Icon className={cn("size-4 shrink-0 transition-colors", active ? "text-brand" : "opacity-70 group-hover:opacity-100")} />
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {count != null && <span className="text-xs text-sidebar-foreground/70">{count}</span>}
+      {count != null && <span className="text-xs text-sidebar-foreground/60">{count}</span>}
     </Link>
   );
 }
@@ -51,7 +52,7 @@ function NavLink({ href, active, icon: Icon, children, count }: { href: string; 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="space-y-0.5">
-      <div className="px-3 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/50">{title}</div>
+      <div className="px-3 pb-1.5 pt-6 text-[10.5px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/55">{title}</div>
       {children}
     </div>
   );
@@ -68,13 +69,13 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   const page = params.get("p");
 
   return (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onNavigate(); }}>
-      <div className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-4">
+    <div className="flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onNavigate(); }}>
+      <div className="flex h-16 items-center gap-2.5 px-5">
         <Logo className="h-6 w-6" />
-        <span className="text-[15px] font-semibold tracking-tight text-white">mas</span>
-        <span className="rounded bg-sidebar-accent px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sidebar-foreground">CMS</span>
+        <span className="text-[17px] font-semibold tracking-tight text-foreground">mas</span>
+        <span className="rounded-full bg-foreground px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.1em] text-background">CMS</span>
       </div>
-      <nav className="flex-1 overflow-y-auto px-2 pb-4">
+      <nav className="flex-1 overflow-y-auto px-3 pb-4">
         <div className="pt-3">
           <NavLink href="/cms/" active={pathname === "/cms/" || pathname === "/cms"} icon={LayoutDashboard}>{t("Dashboard")}</NavLink>
         </div>
@@ -115,7 +116,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
           </Group>
         )}
       </nav>
-      <div className="border-t border-sidebar-border p-2">
+      <div className="border-t border-sidebar-border p-3">
         {session.role === "admin"
           ? <NavLink href="/" icon={Server} active={false}>{t("Server dashboard")}</NavLink>
           : <NavLink href="/settings/" icon={SettingsIcon} active={false}>{t("Account")}</NavLink>}
@@ -148,11 +149,11 @@ function Topbar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-card px-4">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/75 px-5 backdrop-blur-xl sm:px-8">
       <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenu} aria-label={t("Menu")}><Menu /></Button>
       {sites.length > 0 && site && (
         <Select value={site.id} onValueChange={switchSite}>
-          <SelectTrigger className="h-8 w-auto min-w-44 max-w-64 gap-2 text-[13px] font-medium"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-9 w-auto min-w-44 max-w-64 gap-2 bg-card text-[13px] font-medium shadow-[0_0_0_1px_var(--border)]"><SelectValue /></SelectTrigger>
           <SelectContent>{sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
         </Select>
       )}
@@ -163,10 +164,11 @@ function Topbar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
         </a>
       )}
       <div className="ml-auto flex items-center gap-1">
-        <button type="button" onClick={onSearch} className="hidden h-8 items-center gap-6 rounded-md border border-input bg-background px-3 text-xs text-muted-foreground transition hover:text-foreground sm:flex" aria-label={t("Search…")}>
-          <span className="flex items-center gap-2"><Search className="size-3.5" />{t("Search…")}</span><kbd className="rounded border px-1.5 text-[10px]">⌘K</kbd>
+        <button type="button" onClick={onSearch} className="hidden h-9 items-center gap-8 rounded-lg bg-card px-3 text-xs text-muted-foreground shadow-[0_0_0_1px_var(--border)] transition hover:text-foreground sm:flex" aria-label={t("Search…")}>
+          <span className="flex items-center gap-2"><Search className="size-3.5" />{t("Search…")}</span><kbd className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium">⌘K</kbd>
         </button>
-        <LanguagePicker className="hidden h-8 rounded-md border border-input bg-background px-2 text-xs sm:block" />
+        <LanguagePicker className="hidden h-9 rounded-lg bg-card px-2.5 text-xs shadow-[0_0_0_1px_var(--border)] sm:block" />
+        {site && <SiteInbox site={site} />}
         <Button variant="ghost" size="icon" aria-label={t("Theme")}
           onClick={() => { const next = !dark; setDark(next); setMode(next ? "dark" : "light"); }}>
           {dark ? <Sun /> : <Moon />}
@@ -235,16 +237,16 @@ function Frame({ children }: { children: ReactNode }) {
         <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 lg:block"><Sidebar onNavigate={() => {}} /></aside>
         {open && (
           <div className="fixed inset-0 z-50 lg:hidden">
-            <div className="absolute inset-0 bg-black/60" onClick={() => setOpen(false)} />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
             <aside className="absolute inset-y-0 left-0 w-64">
               <Sidebar onNavigate={() => setOpen(false)} />
-              <Button variant="ghost" size="icon" className="absolute right-2 top-2 text-white hover:bg-sidebar-accent hover:text-white" onClick={() => setOpen(false)} aria-label={t("Close")}><X /></Button>
+              <Button variant="ghost" size="icon" className="absolute right-2 top-3" onClick={() => setOpen(false)} aria-label={t("Close")}><X /></Button>
             </aside>
           </div>
         )}
         <div className="lg:pl-60">
           <Topbar onMenu={() => setOpen(true)} onSearch={() => setPalette(true)} />
-          <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">{children}</main>
+          <main className="mx-auto max-w-6xl px-5 py-10 sm:px-10">{children}</main>
         </div>
         <Palette open={palette} onClose={() => setPalette(false)} site={site} sites={sites} overview={overview} admin={session.role === "admin"} />
         <Toaster position="bottom-right" richColors closeButton />
@@ -264,10 +266,10 @@ export function CmsLayout({ children }: { children: ReactNode }) {
 
 export function PageTitle({ title, description, actions }: { title: ReactNode; description?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="truncate text-2xl font-semibold tracking-tight">{title}</h1>
-        {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+        <h1 className="truncate font-display text-[44px] font-normal leading-[1.05] tracking-[-0.02em]">{title}</h1>
+        {description && <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
