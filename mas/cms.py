@@ -671,6 +671,7 @@ class CmsManager:
         self.staging = Path(data_dir) / "cms-uploads"
         self._locks: dict[str, threading.Lock] = {}
         self._schemas: dict[str, tuple[float, str, dict]] = {}
+        self._overviews: dict[str, tuple[float, dict]] = {}  # the dashboard asks again and again: 30 s
         self._compat: dict[str, tuple[float, dict]] = {}
 
     def _store(self, app: dict) -> cms_supabase.SupabaseStore:
@@ -926,6 +927,7 @@ class CmsManager:
             raise self._github_error(exc) from None
         self._consume(uploads)
         self._schemas.pop(app["id"], None)
+        self._overviews.pop(app["id"], None)
         release_id = None
         if not app["auto_deploy"]:  # otherwise the push webhook deploys it
             release_id = self.deployer.enqueue(app["id"], "cms", username, commit)
@@ -1082,6 +1084,7 @@ class CmsManager:
         else:
             store.update(c, slug, data, version)
         self._consume(uploads)
+        self._overviews.pop(app["id"], None)
         return {"slug": slug, "commit": None, "unchanged": False, "release_id": None, "instant": True}
 
     def delete_entry(self, app_id: str, cid: str, slug: str, base_sha: str | None, username: str) -> dict:
@@ -1092,6 +1095,7 @@ class CmsManager:
             c = self._collection(schema, cid)
             if c["storage"] == "supabase":
                 self._store(app).delete(c, slug, base_sha)
+                self._overviews.pop(app_id, None)
                 return {"commit": None, "unchanged": False, "release_id": None, "instant": True}
             files, index = self._entries(gh, app, c, head)
             if slug not in files:
@@ -1157,6 +1161,14 @@ class CmsManager:
 
     def overview(self, app_id: str) -> dict:
         """What the site holds: pages, and per collection the number of published, draft and scheduled entries."""
+        cached = self._overviews.get(app_id)
+        if cached and time.monotonic() - cached[0] < 30:
+            return cached[1]
+        out = self._overview(app_id)
+        self._overviews[app_id] = (time.monotonic(), out)
+        return out
+
+    def _overview(self, app_id: str) -> dict:
         gh, app = self._target(app_id)
         schema, head = self.schema(app_id)
         collections = []

@@ -158,6 +158,7 @@ export interface TrafficReport {
   top_pages: { path: string; views: number }[];
   countries?: { code: string; visitors: number }[];
   goals?: { goal: string; hits: number; visitors: number; rate: number }[];
+  cdn?: { share: number; snippet: string } | null;
   conversion?: { visitors: number; rate: number };
   geo?: boolean;
   attribution?: string;

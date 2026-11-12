@@ -37,7 +37,7 @@ no basta, otros servidores se unen como agentes y ejecutan copias de tus apps de
 | 🌐 **Dominios** | Registros DNS creados en OVH, Cloudflare, Gandi, Hetzner, DigitalOcean o Porkbun, y después HTTPS. |
 | 🗄️ **Supabase** | La pila oficial autoalojada en un clic, apps conectadas desde su repositorio, migraciones al desplegar. |
 | 📦 **Servicios listos para usar** | Servidor de correo, Minecraft, Uptime Kuma, Vaultwarden, n8n, Gitea o cualquier imagen Docker, con copias de seguridad cada noche. |
-| ✏️ **CMS** | Tus clientes editan los textos, imágenes y artículos de su sitio; cada guardado es un commit y un despliegue. |
+| ✏️ **CMS** | Un back-office estilo WordPress para tus clientes: panel con estadísticas, borradores y publicación programada, biblioteca de medios, historial con deshacer, mapa mundial de visitantes, tasa de conversión, banner de cookies, auditoría RGPD automática, monitorización de disponibilidad. Cada guardado es un commit y un despliegue. |
 | 📊 **Tráfico** | Peticiones, páginas vistas y visitantes por día para cada sitio, a partir de los registros de nginx, sin cookies. |
 | 🧠 **Recursos** | Memoria y CPU de todo en una sola página; límites de memoria, reposo en inactividad, instancias que siguen el tráfico, consejos aplicados en un clic. |
 | 🛠️ **Operaciones** | Comprobaciones de salud con soluciones, reinicio idéntico de todos los servicios, páginas de mantenimiento, volver a desplegarlo todo. |

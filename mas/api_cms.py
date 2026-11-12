@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 import time
 from collections.abc import Callable
@@ -405,7 +406,24 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.get("/api/cms/sites/{app_id}/cookies")
     def cookies_get(app_id: str, s=Depends(any_session)) -> dict:
         site(s, app_id)
-        return {"config": cookies_mod.load(db, app_id), "stats": cookies_mod.report(db, app_id)}
+        return {"config": cookies_mod.load(db, app_id), "stats": cookies_mod.report(db, app_id),
+                "log": [{"at": r["at"], "consent_id": r["consent_id"], "decision": r["decision"],
+                         "categories": json.loads(r["categories"] or "{}"), "banner": r["banner"]}
+                        for r in db.consent_log(app_id, 20)]}
+
+    @app.get("/api/cms/sites/{app_id}/cookies/log.csv")
+    def cookies_log_csv(app_id: str, s=Depends(any_session)) -> Response:
+        """The proof of consent, as a file to keep or hand to a regulator."""
+        site(s, app_id)
+        db.audit(s.username, "cms-consent-export", True, service_id=app_id)
+        return Response(cookies_mod.log_csv(db, app_id), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="consent-log-{app_id}.csv"'})
+
+    @app.get("/api/cms/sites/{app_id}/cookies/versions")
+    def cookies_versions(app_id: str, s=Depends(any_session)) -> list[dict]:
+        site(s, app_id)
+        return [{"version": v["version"], "first_seen": v["first_seen"], "config": json.loads(v["config"])}
+                for v in db.consent_versions(app_id)]
 
     @app.put("/api/cms/sites/{app_id}/cookies")
     def cookies_put(app_id: str, body: dict, s=Depends(any_session)) -> dict:
