@@ -194,6 +194,8 @@ export interface UptimeReport {
   status_page: boolean;
 }
 
+export interface CmsChange { id: number; sha: string; at: string; actor: string; scope: string; summary: string; reverted: boolean; undoable: boolean }
+
 export interface CmsActivity {
   id: number;
   at: string;
