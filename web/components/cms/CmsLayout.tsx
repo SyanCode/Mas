@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Activity, BarChart3, Bell, Cookie, FileSignature, HeartPulse, ShieldCheck, ExternalLink, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Menu, Moon, Newspaper,
+  Activity, BarChart3, Bell, Cookie, FileSignature, HeartPulse, Search, ShieldCheck, ExternalLink, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Menu, Moon, Newspaper,
   Server, Settings as SettingsIcon, Sun, Users, X,
 } from "lucide-react";
 import { Logo } from "@/components/Shell";
@@ -13,6 +13,7 @@ import { Button } from "@/components/cms/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/cms/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Skeleton } from "@/components/cms/ui/skeleton";
+import { Palette } from "@/components/cms/Palette";
 import { Toaster } from "sonner";
 import { api, rememberSession, type CmsOverview, type CmsSite, type Session } from "@/lib/api";
 import { LanguagePicker, useT } from "@/lib/i18n";
@@ -124,7 +125,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
-function Topbar({ onMenu }: { onMenu: () => void }) {
+function Topbar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void }) {
   const t = useT();
   const { session, sites, site } = useCms();
   const { setMode } = useTheme();
@@ -162,6 +163,9 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
         </a>
       )}
       <div className="ml-auto flex items-center gap-1">
+        <button type="button" onClick={onSearch} className="hidden h-8 items-center gap-6 rounded-md border border-input bg-background px-3 text-xs text-muted-foreground transition hover:text-foreground sm:flex" aria-label={t("Search…")}>
+          <span className="flex items-center gap-2"><Search className="size-3.5" />{t("Search…")}</span><kbd className="rounded border px-1.5 text-[10px]">⌘K</kbd>
+        </button>
         <LanguagePicker className="hidden h-8 rounded-md border border-input bg-background px-2 text-xs sm:block" />
         <Button variant="ghost" size="icon" aria-label={t("Theme")}
           onClick={() => { const next = !dark; setDark(next); setMode(next ? "dark" : "light"); }}>
@@ -194,7 +198,14 @@ function Frame({ children }: { children: ReactNode }) {
   const [overview, setOverview] = useState<CmsOverview | null>(null);
   const [overviewKey, setOverviewKey] = useState(0);
   const [open, setOpen] = useState(false);
+  const [palette, setPalette] = useState(false);
   const wanted = params.get("app");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     api<Session>("/session").then((s) => { rememberSession(s); setSession(s); }).catch(() => { window.location.href = "/login/"; });
@@ -232,9 +243,10 @@ function Frame({ children }: { children: ReactNode }) {
           </div>
         )}
         <div className="lg:pl-60">
-          <Topbar onMenu={() => setOpen(true)} />
+          <Topbar onMenu={() => setOpen(true)} onSearch={() => setPalette(true)} />
           <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">{children}</main>
         </div>
+        <Palette open={palette} onClose={() => setPalette(false)} site={site} sites={sites} overview={overview} admin={session.role === "admin"} />
         <Toaster position="bottom-right" richColors closeButton />
       </div>
     </CmsContext.Provider>

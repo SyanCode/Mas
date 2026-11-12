@@ -76,7 +76,8 @@ def find_chromium() -> str | None:
     for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
         if path := shutil.which(name):
             return path
-    found = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))
+    found = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome")
+                   + glob.glob(os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome")))  # playwright install
     return found[-1] if found else None
 
 
