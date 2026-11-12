@@ -8,7 +8,7 @@ import sqlite3
 import time
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -159,6 +159,21 @@ CREATE TABLE IF NOT EXISTS cms_schedule (    -- entries waiting for their public
     publish_at TEXT NOT NULL,                  -- UTC, YYYY-MM-DDTHH:MM
     PRIMARY KEY (app_id, cid, slug)
 );
+CREATE TABLE IF NOT EXISTS site_goals (      -- conversions: clicks on named goals, per day
+    app_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    goal TEXT NOT NULL,                        -- "_any" = every goal together
+    hits INTEGER NOT NULL,
+    visitors INTEGER NOT NULL,                 -- distinct visitors who reached the goal that day
+    PRIMARY KEY (app_id, day, goal)
+);
+CREATE TABLE IF NOT EXISTS goal_visitors (   -- who reached a goal today and yesterday (hashes), to count them once
+    app_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    hash BLOB NOT NULL,
+    PRIMARY KEY (app_id, day, goal, hash)
+);
 CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday (hashes): counted once per day
     app_id TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -223,6 +238,10 @@ APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "po
               "current_release", "extra_ports", "backends", "stack", "aliases", "replaces", "cluster",
               "cluster_backends", "bind", "replica_of", "resources", "project", "pending", "pending_env"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
+
+
+def _yesterday(day: str) -> str:
+    return (datetime.fromisoformat(day) - timedelta(days=1)).date().isoformat()
 
 
 def _now() -> str:
@@ -586,6 +605,29 @@ class Database:
                 c.executemany("INSERT OR IGNORE INTO site_visitors (app_id, day, hash) VALUES (?, ?, ?)",
                               [(app_id, day, h) for h in hashes])
 
+    def add_goal(self, app_id: str, day: str, goal: str, who: bytes, max_goals: int) -> bool:
+        """Count a goal for a visitor (hits always, visitors once per day), plus the "_any" total."""
+        with self.tx() as c:
+            known = {r[0] for r in c.execute("SELECT goal FROM site_goals WHERE app_id = ? AND day = ? AND goal != '_any'",
+                                             (app_id, day))}
+            if goal not in known and len(known) >= max_goals:
+                return False
+            for name in (goal, "_any"):
+                before = c.total_changes
+                c.execute("INSERT OR IGNORE INTO goal_visitors (app_id, day, goal, hash) VALUES (?, ?, ?, ?)",
+                          (app_id, day, name, who))
+                new = c.total_changes - before
+                c.execute("INSERT INTO site_goals (app_id, day, goal, hits, visitors) VALUES (?, ?, ?, 1, ?) "
+                          "ON CONFLICT(app_id, day, goal) DO UPDATE SET hits = hits + 1, visitors = visitors + ?",
+                          (app_id, day, name, new, new))
+            c.execute("DELETE FROM goal_visitors WHERE app_id = ? AND day < ?", (app_id, _yesterday(day)))
+        return True
+
+    def site_goals(self, app_id: str, since: str) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM site_goals WHERE app_id = ? AND day >= ? ORDER BY day",
+                                               (app_id, since))]
+
     def site_stats(self, app_id: str, since: str) -> list[dict]:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM site_stats WHERE app_id = ? AND day >= ? ORDER BY day",
@@ -644,6 +686,8 @@ class Database:
             c.execute("DELETE FROM apps WHERE id = ?", (app_id,))
             c.execute("DELETE FROM site_stats WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM site_visitors WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM site_goals WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM goal_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM folder_items WHERE kind = 'app' AND item_id = ?", (app_id,))
 
     def create_release(self, app_id: str, trigger: str, actor: str | None, sha: str | None = None,
