@@ -1162,6 +1162,20 @@ class CmsManager:
                 log.warning("scheduled publication of %s/%s/%s failed: %s", row["app_id"], row["cid"], row["slug"], exc)
         return done
 
+    def write_files(self, app_id: str, folder: str, files: dict[str, str], username: str, note: str) -> dict:
+        """Commit generated text files (the legal pages) into a folder of the repository."""
+        folder = safe_repo_path(folder, "folder")
+        lock = self._locks.setdefault(app_id, threading.Lock())
+        with lock:
+            gh, app = self._target(app_id)
+            _, head = self.schema(app_id)
+            changes = {}
+            for name, text in files.items():
+                if not FILENAME_RE.fullmatch(name) or not name.endswith(".md"):
+                    raise CmsError("invalid file name")
+                changes[f"{folder}/{name}"] = text.encode()
+            return self._commit(gh, app, changes, "cms(legal)", note, "legal pages", username, head, [])
+
     # -- history: show and undo what the CMS committed -----------------------------------------------
 
     def changes(self, app_id: str, limit: int = 50) -> list[dict]:
