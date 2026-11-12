@@ -191,6 +191,13 @@ class GitHubApp:
                            "previous_filename": f.get("previous_filename")} for f in c.get("files", [])],
                 "truncated": len(c.get("files", [])) >= 300}
 
+    def create_check_run(self, installation_id: int, repo: str, head_sha: str, name: str, conclusion: str,
+                         title: str, summary: str, text: str = "") -> None:
+        """A check on a commit (needs the app's "Checks: write" permission; GitHubError 403 otherwise)."""
+        self._as_installation(installation_id, f"/repos/{repo}/check-runs", "POST", {
+            "name": name, "head_sha": head_sha, "status": "completed", "conclusion": conclusion,
+            "output": {"title": title[:250], "summary": summary[:60000], "text": text[:60000]}})
+
     def app_info(self) -> dict:
         return self._as_app("GET", "/app")
 

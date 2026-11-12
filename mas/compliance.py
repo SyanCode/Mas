@@ -522,6 +522,23 @@ class Auditor:
         return {"host": host, "score": score, "verdict": verdict, "counts": counts, "findings": unique, "pages": pages}
 
 
+def check_markdown(result: dict, previous: dict | None) -> tuple[str, str, str]:
+    """(conclusion, title, summary) of a GitHub check for one audit."""
+    counts = result["counts"]
+    conclusion = {"ok": "success", "attention": "neutral", "blocking": "failure"}[result["verdict"]]
+    delta = ""
+    if previous:
+        diff = result["score"] - previous["score"]
+        delta = f" ({'+' if diff >= 0 else ''}{diff} since the previous audit)"
+    title = f"Compliance {result['score']}/100{delta}"
+    lines = [f"**{result['host']}**: {counts['critical']} blocking, {counts['warning']} to improve, {counts['info']} advice, {counts['pass']} passed.", ""]
+    for f in result["findings"]:
+        if f["level"] in ("critical", "warning"):
+            lines.append(f"- {'**NEW** ' if f.get('new') else ''}{'🔴' if f['level'] == 'critical' else '🟠'} {f['title']}" + (f" - {f['fix']}" if f.get("fix") else ""))
+    lines += ["", "_Automatic technical audit by Mas of the published site. Not legal advice._"]
+    return conclusion, title, "\n".join(lines)
+
+
 # -- storage and scheduling ---------------------------------------------------------------------------
 
 
@@ -532,6 +549,7 @@ class Compliance:
         self._browser = browser  # "auto": Chrome when installed; None: never; or an object with .run(url)
         self._running: set[str] = set()
         self.notifier = None  # mas.notify.Notifier: tells people when the site got worse
+        self.checks = None  # (app, release_id, result) -> None: posts the result as a check on the commit
 
     def _banner(self, host: str) -> dict | None:
         from mas import cookies
@@ -563,6 +581,11 @@ class Compliance:
         self.db.audit("compliance", "cms-compliance", result["verdict"] != "blocking", service_id=app["id"],
                       detail=f"{result['score']}/100: {crit} critical, {warn} warning(s) ({trigger})")
         self._tell(app, previous, result)
+        if self.checks is not None and release_id is not None:
+            try:
+                self.checks(app, release_id, result)
+            except Exception:  # noqa: BLE001 - GitHub may refuse (no permission): the audit itself stands
+                log.warning("could not post the compliance check of %s", app["id"], exc_info=True)
         return result
 
     def browser(self):
