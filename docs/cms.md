@@ -306,7 +306,9 @@ with the site's collections and pages, and
   Markdown preview;
 - a **media library** of the images in the folders of the `image` fields: upload, search, copy the
   path, delete (refused while a page or entry uses the image);
-- **statistics** (from the nginx logs, no cookie), a **history** of who changed what, and for
+- **statistics** (from the nginx logs, no cookie), with a dotted **world map** of visitors by country
+  (an administrator enables it once: Mas downloads the free DB-IP *Country Lite* file, and keeps only
+  a country code per visitor, never an address; "IP Geolocation by DB-IP", CC BY 4.0), a **history** of who changed what, and for
   administrators the **users** (editors, the sites they can change, password and 2FA resets).
 
 Images of Supabase collections live in Supabase Storage and are not part of the media library.

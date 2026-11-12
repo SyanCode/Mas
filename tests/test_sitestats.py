@@ -112,3 +112,58 @@ def test_a_site_of_the_server_is_counted_from_the_shared_log(tmp_path):
     host.write_text(HOSTS_LOG, host.read_text(HOSTS_LOG) + "blog.example.com " + line("4.4.4.4", "21", "/") + "\n")
     stats._done.clear()
     assert stats.report(target, days=7, today=date(2026, 10, 21))["totals"]["requests"] == 4
+
+
+class FakeGeo:
+    """Countries by address prefix; stands in for the DB-IP file."""
+
+    def country(self, ip):
+        return {"1": "FR", "2": "US"}.get(ip[0])
+
+    def available(self):
+        return True
+
+
+def test_countries_are_counted_without_keeping_addresses(tmp_path):
+    days = count([line("1.1.1.1", "20", "/"), line("1.1.1.1", "20", "/b"), line("2.2.2.2", "20", "/"),
+                  line("1.1.1.9", "20", "/", agent=UA + " x"), line("9.9.9.9", "20", "/")], FakeGeo())
+    assert days["2026-10-20"]["countries"] == {"FR": 2, "US": 1} and days["2026-10-20"]["visitors"] == 4
+
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    db.create_app("bb", name="bb", repo="acme/bb", branch="main", type="static", domain="bb.example.com")
+    log = "/var/log/nginx/mas-app-bb.access.log"
+    host.write_text(log, line("1.1.1.1", "21", "/") + "\n")
+    stats = SiteStats(host, Config(), db, geo=FakeGeo())
+    app = db.get_app("bb")
+    stats.refresh(app, force=True)
+    host.write_text(log, line("1.1.1.1", "21", "/") + "\n" + line("1.1.1.1", "21", "/b") + "\n"
+                    + line("2.2.2.2", "21", "/") + "\n")  # same visitor again, one new
+    stats.refresh(app, force=True)
+    r = stats.report(app, days=7, today=date(2026, 10, 21))
+    assert r["countries"] == [{"code": "FR", "visitors": 1}, {"code": "US", "visitors": 1}] and r["geo"] is True
+    assert "1.1.1.1" not in str(db.site_stats("bb", "2026-01-01"))
+
+
+def test_geo_install_and_lookup(tmp_path):
+    import gzip as gz
+    from mas.geo import Geo, GeoError
+    calls = []
+
+    def fake_download(url, dest):
+        calls.append(url)
+        if "2026-11" in url:
+            raise OSError("not out yet")
+        dest.write_bytes(gz.compress(b"not really a database"))
+
+    geo = Geo(tmp_path, fake_download)
+    assert geo.country("8.8.8.8") is None and not geo.available()
+    result = geo.install(date(2026, 11, 3))
+    assert result["month"] == "2026-10" and len(calls) == 2  # this month first, then the previous one
+    assert geo.country("10.0.0.1") is None  # private, and the fake file is no database: never an error
+    broken = Geo(tmp_path / "x", lambda url, dest: (_ for _ in ()).throw(OSError("offline")))
+    try:
+        broken.install(date(2026, 11, 3))
+        raise AssertionError("should fail")
+    except GeoError:
+        pass
