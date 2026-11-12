@@ -29,6 +29,7 @@ from mas.github import GitHubApp
 from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
+from mas.compliance import Compliance
 from mas import goals as goals_mod
 from mas.geo import Geo
 from mas.sitestats import SiteStats, service_target
@@ -217,6 +218,10 @@ def create_app(
                 await asyncio.to_thread(cms.run_due)
             except Exception:
                 log.exception("scheduled CMS publications failed")
+            try:  # GDPR audit of the sites changed since the last one
+                await asyncio.to_thread(compliance.tick)
+            except Exception:
+                log.exception("compliance audit failed")
             try:  # maintenances whose end time is reached
                 await asyncio.to_thread(maintenance.tick)
             except Exception:
@@ -261,6 +266,8 @@ def create_app(
     stack_backups = StackBackups(stacks, keep=config.stacks_keep_backups)
     cms = CmsManager(db, github_client, deployer, Path(db.path).parent, supabase=supabase)
     geo = Geo(Path(db.path).parent)
+    compliance = Compliance(db)
+    app_state_compliance = compliance
     site_stats = SiteStats(host, config, db, find_service=scanner.get, geo=geo)
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \
         Cluster(host, config, db, deployer)
@@ -305,6 +312,7 @@ def create_app(
     app.state.scanner, app.state.db, app.state.host = scanner, db, host
     mcp = mcp_endpoint.Endpoint(app, db, token_limiter, TRUSTED_PROXIES)
     app.state.cms = cms
+    app.state.compliance = app_state_compliance
 
     # -- middleware --------------------------------------------------------
 
@@ -761,7 +769,7 @@ def create_app(
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,
-                     stats=site_stats, geo=geo)
+                     stats=site_stats, geo=geo, compliance=compliance)
 
     # -- dashboard ---------------------------------------------------------
 

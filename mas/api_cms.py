@@ -6,6 +6,7 @@ import asyncio
 import secrets
 import time
 from collections.abc import Callable
+from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -15,6 +16,10 @@ from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import Database
 from mas.geo import ATTRIBUTION, GeoError
 from mas.sitestats import SiteStats
+
+
+# What an automatic audit cannot see: kept as a short checklist for a human (ids are translated by the UI).
+MANUAL_CHECKS = ["register", "processors", "retention", "rights", "breach", "dpo"]
 
 
 class NewUser(BaseModel):
@@ -80,7 +85,7 @@ class NewEntryBody(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, any_session: Callable, current_session: Callable,
-             manager: CmsManager, stats: SiteStats | None = None, geo=None) -> None:
+             manager: CmsManager, stats: SiteStats | None = None, geo=None, compliance=None) -> None:
 
     def call(fn, *args):
         try:
@@ -361,7 +366,9 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
         def one(a: dict) -> dict:
             report = stats.report(a, 7) if stats is not None and a["domain"] else None
-            return {**site_payload(a), "visits": report, "scheduled": [r for r in scheduled if r["app_id"] == a["id"]]}
+            last = compliance.latest(a["id"]) if compliance is not None else None
+            return {**site_payload(a), "visits": report, "scheduled": [r for r in scheduled if r["app_id"] == a["id"]],
+                    "compliance": {"score": last["score"], "verdict": last["verdict"], "at": last["at"]} if last else None}
         sites_ = await asyncio.gather(*(asyncio.to_thread(one, a) for a in apps))
         names = {a["id"]: a["name"] for a in apps}
         activity = [dict(r) | {"site": names.get(r["service_id"])} for r in db.cms_activity(list(names), 12)]
@@ -409,6 +416,30 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             raise HTTPException(400, str(exc)) from None
         db.audit(s.username, "cms-cookies", True, service_id=app_id, detail="on" if config["enabled"] else "off")
         return {"config": config, "stats": cookies_mod.report(db, app_id)}
+
+    @app.get("/api/cms/sites/{app_id}/compliance")
+    def compliance_get(app_id: str, s=Depends(any_session)) -> dict:
+        target = site(s, app_id)
+        if compliance is None:
+            raise HTTPException(404, "audits are not available")
+        return {"latest": compliance.latest(app_id), "history": compliance.history(app_id),
+                "domain": target["domain"], "manual": MANUAL_CHECKS}
+
+    @app.post("/api/cms/sites/{app_id}/compliance/run")
+    async def compliance_run(app_id: str, s=Depends(any_session)) -> dict:
+        target = site(s, app_id)
+        if compliance is None or not target["domain"]:
+            raise HTTPException(400, "the site needs a domain to be audited")
+        last = compliance.latest(app_id)
+        if last and time.time() - datetime.fromisoformat(last["at"]).timestamp() < 20:
+            return {"latest": last, "history": compliance.history(app_id), "domain": target["domain"],
+                    "manual": MANUAL_CHECKS}
+        try:
+            await asyncio.to_thread(compliance.run, target, None, "manual")
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {"latest": compliance.latest(app_id), "history": compliance.history(app_id),
+                "domain": target["domain"], "manual": MANUAL_CHECKS}
 
     @app.get("/api/cms/sites/{app_id}/overview")
     async def overview(app_id: str, s=Depends(any_session)) -> dict:

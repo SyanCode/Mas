@@ -163,6 +163,22 @@ export interface TrafficReport {
   attribution?: string;
 }
 
+export interface ComplianceFinding {
+  id: string; level: "critical" | "warning" | "info" | "pass"; category: string; title: string; detail: string; fix: string;
+  where: string; new?: boolean;
+}
+export interface ComplianceAudit {
+  id: number; host: string; score: number; verdict: "ok" | "attention" | "blocking";
+  counts: Record<"critical" | "warning" | "info" | "pass", number>; findings: ComplianceFinding[]; pages: string[];
+  at: string; trigger: string; release_id: number | null;
+}
+export interface ComplianceReport {
+  latest: ComplianceAudit | null;
+  history: { id: number; at: string; score: number; verdict: string; trigger: string; release_id: number | null }[];
+  domain: string | null;
+  manual: string[];
+}
+
 export interface CmsActivity {
   id: number;
   at: string;
@@ -175,7 +191,7 @@ export interface CmsActivity {
 }
 
 export interface CmsDashboard {
-  sites: (CmsSite & { visits: TrafficReport | null; scheduled: { cid: string; slug: string; publish_at: string }[] })[];
+  sites: (CmsSite & { visits: TrafficReport | null; scheduled: { cid: string; slug: string; publish_at: string }[]; compliance?: { score: number; verdict: string; at: string } | null })[];
   totals: { pageviews: number; visitors: number; requests: number };
   days: { day: string; pageviews: number; visitors: number }[];
   countries: { code: string; visitors: number }[];

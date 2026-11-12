@@ -8,6 +8,7 @@ import { TrafficChart } from "@/components/cms/TrafficChart";
 import { CountryList, WorldMap } from "@/components/cms/WorldMap";
 import { DeployBadge, StatCard, formatDate, parseUtc, useDescribe } from "@/components/cms/common";
 import { Avatar } from "@/components/cms/ui/avatar";
+import { Badge } from "@/components/cms/ui/badge";
 import { Button } from "@/components/cms/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { Skeleton } from "@/components/cms/ui/skeleton";
@@ -97,17 +98,18 @@ function Dashboard() {
           <CardHeader><CardTitle>{t("Your sites")}</CardTitle></CardHeader>
           <CardContent className="px-2 pb-2">
             <Table>
-              <TableHeader><TableRow><TableHead>{t("Site")}</TableHead><TableHead className="text-right">{t("Page views · 7 days")}</TableHead><TableHead>{t("Last publication")}</TableHead><TableHead /></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>{t("Site")}</TableHead><TableHead className="text-right">{t("Page views · 7 days")}</TableHead><TableHead>{t("Last publication")}</TableHead><TableHead>{t("Compliance")}</TableHead><TableHead /></TableRow></TableHeader>
               <TableBody>
                 {data?.sites.map((s) => (
                   <TableRow key={s.id}>
                     <TableCell><div className="font-medium">{s.name}</div><div className="text-xs text-muted-foreground">{s.domain ?? t("no domain yet")}</div></TableCell>
                     <TableCell className="text-right tabular-nums">{s.visits?.totals ? nf(s.visits.totals.pageviews, lang) : "—"}</TableCell>
                     <TableCell>{s.last_release ? <span className="flex items-center gap-2"><DeployBadge status={s.last_release.status} /><span className="text-xs text-muted-foreground">{timeAgo(s.last_release.created_at)}</span></span> : <span className="text-xs text-muted-foreground">{t("Not published yet")}</span>}</TableCell>
+                    <TableCell>{s.compliance ? <Link href={`/cms/compliance/?app=${encodeURIComponent(s.id)}`}><Badge variant={s.compliance.verdict === "ok" ? "success" : s.compliance.verdict === "attention" ? "warning" : "destructive"}>{s.compliance.score}/100</Badge></Link> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
                     <TableCell className="text-right"><Button asChild size="sm" variant="outline"><Link href={`/cms/?app=${encodeURIComponent(s.id)}`} onClick={() => { try { localStorage.setItem("mas-cms-site", s.id); } catch {} }}>{t("Select")}</Link></Button></TableCell>
                   </TableRow>
                 ))}
-                {!data && <TableRow><TableCell colSpan={4}><Skeleton className="h-8" /></TableCell></TableRow>}
+                {!data && <TableRow><TableCell colSpan={5}><Skeleton className="h-8" /></TableCell></TableRow>}
               </TableBody>
             </Table>
           </CardContent>
