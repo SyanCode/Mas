@@ -209,6 +209,21 @@ CREATE TABLE IF NOT EXISTS consent_versions ( -- what each banner version said (
     first_seen TEXT NOT NULL,
     PRIMARY KEY (app_id, version)
 );
+CREATE TABLE IF NOT EXISTS uptime_checks (   -- one answer of the site per check
+    app_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    status INTEGER NOT NULL,                   -- HTTP status, 0 when nothing answered
+    ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS uptime_app ON uptime_checks(app_id, at);
+CREATE TABLE IF NOT EXISTS uptime_incidents (
+    id INTEGER PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    started TEXT NOT NULL,
+    ended TEXT,
+    reason TEXT
+);
 CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday (hashes): counted once per day
     app_id TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -728,6 +743,51 @@ class Database:
                              "WHERE app_id = ? ORDER BY id DESC LIMIT ?", (app_id, limit)).fetchall()
         return [dict(r) for r in rows]
 
+    def add_uptime_check(self, app_id: str, at: str, ok: bool, status: int, ms: int) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO uptime_checks (app_id, at, ok, status, ms) VALUES (?, ?, ?, ?, ?)",
+                      (app_id, at, int(ok), status, ms))
+
+    def last_uptime(self, app_id: str) -> str | None:
+        with self.tx() as c:
+            row = c.execute("SELECT MAX(at) FROM uptime_checks WHERE app_id = ?", (app_id,)).fetchone()
+        return row[0]
+
+    def recent_uptime(self, app_id: str, n: int) -> list[dict]:
+        """The last ``n`` checks, oldest first."""
+        with self.tx() as c:
+            rows = c.execute("SELECT * FROM uptime_checks WHERE app_id = ? ORDER BY at DESC LIMIT ?", (app_id, n)).fetchall()
+        return [dict(r) | {"ok": bool(r["ok"])} for r in reversed(rows)]
+
+    def uptime_since(self, app_id: str, since: str) -> list[dict]:
+        with self.tx() as c:
+            rows = c.execute("SELECT at, ok, status, ms FROM uptime_checks WHERE app_id = ? AND at >= ? ORDER BY at",
+                             (app_id, since)).fetchall()
+        return [dict(r) | {"ok": bool(r["ok"])} for r in rows]
+
+    def prune_uptime(self, before: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM uptime_checks WHERE at < ?", (before,))
+            c.execute("DELETE FROM uptime_incidents WHERE ended IS NOT NULL AND ended < ?", (before,))
+
+    def open_incident(self, app_id: str) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM uptime_incidents WHERE app_id = ? AND ended IS NULL", (app_id,)).fetchone()
+        return dict(row) if row else None
+
+    def open_incident_row(self, app_id: str, started: str, reason: str) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO uptime_incidents (app_id, started, reason) VALUES (?, ?, ?)", (app_id, started, reason))
+
+    def close_incident(self, incident_id: int, ended: str) -> None:
+        with self.tx() as c:
+            c.execute("UPDATE uptime_incidents SET ended = ? WHERE id = ?", (ended, incident_id))
+
+    def incidents(self, app_id: str, since: str) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM uptime_incidents WHERE app_id = ? AND (ended IS NULL OR ended >= ?) "
+                                               "ORDER BY started DESC", (app_id, since))]
+
     def site_goals(self, app_id: str, since: str) -> list[dict]:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM site_goals WHERE app_id = ? AND day >= ? ORDER BY day",
@@ -793,6 +853,8 @@ class Database:
             c.execute("DELETE FROM site_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM site_goals WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM consent_stats WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM uptime_checks WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM uptime_incidents WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM consent_log WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM consent_versions WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM compliance_audits WHERE app_id = ?", (app_id,))
