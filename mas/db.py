@@ -174,6 +174,13 @@ CREATE TABLE IF NOT EXISTS goal_visitors (   -- who reached a goal today and yes
     hash BLOB NOT NULL,
     PRIMARY KEY (app_id, day, goal, hash)
 );
+CREATE TABLE IF NOT EXISTS consent_stats (   -- cookie banner decisions per day (no identifier)
+    app_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    decision TEXT NOT NULL,                    -- accept | reject | custom
+    n INTEGER NOT NULL,
+    PRIMARY KEY (app_id, day, decision)
+);
 CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday (hashes): counted once per day
     app_id TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -623,6 +630,16 @@ class Database:
             c.execute("DELETE FROM goal_visitors WHERE app_id = ? AND day < ?", (app_id, _yesterday(day)))
         return True
 
+    def add_consent(self, app_id: str, day: str, decision: str) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO consent_stats (app_id, day, decision, n) VALUES (?, ?, ?, 1) "
+                      "ON CONFLICT(app_id, day, decision) DO UPDATE SET n = n + 1", (app_id, day, decision))
+
+    def consent_stats(self, app_id: str, since: str) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT decision, SUM(n) AS n FROM consent_stats "
+                                               "WHERE app_id = ? AND day >= ? GROUP BY decision", (app_id, since))]
+
     def site_goals(self, app_id: str, since: str) -> list[dict]:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM site_goals WHERE app_id = ? AND day >= ? ORDER BY day",
@@ -687,6 +704,8 @@ class Database:
             c.execute("DELETE FROM site_stats WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM site_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM site_goals WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM consent_stats WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM settings WHERE key = ?", (f"cookies:{app_id}",))
             c.execute("DELETE FROM goal_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM folder_items WHERE kind = 'app' AND item_id = ?", (app_id,))
 
