@@ -31,6 +31,7 @@ from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
 from mas.compliance import Compliance
 from mas.notify import Notifier
+from mas.uptime import Uptime
 from mas import goals as goals_mod
 from mas.geo import Geo
 from mas.sitestats import SiteStats, service_target
@@ -219,6 +220,10 @@ def create_app(
                 await asyncio.to_thread(cms.run_due)
             except Exception:
                 log.exception("scheduled CMS publications failed")
+            try:  # is each site answering?
+                await asyncio.to_thread(uptime.tick)
+            except Exception:
+                log.exception("uptime checks failed")
             try:  # failed deployments and the weekly report
                 await asyncio.to_thread(notifier.tick)
             except Exception:
@@ -276,6 +281,7 @@ def create_app(
     site_stats = SiteStats(host, config, db, find_service=scanner.get, geo=geo)
     notifier = Notifier(db, host, config, stats=site_stats, compliance=compliance)
     compliance.notifier = notifier
+    uptime = Uptime(db, notifier=notifier)
     cms.notifier = notifier
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \
         Cluster(host, config, db, deployer)
@@ -322,6 +328,7 @@ def create_app(
     app.state.cms = cms
     app.state.compliance = app_state_compliance
     app.state.notifier = notifier
+    app.state.uptime = uptime
 
     # -- middleware --------------------------------------------------------
 
@@ -778,7 +785,7 @@ def create_app(
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,
-                     stats=site_stats, geo=geo, compliance=compliance, notifier=notifier)
+                     stats=site_stats, geo=geo, compliance=compliance, notifier=notifier, uptime=uptime)
 
     # -- dashboard ---------------------------------------------------------
 
@@ -811,6 +818,15 @@ def create_app(
         except (ValueError, AttributeError):
             pass
         return Response(status_code=204)
+
+    @app.get("/status/{app_id}", include_in_schema=False)
+    def status_page(app_id: str) -> Response:
+        """Public status page of a site, only when its owner switched it on."""
+        target = db.get_app(app_id)
+        if target is None or db.get_setting(f"status_page:{app_id}") != "1":
+            return Response("not found", status_code=404, media_type="text/plain")
+        return Response(uptime.status_html(target), media_type="text/html; charset=utf-8",
+                        headers={"Cache-Control": "public, max-age=30", "X-Robots-Tag": "noindex"})
 
     @app.get("/cookies.js", include_in_schema=False)
     def cookies_script() -> Response:
