@@ -357,4 +357,25 @@ Mas's own conversion script and visit statistics use no cookie and need no banne
 the cookies of the other tools the site loads. It is a technical tool: the legal text (and whether
 your use needs consent) stays yours.
 
+### Compliance audit
+
+*Compliance* in the sidebar shows a GDPR / ePrivacy audit of the **live site**, run by Mas after
+every publication (so after every CMS change) and again every week, since third-party services can
+change without a release. It reads the public pages like a visitor and reports, each with a fix:
+
+- **trackers and embeds** (Google Analytics / Tag Manager, Meta Pixel, ads, YouTube, Maps, Google
+  Fonts…) that load **before consent**, and tracking cookies set on the first visit;
+- **the consent banner**: present (Mas or a known CMP), not switched off, linked to a privacy policy;
+- **legal pages**: privacy policy and legal notice (mentions légales / Impressum) linked and
+  reachable, with their usual content (controller, purposes, retention, rights, authority; publisher,
+  registration number, host); terms of sale for shops;
+- **forms** that collect personal data without information, or over `http://`;
+- **HTTPS**, redirect, HSTS and basic security headers.
+
+The score (100 minus 20 per blocking issue, 6 per point to improve) and what is **new since the
+previous audit** are shown, with the score over time. A clean audit means *nothing visible is wrong*,
+not that the site is legal: how data is handled behind the site (register of processing, contracts
+with processors, retention, rights requests, breach procedure) stays on a checklist for a human.
+Mas does not give legal advice.
+
 Images of Supabase collections live in Supabase Storage and are not part of the media library.

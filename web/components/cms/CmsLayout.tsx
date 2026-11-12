@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Activity, BarChart3, Cookie, ExternalLink, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Menu, Moon, Newspaper,
+  Activity, BarChart3, Cookie, ShieldCheck, ExternalLink, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Menu, Moon, Newspaper,
   Server, Settings as SettingsIcon, Sun, Users, X,
 } from "lucide-react";
 import { Logo } from "@/components/Shell";
@@ -98,6 +98,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
             <Group title={t("Site")}>
               <NavLink href={`/cms/media/?${q}`} icon={ImageIcon} active={here("/cms/media")}>{t("Media")}</NavLink>
               {site.domain && <NavLink href={`/cms/stats/?${q}`} icon={BarChart3} active={here("/cms/stats")}>{t("Statistics")}</NavLink>}
+              <NavLink href={`/cms/compliance/?${q}`} icon={ShieldCheck} active={here("/cms/compliance")}>{t("Compliance")}</NavLink>
               <NavLink href={`/cms/cookies/?${q}`} icon={Cookie} active={here("/cms/cookies")}>{t("Cookie banner")}</NavLink>
               <NavLink href={`/cms/activity/?${q}`} icon={Activity} active={here("/cms/activity")}>{t("History")}</NavLink>
             </Group>
