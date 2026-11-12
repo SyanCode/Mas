@@ -459,7 +459,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         if compliance is None:
             raise HTTPException(404, "audits are not available")
         return {"latest": compliance.latest(app_id), "history": compliance.history(app_id),
-                "domain": target["domain"], "manual": MANUAL_CHECKS}
+                "domain": target["domain"], "manual": MANUAL_CHECKS, "browser": compliance.browser() is not None}
 
     @app.post("/api/cms/sites/{app_id}/compliance/run")
     async def compliance_run(app_id: str, s=Depends(any_session)) -> dict:
@@ -469,7 +469,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         last = compliance.latest(app_id)
         if last and time.time() - datetime.fromisoformat(last["at"]).timestamp() < 20:
             return {"latest": last, "history": compliance.history(app_id), "domain": target["domain"],
-                    "manual": MANUAL_CHECKS}
+                    "manual": MANUAL_CHECKS, "browser": compliance.browser() is not None}
         try:
             await asyncio.to_thread(compliance.run, target, None, "manual")
         except RuntimeError as exc:
