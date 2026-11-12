@@ -11,6 +11,7 @@ import { FormItem } from "@/components/cms/ui/form-item";
 import { Label } from "@/components/cms/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Skeleton } from "@/components/cms/ui/skeleton";
+import { TagField } from "@/components/cms/premium";
 import { Switch } from "@/components/cms/ui/switch";
 import { api, type ApiError } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
@@ -31,7 +32,7 @@ function Notifications() {
   const [smtp, setSmtp] = useState<Smtp | null>(null);
   const [password, setPassword] = useState("");
   const [cfg, setCfg] = useState<SiteNotify | null>(null);
-  const [emails, setEmails] = useState("");
+  const [emails, setEmails] = useState<string[]>([]);
   const [webhook, setWebhook] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -39,7 +40,7 @@ function Notifications() {
   useEffect(() => { api<{ smtp: Smtp }>("/notify").then((r) => setSmtp(r.smtp)).catch((e: ApiError) => setError(e.detail)); }, []);
   useEffect(() => {
     if (!site) return;
-    api<SiteNotify>(`/cms/sites/${encodeURIComponent(site.id)}/notify`).then((r) => { setCfg(r); setEmails(r.emails.join(", ")); setWebhook(""); }).catch((e: ApiError) => setError(e.detail));
+    api<SiteNotify>(`/cms/sites/${encodeURIComponent(site.id)}/notify`).then((r) => { setCfg(r); setEmails(r.emails); setWebhook(""); }).catch((e: ApiError) => setError(e.detail));
   }, [site]);
 
   if (session.role !== "admin") return <p className="text-sm text-muted-foreground">{t("Only administrators manage notifications.")}</p>;
@@ -90,7 +91,7 @@ function Notifications() {
           <CardContent className="space-y-4">
             {!cfg ? <Skeleton className="h-48" /> : (
               <>
-                <FormItem className="space-y-1.5"><Label>{t("E-mail addresses")}</Label><Input value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="client@example.com, me@example.com" /></FormItem>
+                <TagField key={`${site.id}-${cfg.emails.join()}`} label={t("E-mail addresses")} placeholder="client@example.com" hint={t("Press Enter after each address.")} value={emails} onChange={setEmails} />
                 <FormItem className="space-y-1.5"><Label>{t("Webhook")}</Label><Input value={webhook} onChange={(e) => setWebhook(e.target.value)} placeholder={cfg.has_webhook ? t("A webhook is saved (type a new address to replace it)") : "https://hooks.slack.com/services/…"} />
                   <p className="text-xs text-muted-foreground">{t("Slack, Discord or any address that accepts JSON. https only. Stored encrypted.")}</p></FormItem>
                 <div className="space-y-2.5">
@@ -103,7 +104,7 @@ function Notifications() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button disabled={busy === "site"} onClick={() => run("site", async () => {
-                    const r = await api<SiteNotify>(base, { method: "PUT", body: { emails: emails.split(",").map((x) => x.trim()).filter(Boolean), webhook, events: cfg.events, digest: cfg.digest } });
+                    const r = await api<SiteNotify>(base, { method: "PUT", body: { emails, webhook, events: cfg.events, digest: cfg.digest } });
                     setCfg(r); setWebhook(""); toast.success(t("Saved."));
                   })}>{busy === "site" && <Loader2 className="animate-spin" />}{t("Save")}</Button>
                   <Button variant="outline" disabled={busy === "test"} onClick={() => run("test", async () => { await api(`${base}/test`, { method: "POST" }); toast.success(t("Test sent.")); })}>{busy === "test" ? <Loader2 className="animate-spin" /> : <Send />}{t("Send a test")}</Button>

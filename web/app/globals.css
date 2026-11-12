@@ -316,9 +316,10 @@ pre,
   }
 }
 
-/* -- CMS back-office (shadcn/ui tokens) ------------------------------------------------------
-   Scoped to .cms so the rest of the dashboard keeps its themes. Portals (menus, dialogs) carry
-   the class too. Neutral palette, one blue accent, a dark sidebar like a classic admin. */
+/* -- CMS back-office ---------------------------------------------------------------------------
+   Scoped to .cms so the rest of the dashboard keeps its themes. Portals (menus, dialogs) carry the class too.
+   Warm paper and ink, one indigo accent used sparingly, Geist for the interface, Instrument Serif for titles
+   and big figures. Cards float on soft shadows instead of boxes; the sidebar shares the page background. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -338,59 +339,68 @@ pre,
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-brand: var(--brand);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-border: var(--sidebar-border);
 }
+@theme {
+  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+}
 .cms {
-  --background: #f4f4f5;
-  --foreground: #18181b;
+  --background: #f6f5f1;
+  --foreground: #17171a;
   --card: #ffffff;
-  --card-foreground: #18181b;
+  --card-foreground: #17171a;
   --popover: #ffffff;
-  --popover-foreground: #18181b;
-  --primary: #2563eb;
-  --primary-foreground: #ffffff;
-  --secondary: #e4e4e7;
-  --secondary-foreground: #18181b;
-  --muted: #ececee;
-  --muted-foreground: #71717a;
-  --accent: #e8e8eb;
-  --accent-foreground: #18181b;
-  --destructive: #dc2626;
-  --border: #e0e0e4;
-  --input: #d4d4d8;
-  --ring: #2563eb;
-  --sidebar: #1c1f26;
-  --sidebar-foreground: #c8ccd4;
-  --sidebar-accent: #2b2f39;
-  --sidebar-border: #2b2f39;
+  --popover-foreground: #17171a;
+  --primary: #17171a;
+  --primary-foreground: #fafaf8;
+  --secondary: #eceae3;
+  --secondary-foreground: #17171a;
+  --muted: #efede7;
+  --muted-foreground: #77746b;
+  --accent: #ebe9e2;
+  --accent-foreground: #17171a;
+  --destructive: #d92d20;
+  --border: #e6e3da;
+  --input: #e6e3da;
+  --ring: #5b5bd6;
+  --brand: #5b5bd6;
+  --sidebar: #f6f5f1;
+  --sidebar-foreground: #6b685f;
+  --sidebar-accent: #ffffff;
+  --sidebar-border: #e6e3da;
   color: var(--foreground);
-  font-family: var(--font-sans);
+  font-family: "Geist Variable", var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
 }
 :root.dark .cms {
-  --background: #0f1012;
-  --foreground: #ececee;
-  --card: #17181b;
-  --card-foreground: #ececee;
-  --popover: #17181b;
-  --popover-foreground: #ececee;
-  --primary: #3b82f6;
-  --primary-foreground: #ffffff;
-  --secondary: #26272b;
-  --secondary-foreground: #ececee;
-  --muted: #1f2023;
-  --muted-foreground: #9a9aa3;
-  --accent: #26272b;
-  --accent-foreground: #ececee;
-  --destructive: #ef4444;
-  --border: #26272b;
-  --input: #34353a;
-  --ring: #3b82f6;
-  --sidebar: #0a0b0d;
-  --sidebar-foreground: #b4b8c1;
-  --sidebar-accent: #1a1c21;
-  --sidebar-border: #1a1c21;
+  --background: #0c0c0d;
+  --foreground: #f1f0ec;
+  --card: #141415;
+  --card-foreground: #f1f0ec;
+  --popover: #181819;
+  --popover-foreground: #f1f0ec;
+  --primary: #f3f2ed;
+  --primary-foreground: #121213;
+  --secondary: #1f1f21;
+  --secondary-foreground: #f1f0ec;
+  --muted: #1b1b1d;
+  --muted-foreground: #8e8c85;
+  --accent: #232325;
+  --accent-foreground: #f1f0ec;
+  --destructive: #f0584b;
+  --border: #242426;
+  --input: #2c2c2f;
+  --ring: #8b8bf0;
+  --brand: #8b8bf0;
+  --sidebar: #0c0c0d;
+  --sidebar-foreground: #9a9890;
+  --sidebar-accent: #19191b;
+  --sidebar-border: #1d1d1f;
 }
 .cms-page { background: var(--background); }
+.cms code, .cms kbd { font-family: "Geist Mono Variable", var(--font-mono); }

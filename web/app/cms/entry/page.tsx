@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ExternalLink, Loader2, Trash2 } from "lucide-react";
 import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout";
 import { StatusBadge, parseUtc } from "@/components/cms/common";
+import { TimeField } from "@/components/cms/premium";
 import { emptyItem, FieldInput, type Previews, type Values } from "@/components/cms/fields";
 import { PublishBanner, usePublisher, type Saved } from "@/components/cms/publish";
 import { Button } from "@/components/cms/ui/button";
@@ -27,6 +28,24 @@ function toLocalInput(utc: string | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 const toUtc = (local: string) => (local ? new Date(local).toISOString().slice(0, 16) : null);
+
+/** In an hour, on the hour: where a new schedule starts. */
+const defaultWhen = () => { const d = new Date(Date.now() + 3600_000); d.setMinutes(0, 0, 0); return toLocalInput(d.toISOString().slice(0, 16)); };
+
+/** Date and time of a scheduled publication ("YYYY-MM-DDTHH:MM", local time). */
+function SchedulePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const t = useT();
+  const soon = useMemo(defaultWhen, []);
+  const [date, time] = (value || soon).split("T");
+  const [h, m] = time.split(":").map(Number);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    <div className="space-y-2">
+      <Input id="when" type="date" aria-label={t("Publish on")} value={date} min={soon.slice(0, 10)} onChange={(e) => onChange(`${e.target.value}T${time}`)} />
+      <TimeField hour={h} minute={m} onChange={(hh, mm) => onChange(`${date}T${pad(hh)}:${pad(mm)}`)} />
+    </div>
+  );
+}
 
 function Editor() {
   const t = useT();
@@ -138,7 +157,7 @@ function Editor() {
                 {drafts && (
                   <FormItem>
                     <Label>{t("Status")}</Label>
-                    <Select value={status} onValueChange={(v) => setStatus(v as CmsStatus)}>
+                    <Select value={status} onValueChange={(v) => { setStatus(v as CmsStatus); if (v === "scheduled" && !when) setWhen(defaultWhen()); }}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="draft">{t("Draft")}</SelectItem>
@@ -151,7 +170,7 @@ function Editor() {
                 {drafts && status === "scheduled" && (
                   <div className="space-y-1.5">
                     <Label htmlFor="when">{t("Publish on")}</Label>
-                    <Input id="when" type="datetime-local" value={when} min={toLocalInput(new Date().toISOString().slice(0, 16))} onChange={(e) => setWhen(e.target.value)} />
+                    <SchedulePicker key={when === "" ? "empty" : "set"} value={when} onChange={setWhen} />
                     <p className="text-xs text-muted-foreground">{t("Published automatically at that time (your local time).")}</p>
                   </div>
                 )}

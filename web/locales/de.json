@@ -1662,5 +1662,12 @@
   "link text": "Linktext",
   "Formatting": "Formatierung",
   "Image from the library": "Bild aus der Mediathek",
-  "description": "Beschreibung"
+  "description": "Beschreibung",
+  "Press Enter after each address.": "Drücken Sie nach jeder Adresse die Eingabetaste.",
+  "The site is down": "Die Website ist ausgefallen",
+  "Blocking compliance issues": "Blockierende Compliance-Probleme",
+  "Compliance points to improve": "Compliance-Punkte zu verbessern",
+  "{n} blocking": "{n} blockierend",
+  "Inbox": "Posteingang",
+  "Mark all read": "Alle als gelesen markieren"
 }

@@ -12,7 +12,7 @@ const SelectValue = SelectPrimitive.Value;
 const SelectTrigger = React.forwardRef<React.ElementRef<typeof SelectPrimitive.Trigger>, React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>>(
   ({ className, children, id, ...props }, ref) => (
     <SelectPrimitive.Trigger ref={ref} id={id ?? useFormItemId() ?? undefined}
-      className={cn("flex h-9 w-full items-center justify-between gap-2 whitespace-nowrap rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate", className)}
+      className={cn("flex h-10 w-full items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-transparent bg-muted/70 px-3.5 py-2 text-sm transition-colors hover:bg-muted focus:border-brand/40 focus:bg-card focus:outline-none focus:ring-4 focus:ring-brand/10 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate", className)}
       {...props}>
       {children}
       <SelectPrimitive.Icon asChild><ChevronDown className="size-4 opacity-50" /></SelectPrimitive.Icon>
@@ -25,7 +25,7 @@ const SelectContent = React.forwardRef<React.ElementRef<typeof SelectPrimitive.C
   ({ className, children, position = "popper", ...props }, ref) => (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content ref={ref} position={position}
-        className={cn("cms relative z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md", position === "popper" && "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1", className)}
+        className={cn("cms relative z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-xl bg-popover text-popover-foreground shadow-[0_0_0_1px_var(--border),0_16px_40px_-12px_rgb(0_0_0/0.25)]", position === "popper" && "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1", className)}
         {...props}>
         <SelectPrimitive.Viewport className={cn("p-1", position === "popper" && "w-full min-w-[var(--radix-select-trigger-width)]")}>
           {children}

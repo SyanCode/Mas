@@ -87,7 +87,7 @@ function Legal() {
                 <TabsContent key={d.id} value={d.id}>
                   <Card><CardContent className="space-y-4 p-5">
                     {d.missing.length > 0 && <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">{t("To complete")}: {d.missing.map((m) => t(LABEL[m] ?? m)).join(", ")}</p>}
-                    <div className="max-h-[32rem] overflow-auto text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:mb-3 [&_table]:my-3 [&_table]:w-full [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2 [&_th]:text-left">
+                    <div className="max-h-[32rem] overflow-auto text-sm leading-relaxed [&_a]:text-brand [&_a]:underline [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:mb-3 [&_table]:my-3 [&_table]:w-full [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2 [&_th]:text-left">
                       <Markdown>{d.markdown.replace(/<!--.*?-->/s, "")}</Markdown>
                     </div>
                     <div className="flex flex-wrap gap-2">

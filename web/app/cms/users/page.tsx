@@ -78,7 +78,7 @@ function People() {
           </TableBody>
         </Table>
       </Card>
-      <p className="mt-4 text-xs text-muted-foreground">{t("Invitation links and open sign-up are in")} <Link href="/settings/" className="text-primary hover:underline">{t("Settings")}</Link>.</p>
+      <p className="mt-4 text-xs text-muted-foreground">{t("Invitation links and open sign-up are in")} <Link href="/settings/" className="text-brand hover:underline">{t("Settings")}</Link>.</p>
 
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent>

@@ -45,8 +45,8 @@ export function WorldMap({ countries, className = "" }: { countries: CountryVisi
           const r = 0.9 + 2.4 * Math.sqrt(m.visitors / max);
           return (
             <g key={m.code} onMouseEnter={() => setHover(m.code)} onMouseLeave={() => setHover(null)} className="cursor-pointer">
-              <circle cx={m.x} cy={m.y} r={r} className="animate-ping fill-primary/40" style={{ transformOrigin: `${m.x}px ${m.y}px`, animationDuration: "2.6s" }} />
-              <circle cx={m.x} cy={m.y} r={r * 0.55} className="fill-primary" />
+              <circle cx={m.x} cy={m.y} r={r} className="animate-ping fill-brand/40" style={{ transformOrigin: `${m.x}px ${m.y}px`, animationDuration: "2.6s" }} />
+              <circle cx={m.x} cy={m.y} r={r * 0.55} className="fill-brand" />
               <circle cx={m.x} cy={m.y} r={r * 1.6} className="fill-transparent" />
             </g>
           );
@@ -76,7 +76,7 @@ export function CountryList({ countries, limit = 8 }: { countries: CountryVisits
             <span className="truncate">{flag(c.code)} {countryName(c.code, lang)}</span>
             <span className="tabular-nums text-muted-foreground">{Math.round((c.visitors / total) * 100)}%</span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(c.visitors / max) * 100}%` }} /></div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-brand" style={{ width: `${(c.visitors / max) * 100}%` }} /></div>
         </li>
       ))}
     </ul>

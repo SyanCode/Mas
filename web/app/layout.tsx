@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { I18nProvider } from "@/lib/i18n";
 import { ThemeProvider, themeScript } from "@/lib/theme";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "@fontsource/instrument-serif";
 import "./globals.css";
 
 export const metadata: Metadata = {

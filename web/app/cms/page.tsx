@@ -15,8 +15,16 @@ import { Skeleton } from "@/components/cms/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/cms/ui/table";
 import { api, timeAgo, type ApiError, type CmsDashboard } from "@/lib/api";
 import { useI18n, useT } from "@/lib/i18n";
+import { GOOD } from "@/lib/brand";
 
 const nf = (n: number, lang: string) => new Intl.NumberFormat(lang).format(n);
+
+/** A quiet sparkline for table rows (the interactive one is for cards). */
+function MiniTrend({ data }: { data: number[] }) {
+  const max = Math.max(...data, 1), min = Math.min(...data);
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${28 - ((v - min) / (max - min || 1)) * 24 - 2}`).join(" ");
+  return <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-7 w-full text-brand" aria-hidden><polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" /></svg>;
+}
 
 function Dashboard() {
   const t = useT();
@@ -41,10 +49,10 @@ function Dashboard() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {!data ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28" />) : (
           <>
-            <StatCard label={t("Page views · 7 days")} value={hasTraffic ? nf(data.totals.pageviews, lang) : "—"} icon={<Eye />} hint={hasTraffic ? undefined : t("No traffic data yet")} />
-            <StatCard label={t("Visitors · 7 days")} value={hasTraffic ? nf(data.totals.visitors, lang) : "—"} icon={<Users />} />
-            <StatCard label={t("Sites")} value={data.sites.length} icon={<Globe />} />
-            <StatCard label={t("Scheduled")} value={data.scheduled} icon={<CalendarClock />} hint={session.role === "admin" && data.editors != null ? t("{n} editor(s)", { n: data.editors }) : undefined} />
+            <StatCard label={t("Page views · 7 days")} numeric={hasTraffic ? data.totals.pageviews : undefined} value="—" icon={<Eye />} trend={hasTraffic ? data.days.map((d) => d.pageviews) : undefined} hint={hasTraffic ? undefined : t("No traffic data yet")} />
+            <StatCard label={t("Visitors · 7 days")} numeric={hasTraffic ? data.totals.visitors : undefined} value="—" icon={<Users />} trend={hasTraffic ? data.days.map((d) => d.visitors) : undefined} trendColor={GOOD} />
+            <StatCard label={t("Sites")} numeric={data.sites.length} icon={<Globe />} />
+            <StatCard label={t("Scheduled")} numeric={data.scheduled} icon={<CalendarClock />} hint={session.role === "admin" && data.editors != null ? t("{n} editor(s)", { n: data.editors }) : undefined} />
           </>
         )}
       </div>
@@ -86,7 +94,7 @@ function Dashboard() {
         </Card>
       </div>
 
-      {data && data.countries.length > 0 && (
+      {data && (data.countries?.length ?? 0) > 0 && (
         <Card className="mt-6">
           <CardHeader><CardTitle>{t("Visitors by country")}</CardTitle><CardDescription>{t("Last 7 days, all your sites")}</CardDescription></CardHeader>
           <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]"><WorldMap countries={data.countries} /><CountryList countries={data.countries} limit={6} /></CardContent>
@@ -98,18 +106,19 @@ function Dashboard() {
           <CardHeader><CardTitle>{t("Your sites")}</CardTitle></CardHeader>
           <CardContent className="px-2 pb-2">
             <Table>
-              <TableHeader><TableRow><TableHead>{t("Site")}</TableHead><TableHead className="text-right">{t("Page views · 7 days")}</TableHead><TableHead>{t("Last publication")}</TableHead><TableHead>{t("Compliance")}</TableHead><TableHead /></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>{t("Site")}</TableHead><TableHead className="text-right">{t("Page views · 7 days")}</TableHead><TableHead className="hidden md:table-cell" /><TableHead>{t("Last publication")}</TableHead><TableHead>{t("Compliance")}</TableHead><TableHead /></TableRow></TableHeader>
               <TableBody>
                 {data?.sites.map((s) => (
                   <TableRow key={s.id}>
                     <TableCell><div className="font-medium">{s.name}</div><div className="text-xs text-muted-foreground">{s.domain ?? t("no domain yet")}</div></TableCell>
                     <TableCell className="text-right tabular-nums">{s.visits?.totals ? nf(s.visits.totals.pageviews, lang) : "—"}</TableCell>
+                    <TableCell className="hidden w-36 md:table-cell">{s.visits?.days && s.visits.days.length > 1 ? <MiniTrend data={s.visits.days.map((d) => d.pageviews)} /> : null}</TableCell>
                     <TableCell>{s.last_release ? <span className="flex items-center gap-2"><DeployBadge status={s.last_release.status} /><span className="text-xs text-muted-foreground">{timeAgo(s.last_release.created_at)}</span></span> : <span className="text-xs text-muted-foreground">{t("Not published yet")}</span>}</TableCell>
                     <TableCell>{s.compliance ? <Link href={`/cms/compliance/?app=${encodeURIComponent(s.id)}`}><Badge variant={s.compliance.verdict === "ok" ? "success" : s.compliance.verdict === "attention" ? "warning" : "destructive"}>{s.compliance.score}/100</Badge></Link> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
                     <TableCell className="text-right"><Button asChild size="sm" variant="outline"><Link href={`/cms/?app=${encodeURIComponent(s.id)}`} onClick={() => { try { localStorage.setItem("mas-cms-site", s.id); } catch {} }}>{t("Select")}</Link></Button></TableCell>
                   </TableRow>
                 ))}
-                {!data && <TableRow><TableCell colSpan={5}><Skeleton className="h-8" /></TableCell></TableRow>}
+                {!data && <TableRow><TableCell colSpan={6}><Skeleton className="h-8" /></TableCell></TableRow>}
               </TableBody>
             </Table>
           </CardContent>

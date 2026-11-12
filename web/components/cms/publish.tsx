@@ -72,7 +72,7 @@ export function PublishBanner({ state, site }: { state: State; site: CmsSite | n
           : live ? t("Your changes are online.") : t("Saved. Publishing your changes…")}
       </span>
       {live && site?.url && (
-        <a href={site.url} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-primary hover:underline">
+        <a href={site.url} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-brand hover:underline">
           {t("View")}<ExternalLink className="size-3.5" />
         </a>
       )}

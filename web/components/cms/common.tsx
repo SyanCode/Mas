@@ -4,18 +4,27 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/cms/ui/badge";
 import { Card, CardContent } from "@/components/cms/ui/card";
 import type { CmsActivity, CmsStatus, ReleaseStatus } from "@/lib/api";
-import { msg, useT } from "@/lib/i18n";
+import { RollingNumber, Trend } from "@/components/cms/premium";
+import { msg, useI18n, useT } from "@/lib/i18n";
 
-export function StatCard({ label, value, hint, icon }: { label: string; value: ReactNode; hint?: ReactNode; icon: ReactNode }) {
+export function StatCard({ label, value, numeric, format, trend, trendColor, trendFormat, hint, icon }: {
+  label: string; value?: ReactNode; numeric?: number; format?: (n: number) => string; trend?: number[]; trendColor?: string;
+  trendFormat?: (n: number) => string; hint?: ReactNode; icon: ReactNode;
+}) {
+  const { lang } = useI18n();
+  const fmt = format ?? ((n: number) => new Intl.NumberFormat(lang).format(n));
   return (
-    <Card>
-      <CardContent className="flex items-start justify-between gap-3 p-5">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-muted-foreground">{label}</p>
-          <p className="mt-1.5 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
-          {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+    <Card className="group relative overflow-hidden transition-all duration-200 hover:-translate-y-0.5">
+      <CardContent className="p-6 pb-0">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[13px] font-medium text-muted-foreground">{label}</p>
+            <p className="mt-2 font-display text-[48px] leading-none tracking-[-0.02em] tabular-nums">{numeric !== undefined ? <RollingNumber value={numeric} format={fmt} /> : value}</p>
+            {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+          </div>
+          <div className="text-muted-foreground/70 transition-colors group-hover:text-brand [&_svg]:size-[18px]">{icon}</div>
         </div>
-        <div className="rounded-md bg-muted p-2 text-muted-foreground [&_svg]:size-4">{icon}</div>
+        {trend && trend.length > 1 ? <Trend data={trend} color={trendColor} format={trendFormat ?? fmt} className="-mx-6 mt-3" /> : <div className="pb-6" />}
       </CardContent>
     </Card>
   );

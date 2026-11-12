@@ -1666,5 +1666,12 @@
   "link text": "texte du lien",
   "Formatting": "Mise en forme",
   "Image from the library": "Image de la médiathèque",
-  "description": "description"
+  "description": "description",
+  "Press Enter after each address.": "Appuyez sur Entrée après chaque adresse.",
+  "The site is down": "Le site est hors service",
+  "Blocking compliance issues": "Problèmes de conformité bloquants",
+  "Compliance points to improve": "Points de conformité à améliorer",
+  "{n} blocking": "{n} bloquant(s)",
+  "Inbox": "Boîte de réception",
+  "Mark all read": "Tout marquer comme lu"
 }
