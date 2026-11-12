@@ -523,6 +523,7 @@ class Compliance:
         self.db = db
         self.auditor = auditor or Auditor(mas_banner=self._banner)
         self._running: set[str] = set()
+        self.notifier = None  # mas.notify.Notifier: tells people when the site got worse
 
     def _banner(self, host: str) -> dict | None:
         from mas import cookies
@@ -552,7 +553,19 @@ class Compliance:
         crit, warn = result["counts"]["critical"], result["counts"]["warning"]
         self.db.audit("compliance", "cms-compliance", result["verdict"] != "blocking", service_id=app["id"],
                       detail=f"{result['score']}/100: {crit} critical, {warn} warning(s) ({trigger})")
+        self._tell(app, previous, result)
         return result
+
+    def _tell(self, app: dict, previous: dict | None, result: dict) -> None:
+        """A message when blocking issues appeared or the score fell by 10 points or more."""
+        if self.notifier is None or previous is None:
+            return
+        new = [f for f in result["findings"] if f.get("new") and f["level"] == "critical"]
+        drop = previous["score"] - result["score"]
+        if new or drop >= 10:
+            lines = [f"Compliance score: {previous['score']} → {result['score']}/100."]
+            lines += [f"- NEW blocking issue: {f['title']}" for f in new]
+            self.notifier.notify(app["id"], "compliance", "Compliance got worse", "\n".join(lines))
 
     def latest(self, app_id: str) -> dict | None:
         row = self.db.latest_compliance(app_id)

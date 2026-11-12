@@ -17,6 +17,7 @@ from mas import auth, cookies as cookies_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import Database
 from mas.geo import ATTRIBUTION, GeoError
+from mas.notify import EVENTS, NotifyError
 from mas.sitestats import SiteStats
 
 
@@ -87,7 +88,7 @@ class NewEntryBody(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, any_session: Callable, current_session: Callable,
-             manager: CmsManager, stats: SiteStats | None = None, geo=None, compliance=None) -> None:
+             manager: CmsManager, stats: SiteStats | None = None, geo=None, compliance=None, notifier=None) -> None:
 
     def call(fn, *args):
         try:
@@ -475,6 +476,70 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             raise HTTPException(409, str(exc)) from None
         return {"latest": compliance.latest(app_id), "history": compliance.history(app_id),
                 "domain": target["domain"], "manual": MANUAL_CHECKS}
+
+    # -- notifications (administrators) -------------------------------------------------------------
+
+    @app.get("/api/notify")
+    def notify_get(_=Depends(current_session)) -> dict:
+        return {"smtp": notifier.smtp(), "events": list(EVENTS)}
+
+    @app.put("/api/notify/smtp")
+    def notify_smtp(body: dict, s=Depends(current_session)) -> dict:
+        try:
+            result = notifier.set_smtp(body)
+        except NotifyError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "cms-notify-config", True, detail="mail server")
+        return result
+
+    @app.get("/api/cms/sites/{app_id}/notify")
+    def site_notify_get(app_id: str, s=Depends(current_session)) -> dict:
+        site(s, app_id)
+        return {**notifier.site(app_id), "events": notifier.site(app_id)["events"], "all_events": list(EVENTS)}
+
+    @app.put("/api/cms/sites/{app_id}/notify")
+    def site_notify_put(app_id: str, body: dict, s=Depends(current_session)) -> dict:
+        site(s, app_id)
+        try:
+            result = notifier.set_site(app_id, body)
+        except NotifyError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "cms-notify-config", True, service_id=app_id, detail=", ".join(result["events"]))
+        return {**result, "all_events": list(EVENTS)}
+
+    @app.post("/api/cms/sites/{app_id}/notify/test")
+    async def site_notify_test(app_id: str, s=Depends(current_session)) -> dict:
+        target = site(s, app_id)
+        cfg = notifier.site(app_id, reveal=True)
+        if not cfg["emails"] and not cfg["webhook"]:
+            raise HTTPException(400, "add an e-mail address or a webhook first")
+        errors = []
+        if cfg["webhook"]:
+            try:
+                await asyncio.to_thread(notifier.send_webhook, cfg["webhook"], f"{target['name']}: test", "Mas can reach this channel.", "test", app_id)
+            except NotifyError as exc:
+                errors.append(str(exc))
+        if cfg["emails"]:
+            try:
+                await asyncio.to_thread(notifier.send_email, cfg["emails"], f"[{target['name']}] test", "Mas can send you e-mails.")
+            except NotifyError as exc:
+                errors.append(str(exc))
+        if errors:
+            raise HTTPException(502, "; ".join(errors))
+        return {"ok": True}
+
+    @app.post("/api/cms/sites/{app_id}/notify/digest")
+    async def site_notify_digest(app_id: str, s=Depends(current_session)) -> dict:
+        """Send the weekly report now (to check how it looks)."""
+        target = site(s, app_id)
+        text = await asyncio.to_thread(notifier.digest_text, target)
+        cfg = notifier.site(app_id, reveal=True)
+        if cfg["emails"]:
+            try:
+                await asyncio.to_thread(notifier.send_email, cfg["emails"], f"[{target['name']}] Weekly report", text)
+            except NotifyError as exc:
+                raise HTTPException(502, str(exc)) from None
+        return {"text": text, "sent": bool(cfg["emails"])}
 
     @app.get("/api/cms/sites/{app_id}/overview")
     async def overview(app_id: str, s=Depends(any_session)) -> dict:

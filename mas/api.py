@@ -30,6 +30,7 @@ from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
 from mas.compliance import Compliance
+from mas.notify import Notifier
 from mas import goals as goals_mod
 from mas.geo import Geo
 from mas.sitestats import SiteStats, service_target
@@ -218,6 +219,10 @@ def create_app(
                 await asyncio.to_thread(cms.run_due)
             except Exception:
                 log.exception("scheduled CMS publications failed")
+            try:  # failed deployments and the weekly report
+                await asyncio.to_thread(notifier.tick)
+            except Exception:
+                log.exception("notifications failed")
             try:  # GDPR audit of the sites changed since the last one
                 await asyncio.to_thread(compliance.tick)
             except Exception:
@@ -269,6 +274,9 @@ def create_app(
     compliance = Compliance(db)
     app_state_compliance = compliance
     site_stats = SiteStats(host, config, db, find_service=scanner.get, geo=geo)
+    notifier = Notifier(db, host, config, stats=site_stats, compliance=compliance)
+    compliance.notifier = notifier
+    cms.notifier = notifier
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \
         Cluster(host, config, db, deployer)
     resources = Resources(host, config, db, deployer, cluster)
@@ -313,6 +321,7 @@ def create_app(
     mcp = mcp_endpoint.Endpoint(app, db, token_limiter, TRUSTED_PROXIES)
     app.state.cms = cms
     app.state.compliance = app_state_compliance
+    app.state.notifier = notifier
 
     # -- middleware --------------------------------------------------------
 
@@ -769,7 +778,7 @@ def create_app(
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,
-                     stats=site_stats, geo=geo, compliance=compliance)
+                     stats=site_stats, geo=geo, compliance=compliance, notifier=notifier)
 
     # -- dashboard ---------------------------------------------------------
 
