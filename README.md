@@ -245,7 +245,8 @@ App ID, private key (stored in `/etc/mas/github-app.pem`, `0600`) and webhook se
 
 The App is private and asks for: **Contents: read and write** (write is only used by the CMS, to
 commit content edits), **Metadata: read**, **Pull requests: read**, and the **push** and
-**pull_request** webhook events. An App created before the CMS has Contents read-only: change it
+**pull_request** webhook events. Optionally **Checks: write**: the compliance audit of the CMS is then
+posted as a check on the published commit. An App created before the CMS has Contents read-only: change it
 to *Read and write* in the App settings on GitHub, then accept the new permissions on the
 installation.
 
