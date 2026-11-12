@@ -174,3 +174,53 @@ def test_cdn_visitors_are_set_aside_from_countries():
     assert is_cdn("104.16.1.1") and is_cdn("2606:4700::1") and not is_cdn("8.8.8.8") and not is_cdn("nonsense")
     days = count([line("104.16.1.1", "20", "/"), line("1.1.1.1", "20", "/"), line("104.16.1.2", "20", "/", agent=UA + " y")], FakeGeo())
     assert days["2026-10-20"]["countries"] == {"_cdn": 2, "FR": 1}
+
+
+def test_sources_devices_and_page_goals():
+    from mas.sitestats import classify_device, classify_source, matches_goal_path
+    own = {"shop.example.com"}
+    assert classify_source("-", "", own) == "direct|"
+    assert classify_source("https://www.google.fr/", "", own) == "search|google"
+    assert classify_source("https://l.instagram.com/?u=x", "", own) == "social|instagram"
+    assert classify_source("https://t.co/abc", "", own) == "social|x"
+    assert classify_source("https://blog.example.org/post", "", own) == "ref|blog.example.org"
+    assert classify_source("https://google.com/", "utm_source=Newsletter&utm_medium=mail", own) == "utm|newsletter"
+    assert classify_source("https://shop.example.com/menu", "", own) == "direct|"
+    assert classify_device("Mozilla/5.0 (iPhone; CPU iPhone OS 17) AppleWebKit Mobile/15E148 Safari/604.1") == ("mobile", "Safari")
+    assert classify_device("Mozilla/5.0 (Windows NT 10.0) Chrome/120 Safari/537 Edg/120") == ("desktop", "Edge")
+    assert classify_device("Mozilla/5.0 (Linux; Android 13; Pixel) Chrome/120 Safari/537")[0] == "tablet"  # no "Mobile": tablet
+    assert matches_goal_path("/merci", ["/merci"]) == "/merci" and matches_goal_path("/blog/a", ["/blog/*"]) == "/blog/*"
+    assert matches_goal_path("/other", ["/merci", "/blog/*"]) is None
+
+    def hit(ip, path, ref="-", agent=UA, day="20"):
+        return f'{ip} - - [{day}/Oct/2026:10:00:00 +0200] "GET {path} HTTP/2.0" 200 5 "{ref}" "{agent}"'
+    days = count([hit("1.1.1.1", "/", "https://www.google.com/"), hit("1.1.1.1", "/merci"), hit("2.2.2.2", "/?utm_source=ads"),
+                  hit("3.3.3.3", "/merci", "https://shop.example.com/")], own_hosts=own, goal_paths=["/merci"])
+    d = days["2026-10-20"]
+    assert d["sources"] == {"search|google": 1, "utm|ads": 1, "direct|": 1}  # the first page decides, once per visitor
+    assert d["devices"]["device:desktop"] == 3 and d["devices"]["browser:Safari"] == 3
+    assert d["reached"] == {"/merci": 2}
+
+
+def test_report_has_sources_funnel_and_page_goals(tmp_path):
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    db.create_app("bb", name="bb", repo="acme/bb", branch="main", type="static", domain="bb.example.com")
+    db.set_setting("goals:bb", '{"paths": ["/merci"], "funnel": ["page:/merci"]}')
+    log = "/var/log/nginx/mas-app-bb.access.log"
+    today = date.today()
+    stamp = today.strftime("%d/%b/%Y")
+    mk = lambda ip, path, ref="-": f'{ip} - - [{stamp}:10:00:00 +0200] "GET {path} HTTP/2.0" 200 5 "{ref}" "{UA}"'  # noqa: E731
+    host.write_text(log, "\n".join([mk("1.1.1.1", "/", "https://duckduckgo.com/"), mk("1.1.1.1", "/merci"), mk("2.2.2.2", "/")]) + "\n")
+    stats = SiteStats(host, Config(), db)
+    app = db.get_app("bb")
+    r = stats.report(app, days=7, today=today)
+    assert {s["name"] for s in r["sources"]} == {"duckduckgo", "" } and r["devices"] == {"desktop": 2}
+    assert r["goals"][0]["goal"] == "page:/merci" and r["goals"][0]["visitors"] == 1
+    assert r["funnel"] == [{"step": "visitors", "visitors": 2}, {"step": "page:/merci", "visitors": 1}]
+    assert r["conversion"]["rate"] == 50.0 and r["goal_paths"] == ["/merci"]
+    # more lines later: nobody is counted twice
+    host.write_text(log, host.read_text(log) + mk("1.1.1.1", "/merci") + "\n" + mk("3.3.3.3", "/", "https://t.co/x") + "\n")
+    stats.refresh(app, force=True)
+    r = stats.report(app, days=7, today=today)
+    assert r["goals"][0]["visitors"] == 1 and r["goals"][0]["hits"] == 2 and r["totals"]["visitors"] == 3
