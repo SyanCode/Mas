@@ -9,6 +9,7 @@ import { Badge } from "@/components/cms/ui/badge";
 import { Button } from "@/components/cms/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { Input } from "@/components/cms/ui/input";
+import { FormItem } from "@/components/cms/ui/form-item";
 import { Label } from "@/components/cms/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Skeleton } from "@/components/cms/ui/skeleton";
@@ -66,7 +67,7 @@ function Legal() {
             <CardHeader><CardTitle>{t("Your details")}</CardTitle><CardDescription>{t("Empty fields stay marked [TO COMPLETE] in the pages.")}</CardDescription></CardHeader>
             <CardContent className="space-y-3.5">
               {FIELDS.map(([k, label]) => (
-                <div key={k} className="space-y-1"><Label className="text-xs">{t(label)}</Label><Input value={profile[k] ?? ""} onChange={(e) => setProfile({ ...profile, [k]: e.target.value })} /></div>
+                <FormItem key={k} className="space-y-1"><Label className="text-xs">{t(label)}</Label><Input value={profile[k] ?? ""} onChange={(e) => setProfile({ ...profile, [k]: e.target.value })} /></FormItem>
               ))}
               <div className="flex items-center gap-3"><Switch id="nl" checked={profile.newsletter === "true"} onCheckedChange={(on) => setProfile({ ...profile, newsletter: on ? "true" : "" })} /><Label htmlFor="nl" className="font-normal">{t("The site sends a newsletter")}</Label></div>
               <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
@@ -100,7 +101,7 @@ function Legal() {
             <Card>
               <CardHeader><CardTitle>{t("Add them to the site")}</CardTitle><CardDescription>{t("Writes the three pages as Markdown files in your repository (one commit). Your site then displays them like any other page.")}</CardDescription></CardHeader>
               <CardContent className="flex flex-wrap items-end gap-3">
-                <div className="space-y-1"><Label className="text-xs">{t("Folder")}</Label><Input value={folder} onChange={(e) => setFolder(e.target.value)} className="w-56" /></div>
+                <FormItem className="space-y-1"><Label className="text-xs">{t("Folder")}</Label><Input value={folder} onChange={(e) => setFolder(e.target.value)} className="w-56" /></FormItem>
                 <Button disabled={busy === "pub"} onClick={() => run("pub", async () => { await api(`${base}/publish`, { method: "POST", body: { lang, folder } }); toast.success(t("Pages written. The site is being rebuilt.")); })}>
                   {busy === "pub" ? <Loader2 className="animate-spin" /> : <Upload />}{t("Write to the repository")}
                 </Button>

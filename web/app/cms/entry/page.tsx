@@ -12,6 +12,7 @@ import { Button } from "@/components/cms/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { ConfirmDialog } from "@/components/cms/ui/dialog";
 import { Input } from "@/components/cms/ui/input";
+import { FormItem } from "@/components/cms/ui/form-item";
 import { Label } from "@/components/cms/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Skeleton } from "@/components/cms/ui/skeleton";
@@ -135,7 +136,7 @@ function Editor() {
               <CardHeader className="pb-3"><CardTitle>{drafts ? t("Publish") : t("Save")}</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 {drafts && (
-                  <div className="space-y-1.5">
+                  <FormItem>
                     <Label>{t("Status")}</Label>
                     <Select value={status} onValueChange={(v) => setStatus(v as CmsStatus)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
@@ -145,7 +146,7 @@ function Editor() {
                         <SelectItem value="scheduled">{t("Scheduled")}</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
+                  </FormItem>
                 )}
                 {drafts && status === "scheduled" && (
                   <div className="space-y-1.5">

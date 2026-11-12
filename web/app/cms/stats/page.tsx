@@ -11,6 +11,7 @@ import { TrafficChart } from "@/components/cms/TrafficChart";
 import { CountryList, WorldMap } from "@/components/cms/WorldMap";
 import { Button } from "@/components/cms/ui/button";
 import { Input } from "@/components/cms/ui/input";
+import { FormItem } from "@/components/cms/ui/form-item";
 import { Label } from "@/components/cms/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { Skeleton } from "@/components/cms/ui/skeleton";
@@ -69,10 +70,10 @@ function GoalsConfig({ siteId, paths, funnel, onSaved }: { siteId: string; paths
     <details className="px-3 pb-3 pt-2">
       <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">{t("Pages as goals and funnel")}</summary>
       <div className="mt-3 space-y-3">
-        <div className="space-y-1.5"><Label>{t("Pages that count as a goal")}</Label><Input value={p} onChange={(e) => setP(e.target.value)} placeholder="/merci, /commande/*" />
-          <p className="text-xs text-muted-foreground">{t("A visitor who opens one of these pages reached the goal. No script needed. * matches the rest of the path.")}</p></div>
-        <div className="space-y-1.5"><Label>{t("Funnel steps")}</Label><Input value={f} onChange={(e) => setF(e.target.value)} placeholder="book, page:/merci" />
-          <p className="text-xs text-muted-foreground">{t("Goal names in order, e.g. a click goal then page:/merci. Each step counts the visitors who reached it.")}</p></div>
+        <FormItem className="space-y-1.5"><Label>{t("Pages that count as a goal")}</Label><Input value={p} onChange={(e) => setP(e.target.value)} placeholder="/merci, /commande/*" />
+          <p className="text-xs text-muted-foreground">{t("A visitor who opens one of these pages reached the goal. No script needed. * matches the rest of the path.")}</p></FormItem>
+        <FormItem className="space-y-1.5"><Label>{t("Funnel steps")}</Label><Input value={f} onChange={(e) => setF(e.target.value)} placeholder="book, page:/merci" />
+          <p className="text-xs text-muted-foreground">{t("Goal names in order, e.g. a click goal then page:/merci. Each step counts the visitors who reached it.")}</p></FormItem>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <Button size="sm" onClick={save} disabled={busy}>{busy && <Loader2 className="animate-spin" />}{t("Save")}</Button>
       </div>
