@@ -88,7 +88,7 @@ class NewEntryBody(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, any_session: Callable, current_session: Callable,
-             manager: CmsManager, stats: SiteStats | None = None, geo=None, compliance=None, notifier=None) -> None:
+             manager: CmsManager, stats: SiteStats | None = None, geo=None, compliance=None, notifier=None, uptime=None) -> None:
 
     def call(fn, *args):
         try:
@@ -476,6 +476,20 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             raise HTTPException(409, str(exc)) from None
         return {"latest": compliance.latest(app_id), "history": compliance.history(app_id),
                 "domain": target["domain"], "manual": MANUAL_CHECKS}
+
+    @app.get("/api/cms/sites/{app_id}/uptime")
+    async def uptime_get(app_id: str, days: int = Query(30, ge=1, le=35), s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        return await asyncio.to_thread(uptime.report, app_id, days)
+
+    @app.put("/api/cms/sites/{app_id}/uptime")
+    def uptime_put(app_id: str, body: dict, s=Depends(current_session)) -> dict:
+        """Switch the public status page (/status/<site>) on or off."""
+        site(s, app_id)
+        on = bool(body.get("status_page"))
+        db.set_setting(f"status_page:{app_id}", "1" if on else None)
+        db.audit(s.username, "cms-status-page", True, service_id=app_id, detail="on" if on else "off")
+        return {"status_page": on}
 
     # -- notifications (administrators) -------------------------------------------------------------
 

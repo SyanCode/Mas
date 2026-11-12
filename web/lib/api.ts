@@ -186,6 +186,14 @@ export interface ComplianceReport {
   manual: string[];
 }
 
+export interface UptimeReport {
+  uptime: number | null; checks: number; avg_ms: number | null; p95_ms: number | null; up_now: boolean | null; last_check: string | null;
+  days: { day: string; checks: number; uptime: number | null; ms: number | null }[];
+  latency: { hour: string; ms: number; ok: boolean }[];
+  incidents: { id: number; started: string; ended: string | null; reason: string | null }[];
+  status_page: boolean;
+}
+
 export interface CmsActivity {
   id: number;
   at: string;
