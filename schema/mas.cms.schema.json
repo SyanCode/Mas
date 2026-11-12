@@ -61,6 +61,7 @@
         "sort_field": { "type": "string", "description": "Newest first on this field, default the first date field." },
         "index_fields": { "type": "array", "items": { "type": "string" }, "description": "Fields in the index, default all but markdown." },
         "max_entries": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "drafts": { "type": "boolean", "default": false, "description": "Entries have a status (published, draft, scheduled) stored in the entry and in index.json; the site shows only status \"published\". Storage git only." },
         "fields": { "$ref": "#/definitions/fields" }
       },
       "if": { "properties": { "storage": { "const": "supabase" } }, "required": ["storage"] },

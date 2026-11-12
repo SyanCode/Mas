@@ -17,7 +17,7 @@ VAR_RE = re.compile(r"\{(\w+)\}")
 
 def source_keys() -> list[str]:
     keys: list[str] = []
-    files = [*WEB.glob("app/**/*.tsx"), *WEB.glob("components/*.tsx"), *WEB.glob("lib/*.ts"), *WEB.glob("lib/*.tsx")]
+    files = [*WEB.glob("app/**/*.tsx"), *WEB.glob("components/**/*.tsx"), *WEB.glob("lib/*.ts"), *WEB.glob("lib/*.tsx")]
     for path in sorted(files):
         for m in CALL_RE.finditer(path.read_text(encoding="utf-8")):
             key = json.loads(f'"{m.group(1)}"')

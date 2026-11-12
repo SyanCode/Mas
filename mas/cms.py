@@ -38,6 +38,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -221,6 +222,9 @@ def _parse_collection(c: dict, cid: str) -> dict:
     sort = c.get("sort_field") or next((f["key"] for f in fields if f["type"] == "date"), None)
     if sort is not None and by_key.get(sort, {}).get("type") not in ("date", "number", "text"):
         raise CmsError(f"{cid}.sort_field: needs a date, number or text field")
+    drafts = bool(c.get("drafts", False))
+    if drafts and storage != "git":
+        raise CmsError(f"{cid}.drafts: only for collections stored in the repository (Supabase rows are online at once)")
     summary = c.get("index_fields")
     if summary is None:
         summary = [f["key"] for f in fields if f["type"] != "markdown"]
@@ -228,7 +232,7 @@ def _parse_collection(c: dict, cid: str) -> dict:
         raise CmsError(f"{cid}.index_fields: list of field keys")
     return {"id": cid, "label": str(c.get("label") or cid)[:100], "description": str(c.get("description") or "")[:500],
             "item_label": str(c.get("item_label") or "Entry")[:60], "storage": storage, "dir": folder,
-            "table": table, "fields": fields,
+            "table": table, "fields": fields, "drafts": drafts,
             "title_field": title, "sort_field": sort, "index_fields": list(dict.fromkeys(summary)),
             "max_entries": max(1, min(int(c.get("max_entries", MAX_ENTRIES)), MAX_ENTRIES))}
 
@@ -471,8 +475,40 @@ def slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", plain).strip("-")[:SLUG_MAX].strip("-") or "entry"
 
 
+STATUSES = ("published", "draft", "scheduled")
+PUBLISH_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")  # UTC
+
+
 def index_entry(collection: dict, slug: str, data: dict) -> dict:
-    return {"slug": slug, **{k: data[k] for k in collection["index_fields"] if k in data}}
+    entry = {"slug": slug, **{k: data[k] for k in collection["index_fields"] if k in data}}
+    if collection.get("drafts"):  # the site shows an entry only when its status is "published"
+        entry["status"] = data.get("status") if data.get("status") in STATUSES else "published"
+        if entry["status"] == "scheduled" and data.get("publish_at"):
+            entry["publish_at"] = data["publish_at"]
+    return entry
+
+
+def clean_status(c: dict, status: str | None, publish_at: str | None, now: datetime | None = None) -> tuple[str, str | None]:
+    """(status, publish_at) to store; ``status`` None means published."""
+    if not c.get("drafts"):
+        if status not in (None, "published"):
+            raise CmsError(f"{c['label']}: drafts are not enabled (\"drafts\": true in {SCHEMA_FILE})")
+        return "published", None
+    status = status or "published"
+    if status not in STATUSES:
+        raise CmsError("status: published, draft or scheduled")
+    if status != "scheduled":
+        return status, None
+    if not publish_at or not PUBLISH_AT_RE.fullmatch(publish_at):
+        raise CmsError("publication date: YYYY-MM-DDTHH:MM (UTC)")
+    now = now or datetime.now(timezone.utc)
+    try:
+        when = datetime.strptime(publish_at, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise CmsError("publication date is not a valid date") from None
+    if when <= now:
+        raise CmsError("the publication date must be in the future")
+    return status, publish_at
 
 
 def sort_index(collection: dict, entries: list[dict]) -> list[dict]:
@@ -745,7 +781,11 @@ class CmsManager:
         collections = []
         for c in schema["collections"]:
             if c["storage"] == "git":
-                collections.append({**c, "entries": self._entries(gh, app, c, head)[1], "error": None})
+                entries = self._entries(gh, app, c, head)[1]
+                if c["drafts"]:
+                    entries = [{**e, "status": e.get("status") if e.get("status") in STATUSES else "published"}
+                               for e in entries]
+                collections.append({**c, "entries": entries, "error": None})
                 continue
             try:  # a missing table must not hide the pages
                 collections.append({**c, "entries": self._store(app).list(c), "error": None})
@@ -942,16 +982,24 @@ class CmsManager:
         if raw is None:
             raise CmsError(f"{slug} does not exist anymore: reload the list")
         values = self._decode(raw, f"{c['dir']}/{slug}.json")
-        return {"slug": slug, "values": {f["key"]: values.get(f["key"], _empty(f)) for f in c["fields"]}, "sha": sha}
+        out = {"slug": slug, "values": {f["key"]: values.get(f["key"], _empty(f)) for f in c["fields"]}, "sha": sha}
+        if c["drafts"]:
+            out["status"] = values.get("status") if values.get("status") in STATUSES else "published"
+            out["publish_at"] = values.get("publish_at") if out["status"] == "scheduled" else None
+        return out
 
     def save_entry(self, app_id: str, cid: str, slug: str | None, values: dict, base_sha: str | None, user_id: int,
-                   username: str, note: str = "", new_slug: str | None = None) -> dict:
-        """Create (``slug`` None, named ``new_slug`` or after its title) or update an entry, with the index."""
+                   username: str, note: str = "", new_slug: str | None = None, status: str | None = None,
+                   publish_at: str | None = None) -> dict:
+        """Create (``slug`` None, named ``new_slug`` or after its title) or update an entry, with the index.
+
+        ``status`` (published, draft, scheduled) and ``publish_at`` only exist for collections with ``drafts``."""
         lock = self._locks.setdefault(app_id, threading.Lock())
         with lock:
             gh, app = self._target(app_id)
             schema, head = self.schema(app_id)
             c = self._collection(schema, cid)
+            status, publish_at = clean_status(c, status, publish_at)
             if slug is None:
                 if new_slug and (len(new_slug) > SLUG_MAX or not SLUG_RE.fullmatch(new_slug)):
                     raise CmsError("address: lowercase letters, digits and dashes (ete-a-paris)")
@@ -978,6 +1026,11 @@ class CmsManager:
             title = merged[c["title_field"]]
             if slug is None:
                 slug = self._new_slug(new_slug or slugify(title), set(files), bool(new_slug))
+            if c["drafts"]:
+                merged = {k: v for k, v in merged.items() if k not in ("status", "publish_at")}
+                merged["status"] = status
+                if publish_at:
+                    merged["publish_at"] = publish_at
             content = dump_json({"slug": slug, **{k: v for k, v in merged.items() if k != "slug"}})
             if content == raw and not new_files:
                 return {"slug": slug, "commit": None, "unchanged": True, "release_id": None}
@@ -986,7 +1039,9 @@ class CmsManager:
             new_files[f"{c['dir']}/{INDEX_FILE}"] = dump_json(sort_index(c, entries))
             verb = "add" if raw is None else "update"
             result = self._commit(gh, app, new_files, f"cms({cid})", note, f"{verb} {title}", username, head, uploads)
-            return {"slug": slug, **result}
+            if c["drafts"]:
+                self.db.cms_schedule_set(app_id, cid, slug, publish_at)
+            return {"slug": slug, "status": status, **result}
 
     @staticmethod
     def _new_slug(base: str, taken: set[str], chosen: bool) -> str:
@@ -1047,7 +1102,166 @@ class CmsManager:
             changes: dict[str, bytes | None] = {
                 f"{c['dir']}/{slug}.json": None,
                 f"{c['dir']}/{INDEX_FILE}": dump_json([e for e in index if e["slug"] != slug])}
-            return self._commit(gh, app, changes, f"cms({cid})", "", f"delete {title}", username, head, [])
+            result = self._commit(gh, app, changes, f"cms({cid})", "", f"delete {title}", username, head, [])
+            self.db.cms_schedule_set(app_id, cid, slug, None)
+            return result
+
+    def set_status(self, app_id: str, cid: str, slug: str, status: str, publish_at: str | None,
+                   username: str) -> dict:
+        """Publish, unpublish or schedule an entry without touching its fields (list actions, scheduler)."""
+        lock = self._locks.setdefault(app_id, threading.Lock())
+        with lock:
+            gh, app = self._target(app_id)
+            schema, head = self.schema(app_id)
+            c = self._collection(schema, cid)
+            if not c["drafts"]:
+                raise CmsError(f"{c['label']}: drafts are not enabled")
+            status, publish_at = clean_status(c, status, publish_at)
+            files, index = self._entries(gh, app, c, head)
+            if slug not in files:
+                raise CmsConflict(f"{slug} was deleted meanwhile: reload the list")
+            try:
+                raw, _ = gh.read_file(app["installation_id"], app["repo"], f"{c['dir']}/{slug}.json", head)
+            except GitHubError as exc:
+                raise CmsError(str(exc)) from None
+            data = {k: v for k, v in self._decode(raw, slug).items() if k not in ("status", "publish_at")}
+            data["status"] = status
+            if publish_at:
+                data["publish_at"] = publish_at
+            title = data.get(c["title_field"]) or slug
+            entries = [e for e in index if e["slug"] != slug] + [index_entry(c, slug, data)]
+            changes: dict[str, bytes | None] = {f"{c['dir']}/{slug}.json": dump_json(data),
+                                                f"{c['dir']}/{INDEX_FILE}": dump_json(sort_index(c, entries))}
+            verb = {"published": "publish", "draft": "unpublish", "scheduled": "schedule"}[status]
+            result = self._commit(gh, app, changes, f"cms({cid})", "", f"{verb} {title}", username, head, [])
+            self.db.cms_schedule_set(app_id, cid, slug, publish_at)
+            return {"slug": slug, "status": status, **result}
+
+    def run_due(self, now: datetime | None = None) -> list[dict]:
+        """Publish the scheduled entries whose date is reached (called every minute by the background loop)."""
+        stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M")
+        done = []
+        for row in self.db.cms_schedule_due(stamp):
+            try:
+                self.set_status(row["app_id"], row["cid"], row["slug"], "published", None, "scheduler")
+                done.append(row)
+                self.db.audit("scheduler", "cms-status", True, service_id=row["app_id"],
+                              detail=f"{row['cid']}/{row['slug']}: published (scheduled)")
+            except CmsConflict:
+                self.db.cms_schedule_set(row["app_id"], row["cid"], row["slug"], None)  # deleted meanwhile
+            except CmsError as exc:
+                log.warning("scheduled publication of %s/%s/%s failed: %s", row["app_id"], row["cid"], row["slug"], exc)
+        return done
+
+    # -- overview and media library -------------------------------------------------
+
+    def overview(self, app_id: str) -> dict:
+        """What the site holds: pages, and per collection the number of published, draft and scheduled entries."""
+        gh, app = self._target(app_id)
+        schema, head = self.schema(app_id)
+        collections = []
+        for c in schema["collections"]:
+            counts = {"published": 0, "draft": 0, "scheduled": 0}
+            recent, error = [], None
+            try:
+                entries = (self._entries(gh, app, c, head)[1] if c["storage"] == "git"
+                           else self._store(app).list(c))
+                for e in entries:
+                    counts[e.get("status") if e.get("status") in STATUSES else "published"] += 1
+                recent = entries[:5]
+            except CmsError as exc:
+                error = str(exc)
+            collections.append({"id": c["id"], "label": c["label"], "item_label": c["item_label"], "drafts": c["drafts"],
+                                "title_field": c["title_field"], "total": sum(counts.values()), **counts,
+                                "recent": recent, "error": error})
+        return {"pages": [{"id": p["id"], "label": p["label"]} for p in schema["pages"]], "collections": collections}
+
+    @staticmethod
+    def _media_dirs(schema: dict) -> dict[str, str]:
+        """{folder: public url prefix} of the image fields stored in the repository."""
+        return {f["dir"]: f["url"].rstrip("/") for f in image_fields(schema)}
+
+    def _media_usage(self, gh: GitHubApp, app: dict, schema: dict, head: str, full: bool) -> dict[str, list[str]]:
+        """{image value: where it is used}. ``full`` also reads every entry (summaries do not hold every field)."""
+        used: dict[str, list[str]] = {}
+
+        def note(values: Any, where: str) -> None:
+            for text in _strings(values):
+                used.setdefault(text, [])
+                if where not in used[text]:
+                    used[text].append(where)
+        for page in schema["pages"]:
+            try:
+                raw, _ = gh.read_file(app["installation_id"], app["repo"], page["file"], head)
+            except GitHubError as exc:
+                raise CmsError(str(exc)) from None
+            note(self._decode(raw, page["file"]), page["label"])
+        for c in (c for c in schema["collections"] if c["storage"] == "git"):
+            files, index = self._entries(gh, app, c, head)
+            if full and len(files) > 100:
+                raise CmsError(f"{c['label']} has too many entries to check where the image is used")
+            for e in index:
+                note(e, c["label"])
+            for slug in files if full else []:
+                try:
+                    raw, _ = gh.read_file(app["installation_id"], app["repo"], f"{c['dir']}/{slug}.json", head)
+                except GitHubError as exc:
+                    raise CmsError(str(exc)) from None
+                note(self._decode(raw, slug), c["label"])
+        return used
+
+    def media(self, app_id: str) -> dict:
+        gh, app = self._target(app_id)
+        schema, head = self.schema(app_id)
+        folders = self._media_dirs(schema)
+        used = self._media_usage(gh, app, schema, head, full=False)
+        items = []
+        for folder, url in folders.items():
+            try:
+                found = gh.list_dir(app["installation_id"], app["repo"], folder, head)
+            except GitHubError as exc:
+                raise CmsError(str(exc)) from None
+            for f in found:
+                if IMAGE_EXT_RE.search(f["name"]) and FILENAME_RE.fullmatch(f["name"]):
+                    value = f"{url}/{f['name']}"
+                    items.append({"name": f["name"], "dir": folder, "value": value, "size": f.get("size"),
+                                  "used_in": used.get(value, [])})
+        items.sort(key=lambda i: i["name"])
+        return {"items": items, "folders": list(folders), "max_kb": MAX_UPLOAD_KB,
+                "supabase": any(c["storage"] == "supabase" for c in schema["collections"])}
+
+    def add_media(self, app_id: str, folder: str, name: str, data: bytes, username: str) -> dict:
+        if len(data) > MAX_UPLOAD_KB * 1024:
+            raise CmsError(f"image larger than {MAX_UPLOAD_KB // 1024} MB")
+        ext = detect_image(data)
+        if ext is None:
+            raise CmsError("only PNG, JPEG, GIF, WebP and AVIF images are accepted")
+        lock = self._locks.setdefault(app_id, threading.Lock())
+        with lock:
+            gh, app = self._target(app_id)
+            schema, head = self.schema(app_id)
+            folders = self._media_dirs(schema)
+            if folder not in folders:
+                raise CmsError("unknown image folder")
+            stem = re.sub(r"[^a-z0-9]+", "-", PurePosixPath(name or "image").stem.lower()).strip("-")[:40] or "image"
+            file = f"{stem}-{secrets.token_hex(3)}.{ext}"
+            result = self._commit(gh, app, {f"{folder}/{file}": data}, "cms(media)", "", f"add {file}", username, head, [])
+            return {"value": f"{folders[folder]}/{file}", "name": file, **result}
+
+    def delete_media(self, app_id: str, value: str, username: str) -> dict:
+        lock = self._locks.setdefault(app_id, threading.Lock())
+        with lock:
+            gh, app = self._target(app_id)
+            schema, head = self.schema(app_id)
+            folder = next((d for d, url in self._media_dirs(schema).items()
+                           if value.startswith(url + "/") and FILENAME_RE.fullmatch(value[len(url) + 1:])), None)
+            if folder is None:
+                raise CmsError("unknown image")
+            name = value.rsplit("/", 1)[1]
+            where = self._media_usage(gh, app, schema, head, full=True).get(value)
+            if where:
+                raise CmsError(f"this image is used in {', '.join(where)}: replace it there first")
+            return self._commit(gh, app, {f"{folder}/{name}": None}, "cms(media)", "", f"delete {name}", username, head, [])
 
     # -- compatibility (repository list) -----------------------------------------
 

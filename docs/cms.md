@@ -95,6 +95,7 @@ on the first save.
 | `sort_field` | first `date` field | the list is **newest first** on it (a `date`, `number` or `text` field) |
 | `index_fields` | every field but `markdown` | what the list contains (git: `index.json`) |
 | `max_entries` | 1000 | at most 1000 |
+| `drafts` | `false` | entries get a status: `published`, `draft` or `scheduled` ([below](#drafts-and-scheduling)); `git` storage only |
 
 Each entry has a **slug**: its address, made from the title (`Été à Paris !` → `ete-a-paris`,
 `ete-a-paris-2` when taken) or typed by the client when creating it (`a-z`, `0-9`, dashes, 80
@@ -130,6 +131,21 @@ $article = json_decode(file_get_contents(__DIR__ . "/content/articles/" . basena
 ```
 
 A plain static site can `fetch("/content/articles/index.json")` when that folder is served.
+
+### Drafts and scheduling
+
+With `"drafts": true`, the back-office lets the client save an entry as a **draft**, publish it, or
+**schedule** it for a date. Mas stores `status` (and `publish_at`, UTC, for scheduled entries) in the
+entry file and in `index.json`. **Your site shows an entry only when its `status` is `"published"`**
+(entries written before drafts were enabled have no `status`: treat them as published):
+
+```js
+const visible = articles.filter((a) => (a.status ?? "published") === "published");
+```
+
+A scheduled entry is published by Mas at its date (a commit, so a redeploy): the site must rebuild
+on push, as for every other change. Drafts are not available for `storage: "supabase"` (rows are
+online at once).
 
 ### `storage: "supabase"`
 
@@ -277,3 +293,20 @@ Without the plugin, one line is enough:
 ```
 Read https://raw.githubusercontent.com/SyanCode/Mas/main/docs/cms.md and make this site Mas compatible.
 ```
+
+## The back-office
+
+Clients (and administrators) open **/cms** on the Mas dashboard. It is a classic admin: a sidebar
+with the site's collections and pages, and
+
+- a **dashboard**: visits (page views, visitors) of the last 7 days, an entries summary per
+  collection, recent activity and the next scheduled publication;
+- **collections** as searchable, sortable lists with status filters and quick publish / unpublish /
+  delete actions; a two-column editor with a Publish box (status, date, address, note) and a
+  Markdown preview;
+- a **media library** of the images in the folders of the `image` fields: upload, search, copy the
+  path, delete (refused while a page or entry uses the image);
+- **statistics** (from the nginx logs, no cookie), a **history** of who changed what, and for
+  administrators the **users** (editors, the sites they can change, password and 2FA resets).
+
+Images of Supabase collections live in Supabase Storage and are not part of the media library.
