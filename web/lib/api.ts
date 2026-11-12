@@ -156,6 +156,9 @@ export interface TrafficReport {
   days: TrafficDay[];
   totals: { requests: number; pageviews: number; visitors: number } | null;
   top_pages: { path: string; views: number }[];
+  countries?: { code: string; visitors: number }[];
+  geo?: boolean;
+  attribution?: string;
 }
 
 export interface CmsActivity {
@@ -173,6 +176,7 @@ export interface CmsDashboard {
   sites: (CmsSite & { visits: TrafficReport | null; scheduled: { cid: string; slug: string; publish_at: string }[] })[];
   totals: { pageviews: number; visitors: number; requests: number };
   days: { day: string; pageviews: number; visitors: number }[];
+  countries: { code: string; visitors: number }[];
   scheduled: number;
   activity: CmsActivity[];
   editors: number | null;

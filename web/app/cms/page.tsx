@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { CalendarClock, Eye, FilePlus2, Globe, Users } from "lucide-react";
 import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout";
 import { TrafficChart } from "@/components/cms/TrafficChart";
+import { CountryList, WorldMap } from "@/components/cms/WorldMap";
 import { DeployBadge, StatCard, formatDate, parseUtc, useDescribe } from "@/components/cms/common";
 import { Avatar } from "@/components/cms/ui/avatar";
 import { Button } from "@/components/cms/ui/button";
@@ -83,6 +84,13 @@ function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {data && data.countries.length > 0 && (
+        <Card className="mt-6">
+          <CardHeader><CardTitle>{t("Visitors by country")}</CardTitle><CardDescription>{t("Last 7 days, all your sites")}</CardDescription></CardHeader>
+          <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]"><WorldMap countries={data.countries} /><CountryList countries={data.countries} limit={6} /></CardContent>
+        </Card>
+      )}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">

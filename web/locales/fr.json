@@ -1299,5 +1299,13 @@
   "Library": "Médiathèque",
   "Write": "Écrire",
   "Preview": "Aperçu",
-  "Nothing to preview.": "Rien à prévisualiser."
+  "Nothing to preview.": "Rien à prévisualiser.",
+  "Visitors by country": "Visiteurs par pays",
+  "Last 7 days, all your sites": "7 derniers jours, tous vos sites",
+  "Only the country is kept, never the address.": "Seul le pays est conservé, jamais l'adresse.",
+  "See where your visitors come from on a world map. Needs a free country database (DB-IP), downloaded once.": "Voyez d'où viennent vos visiteurs sur une carte du monde. Nécessite une base de pays gratuite (DB-IP), téléchargée une fois.",
+  "Enable the world map": "Activer la carte du monde",
+  "Ask your administrator to enable it.": "Demandez à votre administrateur de l'activer.",
+  "Countries are counted from now on: they appear with the next visits.": "Les pays sont comptés à partir de maintenant : ils apparaissent avec les prochaines visites.",
+  "{n} visitors · {pct}%": "{n} visiteurs · {pct} %"
 }
