@@ -1303,5 +1303,17 @@
   "Enable the world map": "Activar el mapa del mundo",
   "Ask your administrator to enable it.": "Pida a su administrador que lo active.",
   "Countries are counted from now on: they appear with the next visits.": "Los países se cuentan a partir de ahora: aparecerán con las próximas visitas.",
-  "{n} visitors · {pct}%": "{n} visitantes · {pct} %"
+  "{n} visitors · {pct}%": "{n} visitantes · {pct} %",
+  "Add or change goals": "Añadir o cambiar objetivos",
+  "Start counting conversions": "Empezar a contar conversiones",
+  "1. Add this line to every page of the site, before </body>:": "1. Añada esta línea a cada página del sitio, antes de </body>:",
+  "2. Name what matters with data-mas-goal. Phone and e-mail links are counted on their own.": "2. Nombre lo que importa con data-mas-goal. Los enlaces de teléfono y correo se cuentan solos.",
+  "No cookie, no address stored. Visitors who enable Do Not Track are not counted. Goal names: letters, digits, - _ . :": "Sin cookies ni direcciones guardadas. Los visitantes con «No rastrear» no se cuentan. Nombres de objetivo: letras, números, - _ . :",
+  "Conversion rate": "Tasa de conversión",
+  "{n} visitors reached a goal": "{n} visitantes alcanzaron un objetivo",
+  "No goal tracked yet": "Aún no hay objetivos",
+  "Conversions": "Conversiones",
+  "What your visitors click, and the share of visitors who do it.": "Lo que hacen clic sus visitantes y el porcentaje que lo hace.",
+  "Goal": "Objetivo",
+  "Clicks": "Clics"
 }
