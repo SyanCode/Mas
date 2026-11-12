@@ -37,7 +37,7 @@ reicht, treten weitere Server als Agents bei und betreiben Kopien deiner Apps hi
 | 🌐 **Domains** | DNS-Einträge werden bei OVH, Cloudflare, Gandi, Hetzner, DigitalOcean oder Porkbun angelegt, dann HTTPS. |
 | 🗄️ **Supabase** | Der offizielle Stack mit einem Klick selbst gehostet, Apps direkt aus ihrem Repository verbunden, Migrationen beim Deploy. |
 | 📦 **Fertige Dienste** | Mailserver, Minecraft, Uptime Kuma, Vaultwarden, n8n, Gitea oder ein beliebiges Docker-Image, mit nächtlichen Backups. |
-| ✏️ **CMS** | Deine Kunden bearbeiten Texte, Bilder und Artikel ihrer Website; jedes Speichern ist ein Commit und ein Deploy. |
+| ✏️ **CMS** | Ein Backend im WordPress-Stil für deine Kunden: Übersicht mit Statistiken, Entwürfe und geplante Veröffentlichung, Mediathek, Verlauf mit Rückgängig, Weltkarte der Besucher, Konversionsrate, Cookie-Banner, automatisches DSGVO-Audit, Verfügbarkeitsüberwachung. Jedes Speichern ist ein Commit und ein Deploy. |
 | 📊 **Traffic** | Anfragen, Seitenaufrufe und Besucher pro Tag für jede Website, aus den nginx-Logs, ohne Cookies. |
 | 🧠 **Ressourcen** | Arbeitsspeicher und CPU von allem auf einer Seite; Speicherlimits, Schlafen bei Inaktivität, Instanzen, die dem Traffic folgen, Ratschläge mit einem Klick angewendet. |
 | 🛠️ **Betrieb** | Health-Checks mit Lösungen, jeden Dienst identisch neu starten, Wartungsseiten, alles neu deployen. |

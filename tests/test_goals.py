@@ -112,3 +112,37 @@ def test_cookie_banner_config_script_and_decisions(tmp_path):
     stats = cookies.report(db, "shop")
     assert (stats["accept"], stats["reject"], stats["custom"], stats["accept_rate"]) == (2, 1, 1, 50.0)
     assert "ip" not in str(db.get_setting("cookies:shop"))
+
+
+def test_consent_proof_is_kept_exported_and_forgotten(tmp_path):
+    from mas import cookies
+    host, db = make(tmp_path)
+    client = TestClient(create_app(host, Config(cookie_secure=False), db, background=False))
+    csrf = client.post("/api/login", json={"username": "admin", "password": "correct horse battery"}).json()["csrf"]
+    h = {"x-csrf-token": csrf}
+    client.put("/api/cms/sites/shop/cookies", headers=h, json={"enabled": True, "categories": ["analytics", "marketing"]})
+    version = client.get("/t/c", params={"h": "shop.example.com"}).json()["version"]
+    cid = "0123456789abcdef0123456789abcdef"
+    sent = {"d": "custom", "i": cid, "c": {"analytics": True, "marketing": False, "evil": True}, "v": version}
+    assert client.post("/t/k", content=json.dumps(sent), headers={"origin": SITE}).status_code == 204
+    client.post("/t/k", content=json.dumps({"d": "accept", "i": "not hex!", "v": version}), headers={"origin": SITE})  # counted, no proof
+
+    mine = client.get("/api/cms/sites/shop/cookies").json()
+    assert mine["stats"]["total"] == 2 and mine["stats"]["logged"] == 1 and mine["stats"]["version"] == version
+    assert mine["log"][0]["consent_id"] == cid and mine["log"][0]["categories"] == {"analytics": True, "marketing": False}
+    csv = client.get("/api/cms/sites/shop/cookies/log.csv")
+    assert csv.headers["content-type"].startswith("text/csv") and cid in csv.text
+    assert csv.text.splitlines()[0] == "at,consent_id,decision,analytics,marketing,preferences,banner_version"
+    assert csv.text.splitlines()[1].endswith(f"custom,true,false,,{version}")
+    versions = client.get("/api/cms/sites/shop/cookies/versions").json()
+    assert versions[0]["version"] == version and versions[0]["config"]["categories"] == ["analytics", "marketing"]
+
+    # changing the banner text makes a new version, and old proofs keep pointing at what the visitor saw
+    client.put("/api/cms/sites/shop/cookies", headers=h, json={"enabled": True, "categories": ["analytics"], "title": "New"})
+    assert client.get("/t/c", params={"h": "shop.example.com"}).json()["version"] != version
+    assert len(client.get("/api/cms/sites/shop/cookies/versions").json()) == 2
+    # old proofs are forgotten after 13 months
+    with db.tx() as c:
+        c.execute("UPDATE consent_log SET at = '2020-01-01T00:00:00+00:00'")
+    cookies.record(db, "shop.example.com", "accept", None, "f" * 16, {"analytics": True}, version)
+    assert db.consent_log_count("shop") == 1

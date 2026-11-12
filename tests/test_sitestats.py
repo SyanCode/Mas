@@ -167,3 +167,10 @@ def test_geo_install_and_lookup(tmp_path):
         raise AssertionError("should fail")
     except GeoError:
         pass
+
+
+def test_cdn_visitors_are_set_aside_from_countries():
+    from mas.cdn import is_cdn
+    assert is_cdn("104.16.1.1") and is_cdn("2606:4700::1") and not is_cdn("8.8.8.8") and not is_cdn("nonsense")
+    days = count([line("104.16.1.1", "20", "/"), line("1.1.1.1", "20", "/"), line("104.16.1.2", "20", "/", agent=UA + " y")], FakeGeo())
+    assert days["2026-10-20"]["countries"] == {"_cdn": 2, "FR": 1}

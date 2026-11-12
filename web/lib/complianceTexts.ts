@@ -81,11 +81,20 @@ const PATTERNS: [RegExp, string, string[]][] = [
 ]; 
 
 /** The translation of one finding text; unknown texts stay as the audit wrote them. */
+export const FINDING_ITEMS: string[] = [
+  msg("publisher / company name"), msg("registration number (SIRET/RCS/VAT)"), msg("publication director"), msg("host"),
+  msg("contact"), msg("data controller"), msg("purposes"), msg("retention period"), msg("rights (access, erasure…)"),
+  msg("supervisory authority (CNIL…)"), msg("recipients / processors"),
+];
+
+/** "a, b, c" → each element translated when it is a known name (header names stay as they are). */
+const translateList = (list: string) => list.split(", ").map((x) => tr(x)).join(", ");
+
 export function translateFinding(text: string): string {
   if (!text) return text;
   for (const [rx, key, names] of PATTERNS) {
     const m = rx.exec(text);
-    if (m) return tr(key, Object.fromEntries(names.map((n, i) => [n, m[i + 1]])));
+    if (m) return tr(key, Object.fromEntries(names.map((n, i) => [n, n === "list" ? translateList(m[i + 1]) : m[i + 1]])));
   }
   return tr(text);
 }

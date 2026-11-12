@@ -8,6 +8,7 @@ reject, custom) per day, with no identifier. Scripts and iframes that set cookie
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import date
@@ -73,9 +74,16 @@ def load(db: Database, app_id: str) -> dict:
         return dict(DEFAULTS)
 
 
+def version(config: dict) -> str:
+    """Short identifier of what the banner says: the proof of a consent names the version the visitor saw."""
+    keep = {k: config[k] for k in ("position", "title", "message", "categories", "policy_url", "expiry_months")}
+    return hashlib.sha256(json.dumps(keep, sort_keys=True).encode()).hexdigest()[:10]
+
+
 def save(db: Database, app_id: str, raw: dict) -> dict:
     config = normalize(raw)
     db.set_setting(f"cookies:{app_id}", json.dumps(config))
+    db.save_consent_version(app_id, version(config), json.dumps(config))
     return config
 
 
@@ -85,15 +93,35 @@ def public_config(db: Database, host: str) -> dict:
     if app is None:
         return {"enabled": False}
     config = load(db, app["id"])
-    return config if config["enabled"] else {"enabled": False}
+    return {**config, "version": version(config)} if config["enabled"] else {"enabled": False}
 
 
-def record(db: Database, host: str, decision: str, today: date | None = None) -> bool:
+ID_RE = re.compile(r"^[0-9a-f]{16,32}$")
+LOG_MONTHS = 13  # a consent is proven for as long as it is valid, then forgotten
+
+
+def record(db: Database, host: str, decision: str, today: date | None = None, consent_id: str = "",
+           choice: dict | None = None, banner: str = "") -> bool:
+    """Count a decision and, with its random id, keep the proof of it (when, what, which banner text)."""
     app = app_for_origin(db, f"https://{host}")
     if app is None or decision not in DECISIONS:
         return False
     db.add_consent(app["id"], (today or date.today()).isoformat(), decision)
+    if ID_RE.fullmatch(consent_id or ""):
+        cats = {c: bool((choice or {}).get(c)) for c in CATEGORIES if c in (choice or {})}
+        db.add_consent_log(app["id"], consent_id, decision, json.dumps(cats), re.sub(r"[^0-9a-f]", "", banner)[:16],
+                           LOG_MONTHS)
     return True
+
+
+def log_csv(db: Database, app_id: str, limit: int = 100_000) -> str:
+    """The consent log as CSV: the proof a regulator may ask for."""
+    out = ["at,consent_id,decision," + ",".join(CATEGORIES) + ",banner_version"]
+    for r in db.consent_log(app_id, limit):
+        cats = json.loads(r["categories"] or "{}")
+        out.append(",".join([r["at"], r["consent_id"], r["decision"], *("" if c not in cats else str(cats[c]).lower()
+                                                                          for c in CATEGORIES), r["banner"]]))
+    return "\n".join(out) + "\n"
 
 
 def report(db: Database, app_id: str, days: int = 30, today: date | None = None) -> dict:
@@ -103,7 +131,8 @@ def report(db: Database, app_id: str, days: int = 30, today: date | None = None)
     for row in db.consent_stats(app_id, since):
         totals[row["decision"]] += row["n"]
     shown = sum(totals.values())
-    return {**totals, "total": shown, "accept_rate": round(100 * totals["accept"] / shown, 1) if shown else 0.0}
+    return {**totals, "total": shown, "accept_rate": round(100 * totals["accept"] / shown, 1) if shown else 0.0,
+            "logged": db.consent_log_count(app_id), "version": version(load(db, app_id))}
 
 
 SCRIPT = r"""(function () {
@@ -129,9 +158,13 @@ SCRIPT = r"""(function () {
     if (!m) return null;
     try { var v = JSON.parse(decodeURIComponent(m[1])); return v && v.c && v.e > Date.now() ? v : null; } catch (e) { return null; }
   }
+  function newId() {
+    var a = new Uint8Array(16); (window.crypto || window.msCrypto).getRandomValues(a);
+    return Array.prototype.map.call(a, function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+  }
   function write(choice) {
     var months = (cfg && cfg.expiry_months) || 6;
-    var v = { c: choice, e: Date.now() + months * 30 * 864e5 };
+    var v = { c: choice, e: Date.now() + months * 30 * 864e5, i: (state && state.i) || newId(), v: cfg.version || "" };
     document.cookie = COOKIE + "=" + encodeURIComponent(JSON.stringify(v)) + "; max-age=" + months * 30 * 86400 +
       "; path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
     state = v;
@@ -160,17 +193,17 @@ SCRIPT = r"""(function () {
     window.dispatchEvent(new CustomEvent("mas:consent", { detail: state && state.c }));
   }
 
-  function beacon(decision) {
+  function beacon(decision, choice) {
     if (cfg && cfg.preview) return;
     try {
-      fetch(base + "/t/k", { method: "POST", body: JSON.stringify({ d: decision }), keepalive: true,
+      fetch(base + "/t/k", { method: "POST", body: JSON.stringify({ d: decision, i: state && state.i, c: choice, v: cfg.version || "" }), keepalive: true,
         mode: "no-cors", credentials: "omit", headers: { "Content-Type": "text/plain" } });
     } catch (e) {}
   }
   function decide(choice, decision) {
     if (!cfg.preview) write(choice);
     close();
-    beacon(decision);
+    beacon(decision, choice);
     if (!cfg.preview) activate();
     showReopen();
   }

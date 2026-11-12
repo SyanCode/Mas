@@ -37,7 +37,7 @@ suffit plus, d'autres serveurs rejoignent le premier comme agents et font tourne
 | 🌐 **Domaines** | Enregistrements DNS créés chez OVH, Cloudflare, Gandi, Hetzner, DigitalOcean ou Porkbun, puis HTTPS. |
 | 🗄️ **Supabase** | La stack officielle auto-hébergée en un clic, les apps connectées depuis leur dépôt, les migrations au déploiement. |
 | 📦 **Services prêts à l'emploi** | Serveur mail, Minecraft, Uptime Kuma, Vaultwarden, n8n, Gitea ou n'importe quelle image Docker, avec sauvegardes chaque nuit. |
-| ✏️ **CMS** | Vos clients modifient les textes, les images et les articles de leur site ; chaque enregistrement est un commit et un déploiement. |
+| ✏️ **CMS** | Un back-office façon WordPress pour vos clients : tableau de bord et stats, brouillons et publication programmée, médiathèque, historique avec retour arrière, carte du monde des visiteurs, taux de conversion, bannière cookies, audit RGPD automatique, surveillance de disponibilité. Chaque enregistrement est un commit et un déploiement. |
 | 📊 **Trafic** | Requêtes, pages vues et visiteurs par jour pour chaque site, à partir des journaux nginx, sans cookies. |
 | 🧠 **Ressources** | Mémoire et CPU de tout ce qui tourne sur une seule page ; limites mémoire, mise en veille en cas d'inactivité, instances qui suivent le trafic, conseils appliqués en un clic. |
 | 🛠️ **Exploitation** | Vérifications de santé avec corrections, redémarrage de tous les services à l'identique, pages de maintenance, tout redéployer. |

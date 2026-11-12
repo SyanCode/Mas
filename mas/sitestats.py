@@ -18,6 +18,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from urllib.parse import unquote, urlsplit
 
+from mas.cdn import REALIP_SNIPPET, is_cdn
 from mas.config import Config
 from mas.db import Database
 from mas.host import Host
@@ -101,7 +102,7 @@ def tally(lines, geo=None) -> dict[str, dict]:
         who = hashlib.blake2b(f"{day}|{ip}|{agent}".encode(), digest_size=8).digest()
         d["visitors"].add(who)
         if geo is not None and who not in d["geo"]:
-            code = geo.country(ip)
+            code = "_cdn" if is_cdn(ip) else geo.country(ip)  # a CDN edge says nothing about the visitor
             if code:
                 d["geo"][who] = code
         d["pages"][path] += 1
@@ -254,6 +255,8 @@ class SiteStats:
                 "totals": {"requests": total("requests"), "pageviews": total("pageviews"),
                            "visitors": total("visitors")},
                 "top_pages": [{"path": p, "views": v} for p, v in pages.most_common(10)],
-                "countries": [{"code": c, "visitors": v} for c, v in countries.most_common(60)],
+                "countries": [{"code": c, "visitors": v} for c, v in countries.most_common(61) if c != "_cdn"][:60],
+                "cdn": ({"share": round(countries["_cdn"] / max(1, sum(countries.values())), 2), "snippet": REALIP_SNIPPET}
+                        if countries.get("_cdn") else None),
                 "geo": bool(self.geo and self.geo.available()),
                 "updated_at": datetime.now().isoformat(timespec="seconds")}
