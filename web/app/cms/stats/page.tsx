@@ -133,6 +133,13 @@ function Stats() {
                   <CountryList countries={data.countries} />
                 </div>
               ) : <p className="py-12 text-center text-sm text-muted-foreground">{t("Countries are counted from now on: they appear with the next visits.")}</p>}
+              {data?.geo && data.cdn && (
+                <div className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                  <p className="font-medium">{t("Your site seems to be behind a CDN (Cloudflare)")}</p>
+                  <p className="mt-1 text-muted-foreground">{t("{pct}% of the visitors come from the CDN's addresses, whose country says nothing about the visitor. Countries are left out for them. Pass the real address to nginx:", { pct: Math.round(data.cdn.share * 100) })}</p>
+                  <Snippet code={data.cdn.snippet} />
+                </div>
+              )}
               {data?.geo && <p className="mt-4 text-[11px] text-muted-foreground">{data.attribution}</p>}
             </CardContent>
           </Card>

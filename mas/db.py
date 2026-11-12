@@ -192,6 +192,23 @@ CREATE TABLE IF NOT EXISTS compliance_audits (  -- automatic GDPR / consent audi
     result TEXT NOT NULL                       -- JSON: findings, counts, pages
 );
 CREATE INDEX IF NOT EXISTS compliance_app ON compliance_audits(app_id, id);
+CREATE TABLE IF NOT EXISTS consent_log (     -- proof of each cookie choice: a random id the visitor holds, no address
+    id INTEGER PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    consent_id TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    categories TEXT,                           -- JSON {analytics: true, ...}
+    banner TEXT                                -- version of the banner text the visitor saw
+);
+CREATE INDEX IF NOT EXISTS consent_log_app ON consent_log(app_id, id);
+CREATE TABLE IF NOT EXISTS consent_versions ( -- what each banner version said (to read a proof later)
+    app_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    config TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    PRIMARY KEY (app_id, version)
+);
 CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday (hashes): counted once per day
     app_id TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -646,6 +663,33 @@ class Database:
             c.execute("INSERT INTO consent_stats (app_id, day, decision, n) VALUES (?, ?, ?, 1) "
                       "ON CONFLICT(app_id, day, decision) DO UPDATE SET n = n + 1", (app_id, day, decision))
 
+    def add_consent_log(self, app_id: str, consent_id: str, decision: str, categories: str, banner: str,
+                        keep_months: int) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30 * keep_months)).isoformat(timespec="seconds")
+        with self.tx() as c:
+            c.execute("INSERT INTO consent_log (app_id, at, consent_id, decision, categories, banner) VALUES (?, ?, ?, ?, ?, ?)",
+                      (app_id, _now(), consent_id, decision, categories, banner))
+            c.execute("DELETE FROM consent_log WHERE app_id = ? AND at < ?", (app_id, cutoff))
+
+    def consent_log(self, app_id: str, limit: int = 100) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM consent_log WHERE app_id = ? ORDER BY id DESC LIMIT ?",
+                                               (app_id, limit))]
+
+    def consent_log_count(self, app_id: str) -> int:
+        with self.tx() as c:
+            return int(c.execute("SELECT COUNT(*) FROM consent_log WHERE app_id = ?", (app_id,)).fetchone()[0])
+
+    def save_consent_version(self, app_id: str, version: str, config: str) -> None:
+        with self.tx() as c:
+            c.execute("INSERT OR IGNORE INTO consent_versions (app_id, version, config, first_seen) VALUES (?, ?, ?, ?)",
+                      (app_id, version, config, _now()))
+
+    def consent_versions(self, app_id: str) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM consent_versions WHERE app_id = ? ORDER BY first_seen DESC",
+                                               (app_id,))]
+
     def consent_stats(self, app_id: str, since: str) -> list[dict]:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT decision, SUM(n) AS n FROM consent_stats "
@@ -736,6 +780,8 @@ class Database:
             c.execute("DELETE FROM site_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM site_goals WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM consent_stats WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM consent_log WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM consent_versions WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM compliance_audits WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM settings WHERE key = ?", (f"cookies:{app_id}",))
             c.execute("DELETE FROM goal_visitors WHERE app_id = ?", (app_id,))
