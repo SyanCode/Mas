@@ -311,4 +311,20 @@ with the site's collections and pages, and
   a country code per visitor, never an address; "IP Geolocation by DB-IP", CC BY 4.0), a **history** of who changed what, and for
   administrators the **users** (editors, the sites they can change, password and 2FA resets).
 
+### Conversions
+
+Add one line to the site and Mas counts what visitors click, still without cookie or stored address:
+
+```html
+<script defer src="https://your-mas-domain/t.js"></script>
+<a href="/reservation" data-mas-goal="book">Book a table</a>   <!-- a click is a goal -->
+<form action="/contact" data-mas-goal="contact">…</form>         <!-- a submit is a goal -->
+```
+
+`tel:` and `mailto:` links count on their own (`tel`, `mailto`); `mas("name")` sends a goal from
+your own script. The statistics show, per goal, the clicks, the visitors who did it and the
+**conversion rate** (visitors who reached the goal ÷ visitors). The visitor is the same anonymous
+daily hash the access logs use, so no cookie is needed; Do Not Track is respected. Needs the Mas
+dashboard to be reachable from your visitors' browsers (it receives `POST /t/e`).
+
 Images of Supabase collections live in Supabase Storage and are not part of the media library.
