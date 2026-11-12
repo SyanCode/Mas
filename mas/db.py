@@ -181,6 +181,17 @@ CREATE TABLE IF NOT EXISTS consent_stats (   -- cookie banner decisions per day 
     n INTEGER NOT NULL,
     PRIMARY KEY (app_id, day, decision)
 );
+CREATE TABLE IF NOT EXISTS compliance_audits (  -- automatic GDPR / consent audits of the published site
+    id INTEGER PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    release_id INTEGER,                        -- the release that was audited (NULL: scheduled)
+    at TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    verdict TEXT NOT NULL,                     -- ok | attention | blocking
+    trigger TEXT NOT NULL,                     -- release | weekly | manual | first
+    result TEXT NOT NULL                       -- JSON: findings, counts, pages
+);
+CREATE INDEX IF NOT EXISTS compliance_app ON compliance_audits(app_id, id);
 CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday (hashes): counted once per day
     app_id TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -640,6 +651,26 @@ class Database:
             return [dict(r) for r in c.execute("SELECT decision, SUM(n) AS n FROM consent_stats "
                                                "WHERE app_id = ? AND day >= ? GROUP BY decision", (app_id, since))]
 
+    def save_compliance(self, app_id: str, release_id: int | None, score: int, verdict: str, trigger: str,
+                        result: str) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO compliance_audits (app_id, release_id, at, score, verdict, trigger, result) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?)", (app_id, release_id, _now(), score, verdict, trigger, result))
+            c.execute("DELETE FROM compliance_audits WHERE app_id = ? AND id NOT IN "
+                      "(SELECT id FROM compliance_audits WHERE app_id = ? ORDER BY id DESC LIMIT 50)", (app_id, app_id))
+
+    def latest_compliance(self, app_id: str) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM compliance_audits WHERE app_id = ? ORDER BY id DESC LIMIT 1",
+                            (app_id,)).fetchone()
+        return dict(row) if row else None
+
+    def compliance_history(self, app_id: str, limit: int = 20) -> list[dict]:
+        with self.tx() as c:
+            rows = c.execute("SELECT id, at, score, verdict, release_id, trigger FROM compliance_audits "
+                             "WHERE app_id = ? ORDER BY id DESC LIMIT ?", (app_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+
     def site_goals(self, app_id: str, since: str) -> list[dict]:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM site_goals WHERE app_id = ? AND day >= ? ORDER BY day",
@@ -705,6 +736,7 @@ class Database:
             c.execute("DELETE FROM site_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM site_goals WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM consent_stats WHERE app_id = ?", (app_id,))
+            c.execute("DELETE FROM compliance_audits WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM settings WHERE key = ?", (f"cookies:{app_id}",))
             c.execute("DELETE FROM goal_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM folder_items WHERE kind = 'app' AND item_id = ?", (app_id,))
