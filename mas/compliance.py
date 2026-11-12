@@ -247,6 +247,8 @@ def finding(fid: str, level: str, category: str, title: str, detail: str = "", f
 
 
 class Auditor:
+    _detected: dict = {"services": [], "cookies": []}
+
     def __init__(self, fetch: Callable[..., Response] = http_fetch, mas_banner: Callable[[str], dict | None] = lambda host: None) -> None:
         self.fetch = fetch
         self.mas_banner = mas_banner  # host -> the banner settings Mas holds for that site, if any
@@ -264,10 +266,13 @@ class Auditor:
         pages = self._pages(host, home)
         out += self._https(host, home)
         out += self._cookies(pages, home)
+        self._detected = {"services": [], "cookies": []}
         out += self._trackers(host, pages, home)
         out += self._legal(host, pages)
         out += self._forms(pages)
-        return self._result(host, out, [p.url for p in pages])
+        result = self._result(host, out, [p.url for p in pages])
+        result["detected"] = self._detected
+        return result
 
     # crawl: the home page, the legal pages it links, a few pages of the sitemap or menu
     def _pages(self, host: str, home: Response) -> list[Page]:
@@ -365,6 +370,8 @@ class Auditor:
                     loaded.setdefault(t[1], {"category": t[2], "region": t[3], "where": page.url})
             if "cookieconsent" in " ".join(page.text).lower() or any(h in " ".join(page.text).lower() for h in ("tarteaucitron", "didomi")):
                 banner = True
+        self._detected["services"] = [{"name": n, "category": v["category"], "region": v["region"]} for n, v in sorted(loaded.items())]
+        self._detected["cookies"] = [raw.split("=", 1)[0].strip() for raw in home.cookies()]
         needs_consent = {n: v for n, v in loaded.items() if v["category"] in ("analytics", "marketing", "embed")}
         for name, v in sorted(needs_consent.items()):
             out.append(finding(f"tracker-{re.sub(r'[^a-z0-9]+', '-', name.lower())}", "critical", "trackers",
