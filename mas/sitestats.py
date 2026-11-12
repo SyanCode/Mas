@@ -79,10 +79,12 @@ def for_hosts(lines, hosts: list[str] | None):
             yield rest
 
 
-def tally(lines) -> dict[str, dict]:
-    """{day: {requests, pageviews, visitors (set of hashes), pages (Counter)}} from access log lines."""
+def tally(lines, geo=None) -> dict[str, dict]:
+    """{day: {requests, pageviews, visitors (set of hashes), pages (Counter), geo {hash: country}}}.
+
+    ``geo`` (mas.geo.Geo) gives the country of a visitor; the address itself is never kept."""
     days: dict[str, dict] = defaultdict(lambda: {"requests": 0, "pageviews": 0, "visitors": set(),
-                                                 "pages": Counter()})
+                                                 "pages": Counter(), "geo": {}})
     for line in lines:
         m = LINE_RE.match(line)
         if not m or m.group(3) not in MONTHS:
@@ -96,15 +98,21 @@ def tally(lines) -> dict[str, dict]:
                 or FILE_RE.search(path) or PROBE_RE.search(path)):
             continue
         d["pageviews"] += 1
-        d["visitors"].add(hashlib.blake2b(f"{day}|{ip}|{agent}".encode(), digest_size=8).digest())
+        who = hashlib.blake2b(f"{day}|{ip}|{agent}".encode(), digest_size=8).digest()
+        d["visitors"].add(who)
+        if geo is not None and who not in d["geo"]:
+            code = geo.country(ip)
+            if code:
+                d["geo"][who] = code
         d["pages"][path] += 1
     return days
 
 
-def count(lines) -> dict[str, dict]:
-    """{day: {requests, pageviews, visitors, pages}} from access log lines."""
+def count(lines, geo=None) -> dict[str, dict]:
+    """{day: {requests, pageviews, visitors, pages, countries}} from access log lines."""
     return {day: {"day": day, "requests": d["requests"], "pageviews": d["pageviews"], "visitors": len(d["visitors"]),
-                  "pages": dict(d["pages"].most_common(TOP_PAGES))} for day, d in tally(lines).items()}
+                  "pages": dict(d["pages"].most_common(TOP_PAGES)), "countries": dict(Counter(d["geo"].values()))}
+            for day, d in tally(lines, geo).items()}
 
 
 def own_access_logs(service: Service) -> list[str]:
@@ -129,8 +137,10 @@ def service_target(service: Service, apps: list[dict], apps_dir: str) -> dict | 
 
 
 class SiteStats:
-    def __init__(self, host: Host, config: Config, db: Database, find_service=lambda service_id: None) -> None:
+    def __init__(self, host: Host, config: Config, db: Database, find_service=lambda service_id: None,
+                 geo=None) -> None:
         self.host, self.config, self.db = host, config, db
+        self.geo = geo  # mas.geo.Geo: countries for the traffic map (optional)
         self.find_service = find_service
         self._done: dict[str, float] = {}
         self._read_to: dict[str, int] = {}  # where the last reading stopped, per file
@@ -177,12 +187,14 @@ class SiteStats:
 
     def _recount(self, app: dict, files: list[str]) -> None:
         budget = [MAX_BYTES]
-        days = tally(for_hosts((line for path in files for line in _lines(self.host, path, budget)), app.get("hosts")))
+        days = tally(for_hosts((line for path in files for line in _lines(self.host, path, budget)), app.get("hosts")),
+                     self.geo)
         self._read_to = {}
         if days:
             self.db.save_site_stats(app["id"], [
                 {"day": day, "requests": d["requests"], "pageviews": d["pageviews"], "visitors": len(d["visitors"]),
-                 "pages": dict(d["pages"].most_common(TOP_PAGES))} for day, d in days.items()])
+                 "pages": dict(d["pages"].most_common(TOP_PAGES)), "countries": dict(Counter(d["geo"].values()))}
+                for day, d in days.items()])
         recent = (date.today() - timedelta(days=1)).isoformat()
         self.db.keep_site_visitors(app["id"], recent, {day: d["visitors"] for day, d in days.items() if day >= recent})
 
@@ -192,9 +204,10 @@ class SiteStats:
             data = self.host.read_from(path, offset, CHUNK_BYTES)
             cut = data.rfind(b"\n") + 1  # a line still being written stays for next time
             self._read_to[path] = offset + cut
-            for day, d in tally(for_hosts(data[:cut].decode("utf-8", "replace").splitlines(), app.get("hosts"))).items():
+            lines = for_hosts(data[:cut].decode("utf-8", "replace").splitlines(), app.get("hosts"))
+            for day, d in tally(lines, self.geo).items():
                 self.db.add_site_counts(app["id"], day, d["requests"], d["pageviews"], d["visitors"], dict(d["pages"]),
-                                        TOP_PAGES)
+                                        TOP_PAGES, d["geo"])
         self.db.keep_site_visitors(app["id"], (date.today() - timedelta(days=1)).isoformat())
 
     def refresh_all(self, services: list[Service] = ()) -> None:
@@ -212,7 +225,7 @@ class SiteStats:
         today = today or date.today()
         first = today - timedelta(days=days - 1)
         stored = {r["day"]: r for r in self.db.site_stats(app["id"], first.isoformat())}
-        series, pages = [], Counter()
+        series, pages, countries = [], Counter(), Counter()
         for i in range(days):
             day = (first + timedelta(days=i)).isoformat()
             row = stored.get(day)
@@ -220,9 +233,13 @@ class SiteStats:
                            "pageviews": row["pageviews"] if row else 0, "visitors": row["visitors"] if row else 0})
             if row and row["pages"]:
                 pages.update(json.loads(row["pages"]))
+            if row and row["countries"]:
+                countries.update(json.loads(row["countries"]))
         total = lambda key: sum(d[key] for d in series)  # noqa: E731
         return {"days": series, "since": first.isoformat(), "tracked_since": min(stored) if stored else None,
                 "totals": {"requests": total("requests"), "pageviews": total("pageviews"),
                            "visitors": total("visitors")},
                 "top_pages": [{"path": p, "views": v} for p, v in pages.most_common(10)],
+                "countries": [{"code": c, "visitors": v} for c, v in countries.most_common(60)],
+                "geo": bool(self.geo and self.geo.available()),
                 "updated_at": datetime.now().isoformat(timespec="seconds")}

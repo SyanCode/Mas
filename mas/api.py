@@ -28,6 +28,7 @@ from mas.deploy import Deployer, PendingEnvError
 from mas.github import GitHubApp
 from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
+from mas.geo import Geo
 from mas.sitestats import SiteStats, service_target
 from mas.usage import Usage
 from mas import removesite
@@ -257,7 +258,8 @@ def create_app(
     stacks = StackManager(host, config, db, deployer)
     stack_backups = StackBackups(stacks, keep=config.stacks_keep_backups)
     cms = CmsManager(db, github_client, deployer, Path(db.path).parent, supabase=supabase)
-    site_stats = SiteStats(host, config, db, find_service=scanner.get)
+    geo = Geo(Path(db.path).parent)
+    site_stats = SiteStats(host, config, db, find_service=scanner.get, geo=geo)
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \
         Cluster(host, config, db, deployer)
     resources = Resources(host, config, db, deployer, cluster)
@@ -757,7 +759,7 @@ def create_app(
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,
-                     stats=site_stats)
+                     stats=site_stats, geo=geo)
 
     # -- dashboard ---------------------------------------------------------
 
