@@ -171,11 +171,14 @@ def _privacy(p: dict, services: list, lang: str, host: str, today: date, miss: l
     contact = p["contact_form"] == "true" or not p["contact_form"]
     names = {s["name"] for s in services}
     us = sorted(s["name"] for s in services if "US" in s["region"])
+    dpo = p["dpo"]  # (no quote reuse inside f-strings: the server may run Python 3.11)
+    dpo_fr = f" · Délégué à la protection des données : {dpo}" if dpo else ""
+    dpo_en = f" · Data protection officer: {dpo}" if dpo else ""
     if lang == "fr":
         lines = [f"# Politique de confidentialité", "", f"*Dernière mise à jour : {today.strftime('%d/%m/%Y')}*", "",
                  "## Qui est responsable de vos données ?", "",
                  f"**{g('company')}**, {g('address')}, est responsable du traitement des données personnelles collectées sur **{host}**. "
-                 f"Contact : {g('email')}{f' · Délégué à la protection des données : {p['dpo']}' if p['dpo'] else ''}.", "",
+                 f"Contact : {g('email')}{dpo_fr}.", "",
                  "## Quelles données, pourquoi et sur quelle base ?", "",
                  "| Finalité | Données | Base légale | Durée de conservation |", "|---|---|---|---|"]
         if contact:
@@ -199,7 +202,7 @@ def _privacy(p: dict, services: list, lang: str, host: str, today: date, miss: l
         return "\n".join(lines)
     lines = ["# Privacy policy", "", f"*Last updated: {today.isoformat()}*", "", "## Who is responsible for your data?", "",
              f"**{g('company')}**, {g('address')}, is the controller of the personal data collected on **{host}**. "
-             f"Contact: {g('email')}{f' · Data protection officer: {p['dpo']}' if p['dpo'] else ''}.", "",
+             f"Contact: {g('email')}{dpo_en}.", "",
              "## What data, why and on what basis?", "", "| Purpose | Data | Legal basis | Retention |", "|---|---|---|---|"]
     if contact:
         lines.append(f"| Answering your messages (form, e-mail) | name, e-mail, message | legitimate interest / pre-contractual steps | {keep} months after the last exchange |")
