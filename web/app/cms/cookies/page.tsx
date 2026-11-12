@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/cms/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { Input, Textarea } from "@/components/cms/ui/input";
+import { FormItem } from "@/components/cms/ui/form-item";
 import { Label } from "@/components/cms/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Skeleton } from "@/components/cms/ui/skeleton";
@@ -26,7 +27,7 @@ interface LogRow { at: string; consent_id: string; decision: string; categories:
 const CATEGORIES = ["analytics", "marketing", "preferences"] as const;
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return <div className="space-y-1.5"><Label>{label}</Label>{children}{hint && <p className="text-xs text-muted-foreground">{hint}</p>}</div>;
+  return <FormItem><Label>{label}</Label>{children}{hint && <p className="text-xs text-muted-foreground">{hint}</p>}</FormItem>;
 }
 
 function Preview({ config, lang }: { config: Config; lang: string }) {
