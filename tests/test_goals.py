@@ -78,3 +78,37 @@ def test_script_and_public_beacon(tmp_path):
     assert client.post("/t/e", content=json.dumps({"g": "x"}), headers={"origin": "https://evil.example"}).status_code == 204
     goals = db.site_goals("shop", "2000-01-01")
     assert [g["goal"] for g in goals] == ["_any", "book"]
+
+
+def test_cookie_banner_config_script_and_decisions(tmp_path):
+    from mas import cookies
+    host, db = make(tmp_path)
+    client = TestClient(create_app(host, Config(cookie_secure=False), db, background=False))
+    csrf = client.post("/api/login", json={"username": "admin", "password": "correct horse battery"}).json()["csrf"]
+    h = {"x-csrf-token": csrf}
+
+    # off by default: the public config says nothing
+    assert client.get("/t/c", params={"h": "shop.example.com"}).json() == {"enabled": False}
+    js = client.get("/cookies.js")
+    assert js.status_code == 200 and "javascript" in js.headers["content-type"] and "mas_consent" in js.text
+
+    mine = client.get("/api/cms/sites/shop/cookies").json()
+    assert mine["config"]["enabled"] is False and mine["stats"]["total"] == 0
+    r = client.put("/api/cms/sites/shop/cookies", headers=h, json={
+        "enabled": True, "position": "bottom", "accent": "#ff6600", "categories": ["analytics", "marketing"],
+        "policy_url": "/privacy", "title": "Cookies", "expiry_months": 6})
+    assert r.status_code == 200, r.text
+    for bad in ({"accent": "red"}, {"position": "top"}, {"categories": ["tracking"]}, {"expiry_months": 24},
+                {"policy_url": "javascript:alert(1)"}, {"message": "x" * 501}):
+        assert client.put("/api/cms/sites/shop/cookies", headers=h, json=bad).status_code == 400
+    public = client.get("/t/c", params={"h": "shop.example.com"})
+    assert public.headers["access-control-allow-origin"] == "*"
+    assert public.json()["accent"] == "#ff6600" and public.json()["categories"] == ["analytics", "marketing"]
+    assert client.get("/t/c", params={"h": "evil.example"}).json() == {"enabled": False}  # unknown site
+
+    for decision in ("accept", "accept", "reject", "custom", "bogus"):
+        assert client.post("/t/k", content=json.dumps({"d": decision}),
+                           headers={"origin": SITE, "content-type": "text/plain"}).status_code == 204
+    stats = cookies.report(db, "shop")
+    assert (stats["accept"], stats["reject"], stats["custom"], stats["accept_rate"]) == (2, 1, 1, 50.0)
+    assert "ip" not in str(db.get_setting("cookies:shop"))
