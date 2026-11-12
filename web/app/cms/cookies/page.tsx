@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Copy, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout";
-import { StatCard } from "@/components/cms/common";
+import { StatCard, formatDate } from "@/components/cms/common";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/cms/ui/table";
 import { Button } from "@/components/cms/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { Input, Textarea } from "@/components/cms/ui/input";
@@ -14,13 +15,14 @@ import { Skeleton } from "@/components/cms/ui/skeleton";
 import { Switch } from "@/components/cms/ui/switch";
 import { api, type ApiError } from "@/lib/api";
 import { useI18n, useT } from "@/lib/i18n";
-import { BarChart3, Cookie, ShieldCheck, ShieldX } from "lucide-react";
+import { BarChart3, Cookie, Download, ShieldCheck, ShieldX } from "lucide-react";
 
 interface Config {
   enabled: boolean; position: string; theme: string; accent: string; policy_url: string; title: string; message: string;
   categories: string[]; expiry_months: number; reopen_button: boolean;
 }
-interface Stats { accept: number; reject: number; custom: number; total: number; accept_rate: number }
+interface Stats { accept: number; reject: number; custom: number; total: number; accept_rate: number; logged?: number; version?: string }
+interface LogRow { at: string; consent_id: string; decision: string; categories: Record<string, boolean>; banner: string }
 const CATEGORIES = ["analytics", "marketing", "preferences"] as const;
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -48,13 +50,14 @@ function Cookies() {
   const [config, setConfig] = useState<Config | null>(null);
   const [saved, setSaved] = useState("");
   const [stats, setStats] = useState<Stats | null>(null);
+  const [log, setLog] = useState<LogRow[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const base = site ? `/cms/sites/${encodeURIComponent(site.id)}/cookies` : "";
 
   useEffect(() => {
     if (!site) return;
-    api<{ config: Config; stats: Stats }>(base).then((r) => { setConfig(r.config); setSaved(JSON.stringify(r.config)); setStats(r.stats); }).catch((e: ApiError) => setError(e.detail));
+    api<{ config: Config; stats: Stats; log: LogRow[] }>(base).then((r) => { setConfig(r.config); setSaved(JSON.stringify(r.config)); setStats(r.stats); setLog(r.log); }).catch((e: ApiError) => setError(e.detail));
   }, [site, base]);
 
   if (!site) return <NoSite />;
@@ -84,6 +87,31 @@ function Cookies() {
             <StatCard label={t("Rejected")} value={stats?.reject ?? 0} icon={<ShieldX />} />
             <StatCard label={t("Customized")} value={stats?.custom ?? 0} icon={<BarChart3 />} />
           </div>
+          <Card className="mb-6">
+            <CardHeader className="flex-row items-start justify-between space-y-0">
+              <div className="space-y-1.5">
+                <CardTitle>{t("Proof of consent")}</CardTitle>
+                <CardDescription>{t("Each choice is kept with a random id, the date, the categories and the banner version the visitor saw. No address. Kept 13 months.")}</CardDescription>
+              </div>
+              <Button asChild variant="outline" size="sm"><a href={`/api${base}/log.csv`} download><Download />{t("Export CSV")}</a></Button>
+            </CardHeader>
+            <CardContent className="px-2 pb-2">
+              <Table>
+                <TableHeader><TableRow><TableHead>{t("When")}</TableHead><TableHead>{t("Choice")}</TableHead><TableHead>{t("Categories")}</TableHead><TableHead>{t("Banner version")}</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {log.length === 0 && <TableRow><TableCell colSpan={4} className="py-8 text-center text-muted-foreground">{t("No proof yet. It is kept from the next visitor choice.")}</TableCell></TableRow>}
+                  {log.map((r) => (
+                    <TableRow key={r.consent_id + r.at}>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(r.at, lang)}</TableCell>
+                      <TableCell>{r.decision === "accept" ? t("Accepted") : r.decision === "reject" ? t("Rejected") : t("Customized")}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{Object.entries(r.categories).filter(([, v]) => v).map(([k]) => k).join(", ") || "—"}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.banner}{r.banner === stats?.version ? ` · ${t("current")}` : ""}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader><CardTitle>{t("Settings")}</CardTitle></CardHeader>

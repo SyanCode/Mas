@@ -824,7 +824,10 @@ def create_app(
             if len(body) <= goals_mod.MAX_BODY and not goal_limiter.blocked(ip):
                 goal_limiter.hit(ip)
                 host = urlparse(request.headers.get("origin", "")).hostname or ""
-                await asyncio.to_thread(cookies_mod.record, db, host.lower(), str(json.loads(body).get("d", "")))
+                sent = json.loads(body)
+                await asyncio.to_thread(cookies_mod.record, db, host.lower(), str(sent.get("d", "")), None,
+                                        str(sent.get("i") or ""), sent.get("c") if isinstance(sent.get("c"), dict) else None,
+                                        str(sent.get("v") or ""))
         except (ValueError, AttributeError):
             pass
         return Response(status_code=204)
