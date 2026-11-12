@@ -154,13 +154,45 @@ def test_every_audit_text_can_be_translated():
     import json
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
-    tree = ast.parse((root / "mas" / "compliance.py").read_text(encoding="utf-8"))
     listed = (root / "web" / "lib" / "complianceTexts.ts").read_text(encoding="utf-8")
     missing = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "finding":
-            for arg in node.args[3:] + [k.value for k in node.keywords if k.arg in ("detail", "fix")]:
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value != '<html lang="fr">' \
-                        and json.dumps(arg.value, ensure_ascii=False) not in listed:
-                    missing.append(arg.value)
+    for name in ("compliance.py", "browser_audit.py"):
+        tree = ast.parse((root / "mas" / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") in ("finding", "add"):
+                start = 3 if node.func.id == "finding" else 2
+                for arg in node.args[start:] + [k.value for k in node.keywords if k.arg in ("detail", "fix")]:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value \
+                            and arg.value != '<html lang="fr">' and json.dumps(arg.value, ensure_ascii=False) not in listed:
+                        missing.append(arg.value)
     assert not missing, f"add to web/lib/complianceTexts.ts and the locales: {missing[:3]}"
+
+
+def test_browser_findings_are_merged_and_a_failure_is_not_fatal(tmp_path):
+    db = Database(tmp_path / "mas.db")
+    db.create_app("shop", name="Shop", repo="acme/shop", branch="main", type="static", domain="shop.example.com")
+    pages = {"https://shop.example.com/": (GOOD_HOME, None), "https://shop.example.com/mentions-legales": (LEGAL, None),
+             "https://shop.example.com/confidentialite": (PRIVACY, None)}
+    auditor = Auditor(lambda url, follow=True: site(pages)(url, follow), mas_banner=lambda h: {"enabled": True, "policy_url": "/c"})
+    app = db.get_app("shop")
+
+    class Browser:
+        def run(self, url):
+            assert url == "https://shop.example.com/"
+            return {"banner": {"present": True}, "perf": {"lcp": 900}, "findings": [
+                {"id": "refusal-ignored", "level": "critical", "category": "consent", "title": "Services still run after the visitor refuses",
+                 "detail": "d", "fix": "f", "where": ""},
+                {"id": "a11y-alt", "level": "warning", "category": "accessibility", "title": "2 image(s) without alternative text",
+                 "detail": "d", "fix": "f", "where": ""},
+                {"id": "legal-ok", "level": "pass", "category": "legal", "title": "duplicate of an HTML finding", "detail": "", "fix": "", "where": "x"}]}
+    result = Compliance(db, auditor, browser=Browser()).run(app, None, "manual")
+    assert result["browser"]["used"] is True and result["verdict"] == "blocking"
+    assert {"refusal-ignored", "a11y-alt"} <= ids(result) and sum(1 for f in result["findings"] if f["id"] == "legal-ok") == 1
+    assert result["score"] == 100 - 20 - 6 and "detected" in result
+
+    class Broken:
+        def run(self, url):
+            raise RuntimeError("chrome crashed")
+    result = Compliance(db, auditor, browser=Broken()).run(app, None, "manual")
+    assert result["verdict"] == "ok" and "browser-failed" in ids(result, "info")  # the HTML audit still stands
+    assert Compliance(db, auditor, browser=None).run(app, None, "manual")["browser"] == {"used": False}

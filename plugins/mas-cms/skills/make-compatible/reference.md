@@ -372,6 +372,14 @@ change without a release. It reads the public pages like a visitor and reports, 
 - **forms** that collect personal data without information, or over `http://`;
 - **HTTPS**, redirect, HSTS and basic security headers.
 
+With **Chrome or Chromium on the server** and `pip install mas[browser]` (set `MAS_CHROMIUM` if it is
+in an unusual place), the audit also opens the site in a real browser: it records every request and
+cookie before any click (a tracker added by JavaScript shows up), then visits again and **clicks the
+banner's reject button** to check that nothing that needs consent starts. The same visit measures
+basic accessibility (images without alternative text, unnamed fields, links and buttons, missing
+title, blocked zoom, low contrast, headings) and speed (main content time, layout shifts, page
+weight). Without a browser the HTML audit alone runs.
+
 The score (100 minus 20 per blocking issue, 6 per point to improve) and what is **new since the
 previous audit** are shown, with the score over time. A clean audit means *nothing visible is wrong*,
 not that the site is legal: how data is handled behind the site (register of processing, contracts
