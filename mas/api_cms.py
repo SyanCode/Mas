@@ -13,7 +13,7 @@ from datetime import datetime
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from mas import auth, cookies as cookies_mod
+from mas import auth, cookies as cookies_mod, legal as legal_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import Database
 from mas.geo import ATTRIBUTION, GeoError
@@ -476,6 +476,43 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             raise HTTPException(409, str(exc)) from None
         return {"latest": compliance.latest(app_id), "history": compliance.history(app_id),
                 "domain": target["domain"], "manual": MANUAL_CHECKS}
+
+    # -- legal pages generator ----------------------------------------------------------------------
+
+    def legal_payload(app_id: str, lang: str) -> dict:
+        audit = compliance.latest(app_id) if compliance is not None else None
+        detected = (audit or {}).get("detected") or {"services": [], "cookies": []}
+        profile = legal_mod.load(db, app_id)
+        target = db.get_app(app_id)
+        return {"profile": profile, "detected": detected, "audited": bool(audit), "lang": lang,
+                "documents": legal_mod.generate(profile, detected, lang, (target or {}).get("domain") or app_id)}
+
+    @app.get("/api/cms/sites/{app_id}/legal")
+    def legal_get(app_id: str, lang: str = Query("fr", max_length=2), s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        return legal_payload(app_id, lang)
+
+    @app.put("/api/cms/sites/{app_id}/legal")
+    def legal_put(app_id: str, body: dict, lang: str = Query("fr", max_length=2), s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        try:
+            legal_mod.save(db, app_id, body)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "cms-legal", True, service_id=app_id, detail="profile")
+        return legal_payload(app_id, lang)
+
+    @app.post("/api/cms/sites/{app_id}/legal/publish")
+    async def legal_publish(app_id: str, body: dict, s=Depends(any_session)) -> dict:
+        """Write the three pages as Markdown files in a folder of the repository."""
+        site(s, app_id)
+        lang = str(body.get("lang", "fr"))
+        docs = legal_payload(app_id, lang)["documents"]
+        files = {d["filename"]: d["markdown"] for d in docs}
+        result = await asyncio.to_thread(call, manager.write_files, app_id, str(body.get("folder", "content/legal")), files,
+                                         s.username, "legal pages")
+        db.audit(s.username, "cms-legal", True, service_id=app_id, detail=f"published {len(files)} pages")
+        return {**result, "files": sorted(files)}
 
     @app.get("/api/cms/sites/{app_id}/changes")
     def changes(app_id: str, s=Depends(any_session)) -> list[dict]:
