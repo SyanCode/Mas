@@ -10,7 +10,7 @@ from collections.abc import Callable
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from mas import auth
+from mas import auth, cookies as cookies_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import Database
 from mas.geo import ATTRIBUTION, GeoError
@@ -394,6 +394,21 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
                           key=lambda r: -r["id"])[:limit]
         return [{"id": r["id"], "at": r["at"], "actor": r["actor"], "action": r["action"], "ok": r["ok"],
                  "detail": r["detail"], "site": names.get(r["service_id"]), "app_id": r["service_id"]} for r in rows]
+
+    @app.get("/api/cms/sites/{app_id}/cookies")
+    def cookies_get(app_id: str, s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        return {"config": cookies_mod.load(db, app_id), "stats": cookies_mod.report(db, app_id)}
+
+    @app.put("/api/cms/sites/{app_id}/cookies")
+    def cookies_put(app_id: str, body: dict, s=Depends(any_session)) -> dict:
+        site(s, app_id)
+        try:
+            config = cookies_mod.save(db, app_id, body)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "cms-cookies", True, service_id=app_id, detail="on" if config["enabled"] else "off")
+        return {"config": config, "stats": cookies_mod.report(db, app_id)}
 
     @app.get("/api/cms/sites/{app_id}/overview")
     async def overview(app_id: str, s=Depends(any_session)) -> dict:

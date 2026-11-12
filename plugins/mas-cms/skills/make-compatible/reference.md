@@ -327,4 +327,34 @@ your own script. The statistics show, per goal, the clicks, the visitors who did
 daily hash the access logs use, so no cookie is needed; Do Not Track is respected. Needs the Mas
 dashboard to be reachable from your visitors' browsers (it receives `POST /t/e`).
 
+### Cookie banner
+
+*Cookie banner* in the sidebar configures a consent pop-up (position, theme, accent colour, texts,
+which cookie categories the site uses, link to the privacy policy, how long a choice is kept) with a
+live preview. The site adds one line:
+
+```html
+<script defer src="https://your-mas-domain/cookies.js"></script>
+```
+
+- **Equal choices**: *Reject all* and *Accept all* have the same weight; *Customize* opens one
+  switch per category. Texts are built in for fr, en, es and de (the page's `lang`).
+- **Hold back what sets cookies** until the visitor agrees; the banner starts it on consent:
+
+  ```html
+  <script type="text/plain" data-mas-consent="analytics" src="https://…"></script>
+  <iframe data-mas-consent="marketing" data-src="https://www.youtube.com/embed/…"></iframe>
+  ```
+
+  Categories: `analytics`, `marketing`, `preferences`.
+- **In your code**: `masConsent.has("analytics")`, `masConsent.on(fn)`, the `mas:consent` event;
+  `masConsent.open()` or any element with `data-mas-cookie-settings` reopens the choices. Google
+  Consent Mode is updated automatically when `gtag` exists.
+- **Where the choice lives**: a `mas_consent` cookie on the site itself. Mas only counts the
+  decisions per day (accepted, rejected, customized): no identifier, no address.
+
+Mas's own conversion script and visit statistics use no cookie and need no banner; the banner is for
+the cookies of the other tools the site loads. It is a technical tool: the legal text (and whether
+your use needs consent) stays yours.
+
 Images of Supabase collections live in Supabase Storage and are not part of the media library.
