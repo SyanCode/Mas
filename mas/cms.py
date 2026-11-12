@@ -671,6 +671,7 @@ class CmsManager:
         self.staging = Path(data_dir) / "cms-uploads"
         self._locks: dict[str, threading.Lock] = {}
         self._schemas: dict[str, tuple[float, str, dict]] = {}
+        self.notifier = None  # mas.notify.Notifier, set by the dashboard
         self._overviews: dict[str, tuple[float, dict]] = {}  # the dashboard asks again and again: 30 s
         self._compat: dict[str, tuple[float, dict]] = {}
 
@@ -1151,6 +1152,9 @@ class CmsManager:
                 done.append(row)
                 self.db.audit("scheduler", "cms-status", True, service_id=row["app_id"],
                               detail=f"{row['cid']}/{row['slug']}: published (scheduled)")
+                if self.notifier is not None:
+                    self.notifier.notify(row["app_id"], "scheduled", "Scheduled entry published",
+                                         f"{row['cid']}/{row['slug']} went live at its planned time.")
             except CmsConflict:
                 self.db.cms_schedule_set(row["app_id"], row["cid"], row["slug"], None)  # deleted meanwhile
             except CmsError as exc:
