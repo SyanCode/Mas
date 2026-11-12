@@ -210,6 +210,10 @@ def create_app(
                 await asyncio.to_thread(cluster.watch)
             except Exception:
                 log.exception("cluster watch failed")
+            try:  # CMS entries whose publication date is reached
+                await asyncio.to_thread(cms.run_due)
+            except Exception:
+                log.exception("scheduled CMS publications failed")
             try:  # maintenances whose end time is reached
                 await asyncio.to_thread(maintenance.tick)
             except Exception:
