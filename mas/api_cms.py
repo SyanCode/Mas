@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from mas import auth
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import Database
+from mas.geo import ATTRIBUTION, GeoError
 from mas.sitestats import SiteStats
 
 
@@ -79,7 +80,7 @@ class NewEntryBody(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, any_session: Callable, current_session: Callable,
-             manager: CmsManager, stats: SiteStats | None = None) -> None:
+             manager: CmsManager, stats: SiteStats | None = None, geo=None) -> None:
 
     def call(fn, *args):
         try:
@@ -265,8 +266,23 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         """Visits per day, from the nginx access logs of the site (totals only)."""
         target = site(s, app_id)
         if stats is None or not target["domain"]:
-            return {"days": [], "totals": None, "top_pages": [], "since": None, "tracked_since": None}
-        return await asyncio.to_thread(stats.report, target, days)
+            return {"days": [], "totals": None, "top_pages": [], "countries": [], "geo": False, "since": None,
+                    "tracked_since": None}
+        report = await asyncio.to_thread(stats.report, target, days)
+        return {**report, "attribution": ATTRIBUTION}
+
+    @app.post("/api/cms/geo/install")
+    async def geo_install(s=Depends(current_session)) -> dict:
+        """Download the country database (visitors map). Administrators only."""
+        if geo is None:
+            raise HTTPException(404, "countries are not available")
+        try:
+            result = await asyncio.to_thread(geo.install)
+        except GeoError as exc:
+            db.audit(s.username, "cms-geo", False, detail=str(exc)[:500])
+            raise HTTPException(502, str(exc)) from None
+        db.audit(s.username, "cms-geo", True, detail=result["month"])
+        return result
 
     @app.get("/api/cms/sites/{app_id}/status")
     def status(app_id: str, s=Depends(any_session)) -> dict:
@@ -357,7 +373,12 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
                 row = daily.setdefault(d["day"], {"day": d["day"], "pageviews": 0, "visitors": 0})
                 row["pageviews"] += d["pageviews"]
                 row["visitors"] += d["visitors"]
-        return {"sites": sites_, "totals": totals, "days": sorted(daily.values(), key=lambda r: r["day"]),
+        countries: dict[str, int] = {}
+        for x in sites_:
+            for c in (x["visits"] or {}).get("countries", []):
+                countries[c["code"]] = countries.get(c["code"], 0) + c["visitors"]
+        return {"sites": sites_, "totals": totals,
+                "countries": [{"code": k, "visitors": v} for k, v in sorted(countries.items(), key=lambda kv: -kv[1])], "days": sorted(daily.values(), key=lambda r: r["day"]),
                 "scheduled": len(scheduled), "activity": activity,
                 "editors": len([u for u in db.list_users() if u["role"] == "editor"]) if s.role == "admin" else None}
 
