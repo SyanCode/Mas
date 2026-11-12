@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Activity, BarChart3, Cookie, ShieldCheck, ExternalLink, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Menu, Moon, Newspaper,
+  Activity, BarChart3, Bell, Cookie, ShieldCheck, ExternalLink, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Menu, Moon, Newspaper,
   Server, Settings as SettingsIcon, Sun, Users, X,
 } from "lucide-react";
 import { Logo } from "@/components/Shell";
@@ -108,6 +108,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
         {session.role === "admin" && (
           <Group title={t("Administration")}>
             <NavLink href="/cms/users/" icon={Users} active={here("/cms/users")}>{t("Users")}</NavLink>
+            <NavLink href={`/cms/notifications/?${q}`} icon={Bell} active={here("/cms/notifications")}>{t("Notifications")}</NavLink>
           </Group>
         )}
       </nav>
