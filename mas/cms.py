@@ -929,6 +929,7 @@ class CmsManager:
         self._consume(uploads)
         self._schemas.pop(app["id"], None)
         self._overviews.pop(app["id"], None)
+        self.db.add_cms_commit(app["id"], commit, username, scope, f"{note or default}")
         release_id = None
         if not app["auto_deploy"]:  # otherwise the push webhook deploys it
             release_id = self.deployer.enqueue(app["id"], "cms", username, commit)
@@ -1160,6 +1161,70 @@ class CmsManager:
             except CmsError as exc:
                 log.warning("scheduled publication of %s/%s/%s failed: %s", row["app_id"], row["cid"], row["slug"], exc)
         return done
+
+    # -- history: show and undo what the CMS committed -----------------------------------------------
+
+    def changes(self, app_id: str, limit: int = 50) -> list[dict]:
+        out = []
+        for i, c in enumerate(self.db.cms_commits(app_id, limit)):
+            out.append({"id": c["id"], "sha": c["sha"][:7], "at": c["at"], "actor": c["actor"], "scope": c["scope"],
+                        "summary": c["summary"], "reverted": bool(c["reverted_by"]),
+                        "undoable": not c["reverted_by"] and not c["scope"].startswith("cms(revert")})
+        return out
+
+    def revert(self, app_id: str, change_id: int, username: str) -> dict:
+        """Undo one CMS commit with a new commit. Refused when a file it touched changed since: the
+        restore would silently erase later work."""
+        lock = self._locks.setdefault(app_id, threading.Lock())
+        with lock:
+            row = self.db.get_cms_commit(app_id, change_id)
+            if row is None:
+                raise CmsError("unknown change")
+            if row["reverted_by"]:
+                raise CmsConflict("this change was already undone")
+            if row["scope"].startswith("cms(revert"):
+                raise CmsError("an undo cannot be undone: make the change again")
+            gh, app = self._target(app_id)
+            schema, head = self.schema(app_id)
+            ref = (app["installation_id"], app["repo"])
+            try:
+                info = gh.get_commit(*ref, row["sha"])
+                if len(info["parents"]) != 1 or info.get("truncated"):
+                    raise CmsError("this change cannot be undone automatically")
+                parent = info["parents"][0]
+                files: dict[str, bytes | None] = {}
+                for f in info["files"]:
+                    path, status = f["filename"], f["status"]
+                    if status == "renamed" or f.get("previous_filename"):
+                        raise CmsError("this change cannot be undone automatically")
+                    now_bytes, now_sha = gh.read_file(*ref, path, head)
+                    expected = None if status == "removed" else f["sha"]
+                    if now_sha != expected:
+                        raise CmsConflict(f"{path} changed since: undo it by hand or make the change again")
+                    files[path] = None if status == "added" else gh.read_file(*ref, path, parent)[0]
+            except GitHubError as exc:
+                raise self._github_error(exc) from None
+            if not files:
+                raise CmsError("nothing to undo")
+            result = self._commit(gh, app, files, "cms(revert)", f"undo {row['summary']}"[:100], "undo",
+                                  username, head, [])
+            self.db.mark_reverted(change_id, result["commit"])
+            self._resync_schedule(app_id, schema, files)
+            return result
+
+    def _resync_schedule(self, app_id: str, schema: dict, files: dict[str, bytes | None]) -> None:
+        """After an undo, the publication dates of the entries it restored are the ones to keep."""
+        for c in (c for c in schema["collections"] if c["storage"] == "git" and c["drafts"]):
+            for path, content in files.items():
+                p = PurePosixPath(path)
+                if str(p.parent) == c["dir"] and p.suffix == ".json" and p.name != INDEX_FILE:
+                    data = {}
+                    try:
+                        data = json.loads(content) if content else {}
+                    except ValueError:
+                        pass
+                    when = data.get("publish_at") if data.get("status") == "scheduled" else None
+                    self.db.cms_schedule_set(app_id, c["id"], p.stem, when)
 
     # -- overview and media library -------------------------------------------------
 

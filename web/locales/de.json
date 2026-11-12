@@ -1547,5 +1547,13 @@
   "Reason": "Grund",
   "No incident in the last 30 days.": "Kein Vorfall in den letzten 30 Tagen.",
   "Resolved": "Behoben",
-  "Ongoing": "Andauernd"
+  "Ongoing": "Andauernd",
+  "Change undone. The site is being rebuilt.": "Änderung rückgängig gemacht. Die Website wird neu gebaut.",
+  "Changes you can undo": "Rückgängig machbare Änderungen",
+  "Each change is a commit. Undoing adds a new commit that puts the previous content back; nothing is lost.": "Jede Änderung ist ein Commit. Rückgängig machen fügt einen neuen Commit hinzu, der den vorherigen Inhalt wiederherstellt; nichts geht verloren.",
+  "Undone": "Rückgängig",
+  "Undo": "Rückgängig",
+  "An undo": "Eine Rücknahme",
+  "Undo “{name}”?": "„{name}“ rückgängig machen?",
+  "The site goes back to what it was before this change. It is refused if the same content was changed since.": "Die Website kehrt zum Stand vor dieser Änderung zurück. Es wird abgelehnt, wenn derselbe Inhalt seitdem geändert wurde."
 }
