@@ -177,13 +177,14 @@ export interface ComplianceFinding {
 export interface ComplianceAudit {
   id: number; host: string; score: number; verdict: "ok" | "attention" | "blocking";
   counts: Record<"critical" | "warning" | "info" | "pass", number>; findings: ComplianceFinding[]; pages: string[];
-  at: string; trigger: string; release_id: number | null;
+  at: string; trigger: string; release_id: number | null; browser?: { used: boolean };
 }
 export interface ComplianceReport {
   latest: ComplianceAudit | null;
   history: { id: number; at: string; score: number; verdict: string; trigger: string; release_id: number | null }[];
   domain: string | null;
   manual: string[];
+  browser?: boolean;
 }
 
 export interface UptimeReport {

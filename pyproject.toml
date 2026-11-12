@@ -25,7 +25,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27", "jsonschema>=4"]
+dev = ["pytest>=8", "httpx>=0.27", "jsonschema>=4", "playwright>=1.40"]
+browser = ["playwright>=1.40"]  # the compliance audit with a real Chrome / Chromium (optional)
 
 [project.scripts]
 mas = "mas.cli:run"

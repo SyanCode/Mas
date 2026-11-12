@@ -37,3 +37,10 @@ def result(server_dir):
 @pytest.fixture(scope="session")
 def services(result):
     return {s.id: s for s in result.services}
+
+
+@pytest.fixture(autouse=True)
+def no_real_browser(monkeypatch):
+    """Audits in tests never start Chrome (tests/test_browser_audit.py does, on purpose, through BrowserAudit)."""
+    from mas import browser_audit
+    monkeypatch.setattr(browser_audit, "available", lambda: False)
