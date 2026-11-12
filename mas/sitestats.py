@@ -225,18 +225,32 @@ class SiteStats:
         today = today or date.today()
         first = today - timedelta(days=days - 1)
         stored = {r["day"]: r for r in self.db.site_stats(app["id"], first.isoformat())}
+        goal_rows = self.db.site_goals(app["id"], first.isoformat())
+        converted = {r["day"]: r["visitors"] for r in goal_rows if r["goal"] == "_any"}
         series, pages, countries = [], Counter(), Counter()
         for i in range(days):
             day = (first + timedelta(days=i)).isoformat()
             row = stored.get(day)
             series.append({"day": day, "requests": row["requests"] if row else 0,
-                           "pageviews": row["pageviews"] if row else 0, "visitors": row["visitors"] if row else 0})
+                           "pageviews": row["pageviews"] if row else 0, "visitors": row["visitors"] if row else 0,
+                           "converted": converted.get(day, 0)})
             if row and row["pages"]:
                 pages.update(json.loads(row["pages"]))
             if row and row["countries"]:
                 countries.update(json.loads(row["countries"]))
         total = lambda key: sum(d[key] for d in series)  # noqa: E731
-        return {"days": series, "since": first.isoformat(), "tracked_since": min(stored) if stored else None,
+        visitors = total("visitors")
+        per_goal: dict[str, dict] = {}
+        for r in goal_rows:
+            if r["goal"] != "_any":
+                g = per_goal.setdefault(r["goal"], {"goal": r["goal"], "hits": 0, "visitors": 0})
+                g["hits"] += r["hits"]
+                g["visitors"] += r["visitors"]
+        rate = lambda n: round(100 * n / visitors, 2) if visitors else 0.0  # noqa: E731
+        goals = sorted(({**g, "rate": rate(g["visitors"])} for g in per_goal.values()), key=lambda g: -g["visitors"])
+        reached = sum(converted.values())
+        return {"days": series, "goals": goals, "conversion": {"visitors": reached, "rate": rate(reached)},
+                "since": first.isoformat(), "tracked_since": min(stored) if stored else None,
                 "totals": {"requests": total("requests"), "pageviews": total("pageviews"),
                            "visitors": total("visitors")},
                 "top_pages": [{"path": p, "views": v} for p, v in pages.most_common(10)],

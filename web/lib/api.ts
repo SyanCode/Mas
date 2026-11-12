@@ -151,12 +151,14 @@ export interface CmsEntry {
   publish_at?: string | null;
 }
 
-export interface TrafficDay { day: string; requests: number; pageviews: number; visitors: number }
+export interface TrafficDay { day: string; requests: number; pageviews: number; visitors: number; converted?: number }
 export interface TrafficReport {
   days: TrafficDay[];
   totals: { requests: number; pageviews: number; visitors: number } | null;
   top_pages: { path: string; views: number }[];
   countries?: { code: string; visitors: number }[];
+  goals?: { goal: string; hits: number; visitors: number; rate: number }[];
+  conversion?: { visitors: number; rate: number };
   geo?: boolean;
   attribution?: string;
 }

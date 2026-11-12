@@ -28,6 +28,7 @@ from mas.deploy import Deployer, PendingEnvError
 from mas.github import GitHubApp
 from mas.cms import CmsManager
 from mas.restartall import RestartAll, RestartError
+from mas import goals as goals_mod
 from mas.geo import Geo
 from mas.sitestats import SiteStats, service_target
 from mas.usage import Usage
@@ -769,6 +770,29 @@ def create_app(
 
     from starlette.routing import Route
     app.router.routes.append(Route("/mcp", mcp, methods=["GET", "POST", "DELETE"]))
+
+    goal_limiter = auth.RateLimiter(max_hits=120, window_seconds=60)  # goals per visitor address
+
+    @app.get("/t.js", include_in_schema=False)
+    def tracker_script() -> Response:
+        """The one-line snippet sites add to count conversions (see mas.goals)."""
+        return Response(goals_mod.SCRIPT, media_type="text/javascript",
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.post("/t/e", include_in_schema=False)
+    async def tracker_event(request: Request) -> Response:
+        """A goal reached on a site. Public and cross-origin on purpose: always answers 204."""
+        try:
+            body = await request.body()
+            ip = client_ip(request)
+            if len(body) <= goals_mod.MAX_BODY and not goal_limiter.blocked(ip):
+                goal_limiter.hit(ip)
+                goal = str(json.loads(body).get("g", ""))
+                await asyncio.to_thread(goals_mod.record, db, request.headers.get("origin", ""), ip,
+                                        request.headers.get("user-agent", ""), goal)
+        except (ValueError, AttributeError):
+            pass
+        return Response(status_code=204)
 
     static_dir = web_dir or default_web_dir(config)
     if static_dir is not None:
