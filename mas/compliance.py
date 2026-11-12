@@ -526,9 +526,10 @@ class Auditor:
 
 
 class Compliance:
-    def __init__(self, db: Database, auditor: Auditor | None = None) -> None:
+    def __init__(self, db: Database, auditor: Auditor | None = None, browser="auto") -> None:
         self.db = db
         self.auditor = auditor or Auditor(mas_banner=self._banner)
+        self._browser = browser  # "auto": Chrome when installed; None: never; or an object with .run(url)
         self._running: set[str] = set()
         self.notifier = None  # mas.notify.Notifier: tells people when the site got worse
 
@@ -549,6 +550,7 @@ class Compliance:
         self._running.add(app["id"])
         try:
             result = self.auditor.audit(app["domain"])
+            result = self._with_browser(app, result)
         finally:
             self._running.discard(app["id"])
         previous = self.latest(app["id"])
@@ -562,6 +564,35 @@ class Compliance:
                       detail=f"{result['score']}/100: {crit} critical, {warn} warning(s) ({trigger})")
         self._tell(app, previous, result)
         return result
+
+    def browser(self):
+        """The browser auditor, or None when Chrome / Playwright are not there (the HTML audit then stands alone)."""
+        if self._browser is None or self.db.get_setting("compliance:browser") == "off":
+            return None
+        if self._browser == "auto":
+            from mas import browser_audit
+            return browser_audit.BrowserAudit() if browser_audit.available() else None
+        return self._browser
+
+    def _with_browser(self, app: dict, result: dict) -> dict:
+        """Add what a real browser sees (scripts, cookies, refusal, accessibility, speed) to the HTML audit."""
+        browser = self.browser()
+        result["browser"] = {"used": False}
+        if browser is None or result["verdict"] == "blocking" and any(f["id"] in ("site-unreachable", "https-invalid") for f in result["findings"]):
+            return result
+        try:
+            extra = browser.run(f"https://{app['domain']}/")
+        except Exception as exc:  # noqa: BLE001 - a browser problem must not lose the HTML audit
+            log.warning("browser audit of %s failed: %s", app["id"], exc)
+            result["findings"].append(finding("browser-failed", "info", "security", "The browser audit could not run",
+                                              str(exc)[:200], "Check that Chrome / Chromium is installed and can start on the server."))
+            return result
+        have = {f["id"] for f in result["findings"]}
+        merged = result["findings"] + [f for f in extra["findings"] if f["id"] not in have]
+        redone = self.auditor._result(result["host"], merged, result["pages"])
+        redone["detected"] = result.get("detected", {"services": [], "cookies": []})
+        redone["browser"] = {"used": True, "banner": extra.get("banner"), "perf": extra.get("perf")}
+        return redone
 
     def _tell(self, app: dict, previous: dict | None, result: dict) -> None:
         """A message when blocking issues appeared or the score fell by 10 points or more."""

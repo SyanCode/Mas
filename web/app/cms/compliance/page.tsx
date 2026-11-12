@@ -24,7 +24,7 @@ const MANUAL: Record<string, string> = {
 };
 const CATEGORY: Record<string, string> = {
   security: msg("Security"), cookies: msg("Cookies"), trackers: msg("Third-party services"), consent: msg("Consent"),
-  legal: msg("Legal pages"), forms: msg("Forms"),
+  legal: msg("Legal pages"), forms: msg("Forms"), accessibility: msg("Accessibility"), performance: msg("Performance"),
 };
 const LEVEL_ICON = { critical: ShieldAlert, warning: AlertTriangle, info: Info, pass: CheckCircle2 } as const;
 const LEVEL_STYLE = {
@@ -130,6 +130,7 @@ function Compliance() {
                 <p>{audit.host}</p>
                 <p>{t("Audited")} {timeAgo(audit.at)} · {audit.trigger === "release" ? t("after a publication") : audit.trigger === "weekly" ? t("weekly check") : audit.trigger === "first" ? t("first check") : t("on request")}</p>
                 <p>{t("{n} page(s) read", { n: audit.pages.length })}</p>
+                <p>{audit.browser?.used ? t("Real browser audit: on (scripts, cookies, refusal, accessibility, speed)") : t("Real browser audit: off. Install Chrome and pip install mas[browser] to also see what JavaScript does.")}</p>
               </div>
             </CardContent>
           </Card>
