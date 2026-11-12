@@ -281,6 +281,21 @@ def create_app(
     site_stats = SiteStats(host, config, db, find_service=scanner.get, geo=geo)
     notifier = Notifier(db, host, config, stats=site_stats, compliance=compliance)
     compliance.notifier = notifier
+
+    def post_check(target: dict, release_id: int, result: dict) -> None:
+        """The audit as a check on the commit that was published (shown on GitHub next to the build)."""
+        gh = github_client()
+        release = db.get_release(release_id)
+        if gh is None or not release or not release.get("sha") or not target.get("repo") or not target.get("installation_id"):
+            return
+        from mas.compliance import check_markdown
+        previous = None
+        history = db.compliance_history(target["id"], 2)
+        if len(history) > 1:
+            previous = {"score": history[1]["score"]}
+        conclusion, title, summary = check_markdown(result, previous)
+        gh.create_check_run(target["installation_id"], target["repo"], release["sha"], "Mas compliance", conclusion, title, summary)
+    compliance.checks = post_check
     uptime = Uptime(db, notifier=notifier)
     cms.notifier = notifier
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \

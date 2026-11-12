@@ -380,6 +380,12 @@ basic accessibility (images without alternative text, unnamed fields, links and 
 title, blocked zoom, low contrast, headings) and speed (main content time, layout shifts, page
 weight). Without a browser the HTML audit alone runs.
 
+After a publication the result also appears on GitHub as a **check on the commit** (`Mas compliance`:
+score, what is new, the points to fix). It needs the GitHub App's optional **Checks: write**
+permission; without it nothing is posted and the audit is unaffected. Claude agents connected to
+Mas (MCP) can read the audit with `compliance_report`, start one with `run_compliance_audit`, and
+read `site_stats` and `site_uptime`.
+
 The score (100 minus 20 per blocking issue, 6 per point to improve) and what is **new since the
 previous audit** are shown, with the score over time. A clean audit means *nothing visible is wrong*,
 not that the site is legal: how data is handled behind the site (register of processing, contracts
