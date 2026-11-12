@@ -246,6 +246,8 @@ CREATE TABLE IF NOT EXISTS projects (        -- several apps (repositories) depl
 
 MIGRATIONS = [
     ("site_stats", "countries TEXT"),
+    ("site_stats", "sources TEXT"),
+    ("site_stats", "devices TEXT"),
     ("supabase", "components TEXT"),  # JSON list of enabled optional components
     ("supabase", "studio_access TEXT"),  # JSON list of IPs / networks allowed to open Studio (besides the LAN)
     ("users", "role TEXT NOT NULL DEFAULT 'admin'"),  # admin | editor (CMS only)
@@ -595,41 +597,52 @@ class Database:
         with self.tx() as c:
             for d in days:
                 c.execute("INSERT INTO site_stats (app_id, day, requests, pageviews, visitors, pages, countries, "
-                          "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(app_id, day) DO UPDATE SET "
+                          "sources, devices, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                          "ON CONFLICT(app_id, day) DO UPDATE SET "
                           "requests = excluded.requests, pageviews = excluded.pageviews, "
-                          "visitors = excluded.visitors, pages = excluded.pages, "
-                          "countries = excluded.countries, updated_at = excluded.updated_at",
+                          "visitors = excluded.visitors, pages = excluded.pages, countries = excluded.countries, "
+                          "sources = excluded.sources, devices = excluded.devices, updated_at = excluded.updated_at",
                           (app_id, d["day"], d["requests"], d["pageviews"], d["visitors"], json.dumps(d["pages"]),
-                           json.dumps(d.get("countries") or {}), _now()))
+                           json.dumps(d.get("countries") or {}), json.dumps(d.get("sources") or {}),
+                           json.dumps(d.get("devices") or {}), _now()))
 
     def add_site_counts(self, app_id: str, day: str, requests: int, pageviews: int, hashes: set[bytes],
-                        pages: dict[str, int], keep_pages: int, geo: dict[bytes, str] | None = None) -> None:
+                        pages: dict[str, int], keep_pages: int, traits: dict[bytes, dict] | None = None) -> None:
         """Add the lines read since the last time to the totals of ``day`` (visitors counted once).
 
-        ``geo`` maps a visitor hash to its country; a country is counted for new visitors only."""
+        ``traits`` maps a visitor hash to its country, source, device and browser; they are counted for the
+        visitors not seen before only."""
         with self.tx() as c:
             known = {r[0] for r in c.execute("SELECT hash FROM site_visitors WHERE app_id = ? AND day = ?",
-                                             (app_id, day))} if geo else set()
+                                             (app_id, day))} if traits else set()
             before = c.total_changes
             c.executemany("INSERT OR IGNORE INTO site_visitors (app_id, day, hash) VALUES (?, ?, ?)",
                           [(app_id, day, h) for h in hashes])
             new_visitors = c.total_changes - before
-            row = c.execute("SELECT requests, pageviews, visitors, pages, countries FROM site_stats "
+            row = c.execute("SELECT requests, pageviews, visitors, pages, countries, sources, devices FROM site_stats "
                             "WHERE app_id = ? AND day = ?", (app_id, day)).fetchone()
             countries = dict(json.loads(row["countries"] or "{}")) if row else {}
-            for h, code in (geo or {}).items():
-                if h not in known:
-                    countries[code] = countries.get(code, 0) + 1
+            sources = dict(json.loads(row["sources"] or "{}")) if row else {}
+            devices = dict(json.loads(row["devices"] or "{}")) if row else {}
+            for h, t in (traits or {}).items():
+                if h in known:
+                    continue
+                for store, key in ((countries, t.get("country")), (sources, t.get("source")),
+                                   (devices, f"device:{t['device']}" if t.get("device") else None),
+                                   (devices, f"browser:{t['browser']}" if t.get("browser") else None)):
+                    if key:
+                        store[key] = store.get(key, 0) + 1
             merged = dict(json.loads(row["pages"] or "{}")) if row else {}
             for path, n in pages.items():
                 merged[path] = merged.get(path, 0) + n
             top = dict(sorted(merged.items(), key=lambda kv: -kv[1])[:keep_pages])
-            c.execute("INSERT INTO site_stats (app_id, day, requests, pageviews, visitors, pages, countries, "
-                      "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(app_id, day) DO UPDATE SET "
+            c.execute("INSERT INTO site_stats (app_id, day, requests, pageviews, visitors, pages, countries, sources, "
+                      "devices, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(app_id, day) DO UPDATE SET "
                       "requests = requests + excluded.requests, pageviews = pageviews + excluded.pageviews, "
-                      "visitors = visitors + excluded.visitors, pages = excluded.pages, "
-                      "countries = excluded.countries, updated_at = excluded.updated_at",
-                      (app_id, day, requests, pageviews, new_visitors, json.dumps(top), json.dumps(countries), _now()))
+                      "visitors = visitors + excluded.visitors, pages = excluded.pages, countries = excluded.countries, "
+                      "sources = excluded.sources, devices = excluded.devices, updated_at = excluded.updated_at",
+                      (app_id, day, requests, pageviews, new_visitors, json.dumps(top), json.dumps(countries),
+                       json.dumps(sources), json.dumps(devices), _now()))
 
     def keep_site_visitors(self, app_id: str, since: str, hashes_by_day: dict[str, set[bytes]] | None = None) -> None:
         """Forget the visitors of days before ``since``; optionally replace those of recent days."""
