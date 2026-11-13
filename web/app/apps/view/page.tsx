@@ -10,7 +10,7 @@ import { MaintenanceCard } from "@/components/MaintenanceCard";
 import { StackCard } from "@/components/StackCard";
 import { TrafficStats } from "@/components/TrafficStats";
 import {
-  Actions, Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Spinner,
+  Actions, Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Monogram, Notice, ReleaseBadge, Select, Spinner,
   StatusDot, Terminal, Textarea,
 } from "@/components/ui";
 import { api, ApiError, SERVICE_TYPES, timeAgo, type App, type Release } from "@/lib/api";
@@ -741,9 +741,9 @@ function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void })
         {app.mode === "managed" && (
           <>
             <Label title={t("Type")} hint={t("A site whose build only writes pages (dist/, build/…) is static.")}>
-              <select value={type} onChange={(e) => setType(e.target.value)} className="w-full rounded-md border border-zinc-300 bg-white px-2 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950">
+              <Select value={type} onChange={(e) => setType(e.target.value)}>
                 {SERVICE_TYPES.filter((x) => x !== "unknown").map((x) => <option key={x}>{x}</option>)}
-              </select>
+              </Select>
             </Label>
             {(type === "static" || type === "php") && (
               <Label title={t("Folder to serve (optional)")}><Input value={rootDir} onChange={(e) => setRootDir(e.target.value)} placeholder="public, dist, out…" className="mono text-xs" /></Label>

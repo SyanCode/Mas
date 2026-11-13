@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, ErrorText } from "@/components/ui";
+import { Card, ErrorText, Select } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
 
@@ -40,9 +40,9 @@ export function TrafficStats({ url, title }: { url: string; title?: string }) {
   const label = METRICS.find((m) => m.id === metric)!.label;
   return (
     <Card title={title ?? t("Statistics")} actions={
-      <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label={t("Period")} className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-xs dark:border-zinc-700">
+      <Select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label={t("Period")} className="!w-auto !py-1 text-xs">
         {[7, 30, 90, 365].map((n) => <option key={n} value={n}>{t("{n} days", { n })}</option>)}
-      </select>
+      </Select>
     }>
       <ErrorText>{error}</ErrorText>
       {!data && !error && <div className="glass shimmer h-48 rounded-xl" />}

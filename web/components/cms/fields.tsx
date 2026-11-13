@@ -1,5 +1,6 @@
 "use client";
 
+import { ColorPicker } from "@/components/Pickers";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import { ArrowDown, ArrowUp, Bold, Code, Heading2, Heading3, ImagePlus, Italic, Library, Link2, List, ListOrdered, Plus, Quote, Trash2, Upload, Image as ImageIcon } from "lucide-react";
@@ -266,7 +267,7 @@ export function FieldInput(props: InputProps) {
       return (
         <Field title={title} hint={hint}>
           <div className="flex items-center gap-2">
-            <input type="color" aria-label={field.label} value={text || "#000000"} onChange={(e) => onChange(e.target.value)} className="h-9 w-12 cursor-pointer rounded-md border border-input bg-transparent p-1" />
+            <ColorPicker aria-label={field.label} value={text || "#000000"} onChange={onChange} />
             <Input value={text} onChange={(e) => onChange(e.target.value)} placeholder="#1a2b3c" className="max-w-[8rem]" />
           </div>
         </Field>

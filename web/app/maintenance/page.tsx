@@ -1,5 +1,6 @@
 "use client";
 
+import { ColorPicker, DateTimePicker } from "@/components/Pickers";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MaintenancePreview } from "@/components/MaintenancePreview";
@@ -40,7 +41,7 @@ function PageEditor({ page, onSaved, onCancel }: { page: MaintenancePage | null;
       <Label title={t("Title")}><Input value={title} onChange={(e) => setTitle(e.target.value)} /></Label>
       <Label title={t("Message")}><Textarea rows={3} value={message} onChange={(e) => setMessage(e.target.value)} /></Label>
       <Label title={t("Back at (optional)")}><Input value={back} onChange={(e) => setBack(e.target.value)} placeholder={t("Back around 2 p.m.")} /></Label>
-      <Label title={t("Color")}><input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} className="h-9 w-16 rounded border border-zinc-300 bg-transparent dark:border-white/10" /></Label>
+      <Label title={t("Color")}><ColorPicker value={accent} onChange={setAccent} /></Label>
       <ErrorText>{error}</ErrorText>
       <div className="flex gap-2">
         <Button variant="primary" disabled={busy || !title.trim()} onClick={save}>{busy ? <Spinner /> : null}{t("Save")}</Button>
@@ -112,7 +113,7 @@ function Maintenance() {
                 </Select>
               </Label>
               <Label title={t("Ends by itself (optional)")} hint={t("Empty: until you bring it back.")}>
-                <Input type="datetime-local" value={until} onChange={(e) => setUntil(e.target.value)} />
+                <DateTimePicker value={until} onChange={setUntil} />
               </Label>
               <div className="sm:col-span-2">
                 <Label title={t("Addresses that see the real site")} hint={t("IP addresses or networks (10.0.0.0/8), one per line. Empty: nobody.")}>

@@ -1,6 +1,8 @@
 "use client";
 
 import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { FIELD } from "@/components/Select";
+export { Select } from "@/components/Select";
 import type { Status } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -80,20 +82,12 @@ export function Button({ variant = "secondary", className = "", ...props }: Butt
   );
 }
 
-const FIELD =
-  "w-full rounded-lg border border-zinc-300 bg-white/80 px-3 py-2 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 " +
-  "focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/15 dark:border-white/10 dark:bg-black/40 dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:focus:border-indigo-400/60";
-
 export const Input = forwardRef<HTMLInputElement, React.ComponentProps<"input">>(function Input(props, ref) {
   return <input ref={ref} {...props} className={`${FIELD} ${props.className ?? ""}`} />;
 });
 
 export function Textarea(props: React.ComponentProps<"textarea">) {
   return <textarea {...props} className={`${FIELD} mono text-xs ${props.className ?? ""}`} />;
-}
-
-export function Select(props: React.ComponentProps<"select">) {
-  return <select {...props} className={`${FIELD} pr-8 ${props.className ?? ""}`} />;
 }
 
 export function Label({ title, hint, children }: { title: string; hint?: ReactNode; children: ReactNode }) {

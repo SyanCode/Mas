@@ -6,7 +6,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { RemoveSite } from "@/components/RemoveSite";
 import { Shell } from "@/components/Shell";
 import { TrafficStats } from "@/components/TrafficStats";
-import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, StatusDot } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Select, StatusDot } from "@/components/ui";
 import {
   api, ApiError, daysUntil, githubUrl, SERVICE_TYPES, timeAgo,
   type ActionResult, type LogSource, type Service, type ServiceRuntime,
@@ -61,9 +61,9 @@ function Logs({ id }: { id: string }) {
       title={t("Logs")}
       actions={
         <>
-          <select value={lines} onChange={(e) => setLines(Number(e.target.value))} className="rounded border border-zinc-300 bg-transparent px-1.5 py-1 text-xs dark:border-zinc-700">
+          <Select value={lines} onChange={(e) => setLines(Number(e.target.value))} aria-label={t("Lines")} className="!w-auto !py-1 text-xs">
             {[100, 200, 500, 1000].map((n) => <option key={n} value={n}>{t("{n} lines", { n })}</option>)}
-          </select>
+          </Select>
           <label className="flex items-center gap-1 text-xs text-zinc-500">
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> {t("auto")}
           </label>
@@ -225,10 +225,10 @@ function EditMeta({ svc, onSaved }: { svc: Service; onSaved: (s: Service) => voi
         </label>
         <label className="block space-y-1">
           <span className="text-zinc-500">{t("Type")}</span>
-          <select value={type} onChange={(e) => setType(e.target.value)} className="w-full rounded-md border border-zinc-300 bg-white px-2 py-2 dark:border-zinc-700 dark:bg-zinc-950">
+          <Select value={type} onChange={(e) => setType(e.target.value)}>
             <option value="auto">{t("auto-detect")}</option>
             {SERVICE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="block space-y-1">
           <span className="text-zinc-500">{t("Notes")}</span>

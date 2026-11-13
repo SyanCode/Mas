@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { RepoPicker } from "@/components/RepoPicker";
 import { Shell } from "@/components/Shell";
-import { Badge, Button, Card, ErrorText, Input, PageHeader } from "@/components/ui";
+import { Badge, Button, Card, ErrorText, Input, PageHeader, Select } from "@/components/ui";
 import { api, ApiError, SERVICE_TYPES, type App, type CmsCompat, type Repo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -243,16 +243,16 @@ function NewApp() {
           </label>
           <label className="space-y-1">
             <span className="text-zinc-500">{t("Branch")}</span>
-            <select value={branch} onChange={(e) => setBranch(e.target.value)} className="w-full rounded-md border border-zinc-300 bg-white px-2 py-2 dark:border-zinc-700 dark:bg-zinc-950">
+            <Select value={branch} onChange={(e) => setBranch(e.target.value)}>
               {(branches.length ? branches : [branch]).map((b) => <option key={b}>{b}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="space-y-1">
             <span className="text-zinc-500">{t("Type")} {detecting && <span className="text-xs">({t("detecting…")})</span>}</span>
-            <select value={type} onChange={(e) => setType(e.target.value)} required className="w-full rounded-md border border-zinc-300 bg-white px-2 py-2 dark:border-zinc-700 dark:bg-zinc-950">
+            <Select value={type} onChange={(e) => setType(e.target.value)} required>
               <option value="" disabled>{t("choose…")}</option>
               {DEPLOYABLE.map((type) => <option key={type}>{type}</option>)}
-            </select>
+            </Select>
           </label>
         </div>
       </Card>

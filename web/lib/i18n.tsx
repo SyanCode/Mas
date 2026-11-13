@@ -6,6 +6,7 @@
  * Variables use braces: `t("{n} editor(s)", { n: 3 })`.
  */
 
+import { Select } from "@/components/Select";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import de from "@/locales/de.json";
 import es from "@/locales/es.json";
@@ -84,9 +85,8 @@ export function useT() {
 export function LanguagePicker({ className = "" }: { className?: string }) {
   const { lang, setLang } = useI18n();
   return (
-    <select value={lang} onChange={(e) => setLang(e.target.value as Lang)} aria-label="Language"
-      className={`rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-xs text-zinc-600 dark:border-white/10 dark:text-zinc-300 ${className}`}>
+    <Select value={lang} onChange={(e) => setLang(e.target.value as Lang)} aria-label="Language" className={`!w-auto !py-1 text-xs ${className}`}>
       {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-    </select>
+    </Select>
   );
 }
