@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Info, Loader2, Plus, ScanSearch, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, Info, Loader2, Plus, ScanSearch, Sparkles, Trash2, Wand2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout";
 import { Badge } from "@/components/cms/ui/badge";
@@ -16,7 +16,9 @@ import { useT } from "@/lib/i18n";
 
 const ICON = { error: <XCircle className="size-4 text-red-500" />, warn: <AlertTriangle className="size-4 text-amber-500" />, info: <Info className="size-4 text-sky-500" /> };
 
-function Issues({ items }: { items: SeoIssue[] }) {
+const FIXABLE: Record<string, "robots" | "sitemap"> = { "robots-missing": "robots", "robots-blocks": "robots", "sitemap-missing": "sitemap", "sitemap-unlisted": "sitemap" };
+
+function Issues({ items, onFix, busy }: { items: SeoIssue[]; onFix?: (fix: "robots" | "sitemap") => void; busy?: boolean }) {
   const t = useT();
   return (
     <ul className="space-y-2">
@@ -24,7 +26,8 @@ function Issues({ items }: { items: SeoIssue[] }) {
         <li key={`${i.id}${n}`} className="flex gap-2.5 text-sm">
           <span className="mt-0.5 shrink-0">{ICON[i.level]}</span>
           <span><span className="font-medium">{t(i.title, i.vars)}</span>
-            {i.fix && <span className="block text-muted-foreground">{t(i.fix, i.vars)}</span>}</span>
+            {i.fix && <span className="block text-muted-foreground">{t(i.fix, i.vars)}</span>}
+            {onFix && FIXABLE[i.id] && <Button size="sm" variant="outline" className="mt-1.5" disabled={busy} onClick={() => onFix(FIXABLE[i.id])}><Wand2 />{t("Fix with Mas")}</Button>}</span>
         </li>
       ))}
     </ul>
@@ -63,6 +66,17 @@ function Seo() {
     try { await api(`${base}/rules`, { method: "PUT", body: cfg }); toast.success(t("Applied to the site.")); load(); } catch (e) { toast.error((e as ApiError).detail); } finally { setBusy(""); }
   };
   const supported = state.rules?.supported ?? false;
+  const fixable = audit ? [...new Set(audit.site.map((i) => FIXABLE[i.id]).filter(Boolean))] : [];
+  const optimize = async (fixes: ("robots" | "sitemap")[]) => {
+    setBusy("fix");
+    try {
+      await api(`${base}/optimize`, { method: "POST", body: { fixes } });
+      toast.success(t("Done: robots.txt and the sitemap are in place."));
+      load();
+      setAudit(await api<SeoAudit>(`${base}/audit`, { method: "POST" }));
+    } catch (e) { toast.error((e as ApiError).detail); } finally { setBusy(""); }
+  };
+  const copy = (text: string) => { navigator.clipboard?.writeText(text).catch(() => undefined); toast.success(t("Copied.")); };
   const setRedirect = (i: number, patch: Partial<SiteRulesConfig["redirects"][number]>) => setCfg({ ...cfg, redirects: cfg.redirects.map((r, n) => (n === i ? { ...r, ...patch } : r)) });
   const level = (n: number) => (n >= 90 ? "text-emerald-500" : n >= 70 ? "text-amber-500" : "text-red-500");
 
@@ -83,7 +97,14 @@ function Seo() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {audit.site.length > 0 && <div><h3 className="mb-2 text-sm font-medium">{t("The whole site")}</h3><Issues items={audit.site} /></div>}
+            {admin && supported && fixable.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 rounded-xl bg-brand/[0.07] p-4">
+                <Sparkles className="size-4 text-brand" />
+                <p className="min-w-0 flex-1 text-sm">{t("Mas can set up robots.txt and the sitemap for you in one step.")}</p>
+                <Button onClick={() => optimize(["robots", "sitemap"])} disabled={!!busy}>{busy === "fix" ? <Loader2 className="animate-spin" /> : <Wand2 />}{t("Optimize now")}</Button>
+              </div>
+            )}
+            {audit.site.length > 0 && <div><h3 className="mb-2 text-sm font-medium">{t("The whole site")}</h3><Issues items={audit.site} busy={!!busy} onFix={admin && supported ? (f) => optimize([f]) : undefined} /></div>}
             {audit.pages.map((p) => (
               <div key={p.url} className="rounded-xl bg-muted/50 p-4">
                 <div className="mb-3 text-xs text-muted-foreground">{p.url.replace(/^https?:\/\//, "")}</div>
@@ -91,6 +112,17 @@ function Seo() {
                   <div className="mb-3 rounded-lg bg-card p-3 shadow-[0_0_0_1px_var(--border)]">
                     <div className="truncate text-[17px] text-[#1a0dab] dark:text-sky-400">{p.title}</div>
                     <div className="line-clamp-2 text-sm text-muted-foreground">{p.description || t("No description: the engine picks a sentence of the page.")}</div>
+                  </div>
+                )}
+                {(p.suggestions?.title || p.suggestions?.description) && (
+                  <div className="mb-3 space-y-2 rounded-lg border border-dashed border-brand/40 p-3 text-sm">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-brand"><Sparkles className="size-3.5" />{t("Suggested wording")}</div>
+                    {(["title", "description"] as const).map((k) => p.suggestions?.[k] && (
+                      <div key={k} className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1"><div className="text-xs uppercase text-muted-foreground">{k === "title" ? t("Title") : t("Description")} · {p.suggestions[k]!.length}</div><div>{p.suggestions[k]}</div></div>
+                        <Button variant="ghost" size="icon" aria-label={t("Copy")} onClick={() => copy(p.suggestions![k]!)}><Copy /></Button>
+                      </div>
+                    ))}
                   </div>
                 )}
                 {p.issues.length === 0 ? <p className="flex items-center gap-2 text-sm text-emerald-600"><CheckCircle2 className="size-4" />{t("Nothing to fix.")}</p> : <Issues items={p.issues} />}

@@ -26,7 +26,9 @@ class SeoPage(HTMLParser):
         self.images = 0
         self.no_alt = 0
         self.links: list[str] = []
+        self.paragraphs: list[str] = []
         self._in = ""
+        self._skip = 0
 
     def handle_starttag(self, tag, attrs):
         a = {k: (v or "") for k, v in attrs}
@@ -49,16 +51,25 @@ class SeoPage(HTMLParser):
                 self.no_alt += 1
         elif tag == "a" and a.get("href"):
             self.links.append(a["href"])
+        if tag in ("script", "style", "nav", "header", "footer"):
+            self._skip += 1
+        elif tag == "p" and not self._skip:
+            self._in = "p"
+            self.paragraphs.append("")
 
     def handle_endtag(self, tag):
-        if tag in ("title", "h1"):
+        if tag in ("title", "h1", "p"):
             self._in = ""
+        if tag in ("script", "style", "nav", "header", "footer"):
+            self._skip = max(0, self._skip - 1)
 
     def handle_data(self, data):
         if self._in == "title":
             self.title += data
         elif self._in == "h1" and self.h1:
             self.h1[-1] += data
+        elif self._in == "p" and self.paragraphs:
+            self.paragraphs[-1] += data
 
 
 def read(html: str) -> SeoPage:
@@ -70,6 +81,41 @@ def read(html: str) -> SeoPage:
         pass
     page.title = " ".join(page.title.split())
     return page
+
+
+def _cut(text: str, limit: int) -> str:
+    """The text cut after a whole sentence or word, at most ``limit`` characters."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    stop = max(head.rfind(". "), head.rfind("! "), head.rfind("? "))
+    if stop >= 50:
+        return head[: stop + 1]
+    return head[: head.rfind(" ")].rstrip(" ,;:-–|") if " " in head else head
+
+
+def suggest(p: SeoPage, site_name: str = "") -> dict:
+    """Wording Mas would put in a title and a description, taken from the page itself."""
+    out: dict = {}
+    desc = p.meta.get("description", "").strip()
+    if not DESCRIPTION[0] <= len(desc) <= DESCRIPTION[1]:
+        body = next((" ".join(x.split()) for x in p.paragraphs if len(" ".join(x.split())) >= 40), "")
+        if len(body) >= DESCRIPTION[0] or (body and len(p.h1) and p.h1[0].strip()):
+            cand = _cut(body, 155)
+            if len(cand) >= DESCRIPTION[0]:
+                out["description"] = cand
+    n = len(p.title)
+    h1 = " ".join((p.h1[0] if p.h1 else "").split())
+    if n > TITLE[1]:
+        out["title"] = _cut(p.title, TITLE[1])
+    elif n < TITLE[0]:
+        base = h1 if len(h1) > n else p.title
+        if site_name and base and site_name.lower() not in base.lower() and len(base) + len(site_name) + 3 <= TITLE[1]:
+            base = f"{base} | {site_name}"
+        if base and base != p.title and len(base) >= TITLE[0]:
+            out["title"] = base[: TITLE[1]]
+    return out
 
 
 def issue(fid: str, level: str, title: str, fix: str = "", **vars: object) -> dict:
@@ -110,7 +156,7 @@ def check_page(url: str, p: SeoPage, noindex_ok: bool = False) -> list[dict]:
     return out
 
 
-def audit(domain: str, fetch: Callable[..., Response] = http_fetch) -> dict:
+def audit(domain: str, fetch: Callable[..., Response] = http_fetch, site_name: str = "") -> dict:
     host = domain.lower().strip().rstrip(".")
     home = fetch(f"https://{host}/")
     if home.status == 0:
@@ -133,6 +179,7 @@ def audit(domain: str, fetch: Callable[..., Response] = http_fetch) -> dict:
         site.append(issue("http-redirect", "warn", "http:// does not redirect to https://", "Search engines should only see one version of the site."))
     todo = [home.url] + [u for u in locs if (urlsplit(u).hostname or "").lower() == host]
     seen, pages = set(), []
+    paths: set[str] = {urlsplit(u).path or "/" for u in locs if (urlsplit(u).hostname or "").lower() == host}
     for url in todo:
         key = url.split("#")[0].rstrip("/")
         if key in seen or len(pages) >= MAX_PAGES:
@@ -145,7 +192,10 @@ def audit(domain: str, fetch: Callable[..., Response] = http_fetch) -> dict:
             continue
         p = read(resp.text)
         pages.append({"url": url, "status": 200, "title": p.title, "description": p.meta.get("description", ""),
-                      "issues": check_page(url, p)})
+                      "issues": check_page(url, p), "suggestions": suggest(p, site_name)})
+        if resp is home:
+            home_links = [urlsplit(urljoin(resp.url, l)) for l in p.links]
+            paths.update(x.path for x in home_links if (x.hostname or "").lower() == host and x.path.startswith("/"))
     titles: dict[str, list[str]] = {}
     for pg in pages:
         if pg.get("title"):
@@ -160,4 +210,5 @@ def audit(domain: str, fetch: Callable[..., Response] = http_fetch) -> dict:
     per_page = max(1, len(pages))
     penalty = sum(weight[i["level"]] for i in site) + sum(weight[i["level"]] for pg in pages for i in pg["issues"]) / per_page
     return {"domain": host, "reachable": True, "score": max(0, round(100 - penalty)), "site": site, "pages": pages,
+            "paths": sorted(paths)[:300], "has_robots": bool(robots_text), "has_sitemap": bool(locs),
             "counts": {lv: sum(1 for i in all_issues if i["level"] == lv) for lv in ("error", "warn", "info")}}

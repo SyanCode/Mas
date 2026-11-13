@@ -174,3 +174,21 @@ def test_inbox_bell_and_scheduling_with_the_time_picker(live):
     scheduled = db.cms_scheduled(["site"])
     assert scheduled and scheduled[0]["slug"] == "hand"
     assert not errors, errors
+
+
+def test_seo_panel_previews_and_writes_the_description_from_the_text(live):
+    page, errors = open_page(live, "/cms/entry/?app=site&c=articles")
+    page.get_by_label("Title *").wait_for()
+    page.get_by_label("Title *").fill("Sourdough bread, baked every morning")
+    page.get_by_label("Body").fill("## Why sourdough\n\nWe bake sourdough bread every morning in the heart of the city, with flour from a local mill, "
+                                  "water and salt only. It keeps for days and tastes better each day.")
+    page.get_by_placeholder("Focus keyword (optional)").fill("sourdough")
+    panel = page.locator("div", has=page.get_by_role("heading", name="Search engines")).last
+    page.get_by_text("The keyword is in the title").wait_for()
+    assert page.get_by_text("Sourdough bread, baked every morning").first.is_visible()
+    page.get_by_role("button", name="Write the description from the text").click()
+    excerpt = page.get_by_label("Excerpt").input_value()
+    assert excerpt.startswith("Why sourdough") or excerpt.startswith("We bake sourdough bread")
+    assert 50 <= len(excerpt) <= 160
+    page.get_by_text("Description of 50 to 160 characters").wait_for()
+    assert not errors, errors

@@ -233,3 +233,47 @@ class SiteRules:
             except Exception:  # noqa: BLE001 - one site must not stop the others
                 continue
         return done
+
+
+FIXES = ("robots", "sitemap")
+
+
+def guess_patterns(paths: list[str], collections: list[dict]) -> dict[str, str]:
+    """``{collection: /blog/{slug}}``, found where the site's own links point at the entries of a collection."""
+    out: dict[str, str] = {}
+    for c in collections:
+        slugs = {str(e.get("slug")) for e in c.get("entries", []) if e.get("slug")}
+        for path in paths:
+            clean_path = path.rstrip("/")
+            last = clean_path.rsplit("/", 1)[-1]
+            if last in slugs:
+                pattern = clean_path[: len(clean_path) - len(last)] + "{slug}"
+                if TEMPLATE_RE.fullmatch(pattern):
+                    out[c["id"]] = pattern
+                    break
+    return out
+
+
+def optimized(cfg: dict, fixes: list[str], domain: str, paths: list[str], collections: list[dict]) -> dict:
+    """The settings with what Mas can do about robots.txt and the sitemap done, the rest kept as it is."""
+    cfg = json.loads(json.dumps(cfg))
+    if "sitemap" in fixes:
+        pages = ["/"] + [p for p in paths if PATH_RE.fullmatch(p) and not p.endswith("*") and "//" not in p and p != "/"]
+        known = list(dict.fromkeys([*cfg["sitemap"].get("pages", []), *pages]))[:200]
+        guessed = guess_patterns(paths, collections)
+        cfg["sitemap"] = {"enabled": True, "pages": known, "collections": {**guessed, **cfg["sitemap"].get("collections", {})}}
+        if guessed:  # the entries are listed by their pattern: no need to list their addresses one by one
+            taken = tuple(p.replace("{slug}", "") for p in guessed.values())
+            cfg["sitemap"]["pages"] = [p for p in cfg["sitemap"]["pages"] if p == "/" or not p.startswith(taken)] or ["/"]
+    if "robots" in fixes or "sitemap" in fixes:
+        text = cfg["robots"].get("text", "")
+        blocked = bool(re.search(r"(?im)^\s*disallow:\s*/\s*$", text))
+        if "robots" in fixes and (not cfg["robots"].get("enabled") or blocked or not text):
+            text = ""  # back to the default text: everything allowed
+        if "robots" in fixes or cfg["robots"].get("enabled"):
+            cfg["robots"]["enabled"] = True
+            text = text or default_robots(domain, cfg["sitemap"]["enabled"])
+            if cfg["sitemap"]["enabled"] and "sitemap:" not in text.lower():
+                text = text.rstrip("\n") + f"\n\nSitemap: https://{domain}/sitemap.xml\n"
+            cfg["robots"]["text"] = text
+    return cfg

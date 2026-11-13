@@ -169,3 +169,54 @@ def test_seo_audit_reads_the_live_site(env):
     out = client.post(f"{BASE}/seo/audit", headers=h).json()
     assert out["score"] >= 90, out
     assert client.get(f"{BASE}/seo", headers=h).json()["audit"]["score"] == out["score"]
+
+
+def test_suggestions_come_from_the_page():
+    long_title = "A very long title about our bakery that search engines will cut in the middle of a sentence"
+    body = ("<p>Short.</p><p>We bake sourdough bread every morning in the heart of Lyon. Come and taste it with our "
+            "homemade jam, fresh butter and a hot coffee. Open every day.</p>")
+    p = seo.read(f'<html lang="en"><head><title>{long_title}</title></head><body><nav><p>Menu menu menu menu menu menu menu menu menu menu</p></nav><h1>Bakery</h1>{body}</body></html>')
+    s = seo.suggest(p, "Boulangerie Dupont")
+    assert 50 <= len(s["description"]) <= 160 and s["description"].startswith("We bake sourdough bread") and "Menu" not in s["description"]
+    assert len(s["title"]) <= 60 and not s["title"].endswith(" ")
+    short = seo.read('<html><head><title>Home</title></head><body><h1>Our artisan bakery in Lyon</h1></body></html>')
+    assert seo.suggest(short, "Dupont")["title"] == "Our artisan bakery in Lyon | Dupont"
+    good = seo.read('<html><head><title>A clear title for the home page</title><meta name="description" content="%s"></head></html>' % ("x" * 80))
+    assert seo.suggest(good) == {}
+
+
+def test_optimizer_enables_robots_and_a_sitemap_with_guessed_patterns():
+    cols = [{"id": "articles", "entries": [{"slug": "hello"}, {"slug": "second"}]}]
+    cfg = siterules.default_config()
+    new = siterules.optimized(cfg, ["robots", "sitemap"], "client.example.com",
+                              ["/", "/contact", "/blog/hello", "/blog/second", "/about/"], cols)
+    assert new["sitemap"]["enabled"] and new["sitemap"]["collections"] == {"articles": "/blog/{slug}"}
+    assert "/contact" in new["sitemap"]["pages"] and "/blog/hello" not in new["sitemap"]["pages"]
+    assert new["robots"]["enabled"] and "Sitemap: https://client.example.com/sitemap.xml" in new["robots"]["text"]
+    clean(new)  # it passes the same checks as what a person types
+    # a robots.txt that blocks everything is replaced, a custom one only gets its Sitemap line
+    blocked = {**cfg, "robots": {"enabled": True, "text": "User-agent: *\nDisallow: /"}}
+    assert "Disallow: /\n" not in siterules.optimized(blocked, ["robots"], "x.com", [], [])["robots"]["text"]
+    custom = {**cfg, "robots": {"enabled": True, "text": "User-agent: *\nDisallow: /admin"}}
+    got = siterules.optimized(custom, ["sitemap"], "x.com", [], [])["robots"]["text"]
+    assert got.startswith("User-agent: *\nDisallow: /admin") and "Sitemap: https://x.com/sitemap.xml" in got
+
+
+def test_optimize_endpoint_fixes_what_the_look_found(env):
+    client, db, host, pages = env
+    h = {"x-csrf-token": login(client)}
+    d = "https://client.example.com"
+    pages[f"{d}/"] = html(f"{d}/", page("A clear title for the home page", "x" * 80) .replace("</body>", '<a href="/contact">c</a><a href="/blog/hello">h</a></body>'))
+    r = client.post(f"{BASE}/seo/audit", headers=h).json()
+    assert {i["id"] for i in r["site"]} >= {"robots-missing", "sitemap-missing"} and "/blog/hello" in r["paths"]
+    out = client.post(f"{BASE}/seo/optimize", json={}, headers=h)
+    assert out.status_code == 200, out.text
+    assert out.json()["applied"] == ["robots", "sitemap"]
+    snippet = host.read_text("/etc/nginx/mas-maintenance/site.conf")
+    assert "robots.txt" in snippet and "sitemap.xml" in snippet
+    assert "/contact" in host.read_text("/etc/nginx/mas-site/site/sitemap.xml")
+    assert client.post(f"{BASE}/seo/optimize", json={"fixes": ["nope"]}, headers=h).status_code == 400
+    editor = db.create_user("ed", auth.hash_password(PASSWORD), role="editor"); db.set_user_apps(editor, ["site"])
+    client.cookies.clear()
+    eh = {"x-csrf-token": login(client, "ed")}
+    assert client.post(f"{BASE}/seo/optimize", json={}, headers=eh).status_code in (401, 403)
