@@ -9,6 +9,7 @@ import { Badge } from "@/components/cms/ui/badge";
 import { Button } from "@/components/cms/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cms/ui/card";
 import { Skeleton } from "@/components/cms/ui/skeleton";
+import { ClaudeFix } from "@/components/cms/ClaudeFix";
 import { api, timeAgo, type ApiError, type ComplianceAudit, type ComplianceFinding, type ComplianceReport } from "@/lib/api";
 import { translateFinding } from "@/lib/complianceTexts";
 import { msg, useI18n, useT } from "@/lib/i18n";
@@ -118,6 +119,7 @@ function Compliance() {
         actions={<Button onClick={run} disabled={running || !site.domain}>{running && <Loader2 className="animate-spin" />}{t("Audit now")}</Button>} />
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
       {!site.domain && <Card className="p-8 text-center text-sm text-muted-foreground">{t("Give the site a domain first: the audit reads the live site.")}</Card>}
+      {site.domain && <ClaudeFix preset="compliance" title={t("Fix compliance with Claude")} description={t("Claude audits the site, fixes what blocks (cookie banner, legal pages, consent), deploys and audits again.")} onDone={() => { api<ComplianceReport>(base).then(setReport).catch(() => {}); }} />}
       {site.domain && !report && <Skeleton className="h-64" />}
       {site.domain && report && !audit && (
         <Card className="p-10 text-center text-sm text-muted-foreground">{t("No audit yet. It runs by itself after the next publication, or start one now.")}</Card>

@@ -11,6 +11,7 @@ import { Input, Textarea } from "@/components/cms/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { Skeleton } from "@/components/cms/ui/skeleton";
 import { Switch } from "@/components/cms/ui/switch";
+import { ClaudeFix } from "@/components/cms/ClaudeFix";
 import { api, type ApiError, type SeoAudit, type SeoIssue, type SeoState, type SiteRulesConfig } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -87,9 +88,11 @@ function Seo() {
 
       {!state.domain && <Card className="p-8 text-center text-sm text-muted-foreground">{t("Give the site a domain first: the check reads the live site.")}</Card>}
 
+      {state.domain && <ClaudeFix preset="seo" title={t("Improve the SEO with Claude")} description={t("Claude reads the site and its pages, fixes titles, descriptions, headings, robots.txt and the sitemap, deploys and checks again.")} onDone={() => { load(); run(); }} />}
+
       {audit && (
         <Card className="mb-6">
-          <CardHeader className="flex-row items-center gap-5 space-y-0">
+          <CardHeader className="flex-row flex-wrap items-center gap-x-5 gap-y-2 space-y-0">
             <div className={`font-light tabular-nums text-5xl ${level(audit.score)}`}>{audit.score}</div>
             <div>
               <CardTitle>{audit.reachable ? t("Search readiness") : t("The site could not be reached")}</CardTitle>
@@ -100,7 +103,7 @@ function Seo() {
             {admin && supported && fixable.length > 0 && (
               <div className="flex flex-wrap items-center gap-3 rounded-xl bg-brand/[0.07] p-4">
                 <Sparkles className="size-4 text-brand" />
-                <p className="min-w-0 flex-1 text-sm">{t("Mas can set up robots.txt and the sitemap for you in one step.")}</p>
+                <p className="min-w-[14rem] flex-1 basis-56 text-sm">{t("Mas can set up robots.txt and the sitemap for you in one step.")}</p>
                 <Button onClick={() => optimize(["robots", "sitemap"])} disabled={!!busy}>{busy === "fix" ? <Loader2 className="animate-spin" /> : <Wand2 />}{t("Optimize now")}</Button>
               </div>
             )}

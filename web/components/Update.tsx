@@ -135,7 +135,7 @@ export function UpdateCard() {
   return (
     <Card title={t("Updates")} actions={status ? (behind > 0 ? <Badge tone="amber">{t("update available")}</Badge> : <Badge tone="emerald">{t("up to date")}</Badge>) : undefined}>
       <div className="flex flex-wrap items-center gap-4">
-        <div className="min-w-0 flex-1 text-sm">
+        <div className="min-w-[14rem] flex-1 basis-56 text-sm">
           <div>Mas <span className="font-medium">v{status?.version ?? "…"}</span>{status?.sha && <code className="ml-2 text-xs text-zinc-500">{status.branch}@{status.sha}</code>}</div>
           <p className="mt-1 text-xs text-zinc-500">
             {status?.error ? status.error
