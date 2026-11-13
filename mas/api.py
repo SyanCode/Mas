@@ -20,7 +20,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from mas import preview as preview_mod
-from mas import __version__, advisor as advisor_mod, ai as ai_mod, api_advisor, robot as robot_mod, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, advisor as advisor_mod, ai as ai_mod, claudelogin as claudelogin_mod, api_advisor, robot as robot_mod, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -357,6 +357,7 @@ def create_app(
 
     pool = ai_mod.AiPool(host, config, db)
     advisor = advisor_mod.Advisor(db, pool, advisor_snapshot)
+    claude_login = claudelogin_mod.ClaudeLogin(host, str(Path(db.path).parent / "claude-login"))
     robot = robot_mod.Robot(db, pool, github_client, lambda token: mcp_endpoint.MasClient(app, token, None))
     usage = Usage(host, config, db, scanner, resources)
     maintenance = Maintenance(host, config, db, deployer)
@@ -406,6 +407,7 @@ def create_app(
     app.state.uptime = uptime
     app.state.advisor = advisor
     app.state.pool = pool
+    app.state.claude_login = claude_login
     app.state.robot = robot
 
     # -- middleware --------------------------------------------------------
@@ -868,7 +870,7 @@ def create_app(
     app.state.cluster = cluster
     api_resources.register(app, db=db, current_session=current_session, deployer=deployer, resources=resources)
     api_advisor.register(app, db=db, current_session=current_session, advisor=advisor, pool=pool, robot=robot,
-                         require_password=require_password)
+                         require_password=require_password, claude_login=claude_login)
     api_maintenance.register(app, db=db, current_session=current_session, maintenance=maintenance, client_ip=client_ip)
     app.state.resources = resources
     app.state.stacks = stacks

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from mas.advisor import STATUSES, Advisor, AdvisorError
 from mas.ai import PROVIDERS, AiError, AiPool
+from mas.claudelogin import ClaudeLogin, LoginError
 from mas.db import Database
 from mas.robot import PRESETS, Robot
 
@@ -29,6 +30,15 @@ class AccountPatch(BaseModel):
     enabled: bool | None = None
     secret: str | None = Field(default=None, max_length=700)
     password: str | None = Field(default=None, max_length=200)
+
+
+class LoginStart(BaseModel):
+    password: str = Field(default="", max_length=200)
+
+
+class LoginCode(BaseModel):
+    code: str = Field(max_length=400)
+    name: str = Field(default="", max_length=60)
 
 
 class MoveBody(BaseModel):
@@ -59,7 +69,7 @@ class RobotSettings(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: Advisor, pool: AiPool, robot: Robot,
-             require_password: Callable) -> None:
+             require_password: Callable, claude_login: ClaudeLogin) -> None:
 
     def bad(exc: Exception) -> HTTPException:
         return HTTPException(400, str(exc))
@@ -105,6 +115,44 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
             raise HTTPException(404, "unknown account")
         db.audit(s.username, "ai-account-delete", True, detail=str(account_id))
         return accounts_payload()
+
+    # -- "Connect Claude": the official CLI login driven by Mas ------------------------------------
+
+    @app.get("/api/ai/claude-login")
+    def login_status(_=Depends(current_session)) -> dict:
+        return claude_login.status()
+
+    @app.post("/api/ai/claude-login/install")
+    async def login_install(s=Depends(current_session)) -> dict:
+        try:
+            out = await asyncio.to_thread(claude_login.install)
+        except LoginError as exc:
+            raise HTTPException(409, str(exc)) from None
+        db.audit(s.username, "claude-cli-install", True)
+        return {**claude_login.status(), "output": out}
+
+    @app.post("/api/ai/claude-login/start")
+    async def login_start(body: LoginStart, s=Depends(current_session)) -> dict:
+        require_password(s, body.password)
+        try:
+            return {"url": await asyncio.to_thread(claude_login.start)}
+        except LoginError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.post("/api/ai/claude-login/code")
+    async def login_code(body: LoginCode, s=Depends(current_session)) -> dict:
+        try:
+            token = await asyncio.to_thread(claude_login.finish, body.code)
+            pool.add(body.name or "Claude", "anthropic", token)
+        except (LoginError, AiError) as exc:
+            raise HTTPException(409, str(exc)) from None
+        db.audit(s.username, "ai-account-add", True, detail="anthropic (Claude login)")
+        return accounts_payload()
+
+    @app.delete("/api/ai/claude-login")
+    def login_cancel(_=Depends(current_session)) -> dict:
+        claude_login.cancel()
+        return {"ok": True}
 
     # -- advisor ------------------------------------------------------------------------------------
 

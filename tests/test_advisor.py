@@ -135,3 +135,18 @@ def test_routes(env):
 def test_api_tokens_cannot_reach_the_ai_routes():
     for path in ("/api/advisor", "/api/advisor/run", "/api/ai/accounts", "/api/robot/runs"):
         assert not auth.api_token_allowed(path)
+
+
+def test_claude_login_routes(env):
+    from pathlib import Path
+    client, csrf, db = env
+    client.app.state.claude_login.override = str(Path(__file__).parent / "fixtures" / "fake_claude.py")
+    assert client.get("/api/ai/claude-login").json()["installed"] is True
+    assert client.post("/api/ai/claude-login/start", headers=csrf, json={"password": "wrong"}).status_code == 403
+    url = client.post("/api/ai/claude-login/start", headers=csrf, json={"password": PASSWORD}).json()["url"]
+    assert url.startswith("https://claude.ai/")
+    assert client.post("/api/ai/claude-login/code", headers=csrf, json={"code": "nope-nope"}).status_code == 409
+    client.post("/api/ai/claude-login/start", headers=csrf, json={"password": PASSWORD})
+    r = client.post("/api/ai/claude-login/code", headers=csrf, json={"code": "GOOD-CODE#1234", "name": "Claude Pro"})
+    assert r.status_code == 200 and r.json()["accounts"][0]["kind"] == "claude-code" and "sk-ant-oat" not in r.text
+    assert not auth.api_token_allowed("/api/ai/claude-login/start")
