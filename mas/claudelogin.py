@@ -29,7 +29,7 @@ INSTALL = ["npm", "install", "-g", "@anthropic-ai/claude-code"]
 URL_RE = re.compile(r"https://[^\s\x1b\"'<>]*(?:claude\.(?:ai|com)|anthropic\.com)[^\s\x1b\"'<>]*")
 TOKEN_RE = re.compile(r"sk-ant-oat[0-9]*-[A-Za-z0-9_-]{20,}")
 CODE_RE = re.compile(r"^[A-Za-z0-9_#.:~-]{4,300}$")
-ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])")
+ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Za-z0-9]|[@-Z\\-_])")
 LIFETIME = 600
 
 
@@ -150,9 +150,19 @@ class ClaudeLogin:
             if not s or not self._alive():
                 self._close()
                 raise LoginError("no login is waiting: start again")
-            os.write(s["fd"], code.encode() + b"\r")
-            token = self._read(s, lambda text: (m := TOKEN_RE.search(text)) and m.group(0), 40)
-            tail = clean(s["buffer"]).strip()[-200:]
+            def find(text):
+                m = TOKEN_RE.search(text)
+                return m and m.group(0)
+            # The CLI's input line takes a quick burst for a paste: the code first, then Return on its own, a moment later
+            # (and once more if nothing happened: some versions drop the first one).
+            os.write(s["fd"], code.encode())
+            time.sleep(0.6)
+            os.write(s["fd"], b"\r")
+            token = self._read(s, find, 12)
+            if not token and s["proc"].poll() is None:
+                os.write(s["fd"], b"\r")
+                token = self._read(s, find, 30)
+            tail = re.sub(r"\*{4,}", "***", clean(s["buffer"])).strip()[-200:]
             self._close()
             if not token:
                 raise LoginError("Claude did not accept the code" + (f" ({tail})" if tail else "") + ": start again")
