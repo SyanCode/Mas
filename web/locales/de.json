@@ -1912,5 +1912,11 @@
   "Automatic maintenance": "Automatische Wartung",
   "Every": "Alle",
   "The robot audits compliance and SEO of your sites and fixes what is safe.": "Der Roboter prüft Konformität und SEO Ihrer Sites und behebt Unkritisches.",
-  "Previous runs": "Frühere Läufe"
+  "Previous runs": "Frühere Läufe",
+  "Fix compliance with Claude": "Konformität mit Claude beheben",
+  "Claude audits the site, fixes what blocks (cookie banner, legal pages, consent), deploys and audits again.": "Claude prüft die Site, behebt Blockierendes (Cookie-Banner, Rechtstexte, Einwilligung), deployt und prüft erneut.",
+  "Improve the SEO with Claude": "SEO mit Claude verbessern",
+  "Claude reads the site and its pages, fixes titles, descriptions, headings, robots.txt and the sitemap, deploys and checks again.": "Claude liest die Site und ihre Seiten, behebt Titel, Beschreibungen, Überschriften, robots.txt und Sitemap, deployt und prüft erneut.",
+  "Run again": "Erneut starten",
+  "Fix with Claude": "Mit Claude beheben"
 }
