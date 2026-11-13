@@ -27,7 +27,7 @@ def test_link_then_code_gives_the_token(login):
     assert url.startswith("https://claude.ai/oauth/authorize") and "\x1b" not in url
     assert cl.status()["pending"]
     token = cl.finish("GOOD-CODE#1234")
-    assert token == "sk-ant-oat01-" + "T" * 60
+    assert token == "sk-ant-oat01-" + "T" * 30 + "-_" + "U" * 30
     assert not cl.status()["pending"]
     with pytest.raises(LoginError, match="no login is waiting"):
         cl.finish("GOOD-CODE#1234")
@@ -59,3 +59,14 @@ def test_not_installed_and_install(tmp_path):
 
 def test_clean_strips_terminal_codes():
     assert clean(b"\x1b[1mhello\x1b[0m\r\n\x1b]0;title\x07x") == "hello\nx"
+
+
+def test_extract_token_waits_for_the_end_of_the_token():
+    from mas.claudelogin import extract_token
+    token = "sk-ant-oat01-" + "a" * 70
+    assert extract_token("Your token:\n" + token[:30], False) is None  # still arriving
+    assert extract_token("Your token:\n" + token[:40] + "\n" + token[40:], False) is None
+    assert extract_token(f"x\n{token[:40]}\n{token[40:]}\n\nStore this token securely.", False) == token
+    assert extract_token(f"{token} Store this", False) == token
+    assert extract_token(token, True) == token  # the CLI exited
+    assert extract_token("sk-ant-oat01-short\n\nx", False) is None

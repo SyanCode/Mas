@@ -18,7 +18,12 @@ while True:
     sys.stdout.write("*" * len(chunk))
     sys.stdout.flush()
 if typed == "GOOD-CODE#1234":
-    sys.stdout.write("\r\nYour token:\r\nsk-ant-oat01-" + "T" * 60 + "\r\n")
+    token = "sk-ant-oat01-" + "T" * 30 + "-_" + "U" * 30
+    sys.stdout.write("\r\nYour OAuth token:\r\n\r\n")
+    for i in range(0, len(token), 40):  # a terminal that wraps long lines
+        sys.stdout.write(token[i:i + 40] + "\r\n")
+        sys.stdout.flush()
+    sys.stdout.write("\r\nStore\x1b[1Cthis\x1b[1Ctoken\x1b[1Csecurely.\r\n")
 else:
     sys.stdout.write("\r\nInvalid code\r\n")
 sys.stdout.flush()
