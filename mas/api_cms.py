@@ -11,9 +11,10 @@ from collections.abc import Callable
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from mas import auth, cookies as cookies_mod, legal as legal_mod
+from mas import auth, cms_backup, cookies as cookies_mod, legal as legal_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import Database
 from mas.geo import ATTRIBUTION, GeoError
@@ -41,6 +42,15 @@ class InviteBody(BaseModel):
     apps: list[str] = Field(default_factory=list, max_length=500)
     note: str = Field(default="", max_length=100)  # who it is for, shown in the list
     days: int = Field(default=7, ge=1, le=30)
+
+
+class RestoreBody(BaseModel):
+    data: bool = True
+    content: bool = True
+
+
+class AutoBody(BaseModel):
+    on: bool
 
 
 class Paths(BaseModel):
@@ -608,6 +618,87 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             except NotifyError as exc:
                 raise HTTPException(502, str(exc)) from None
         return {"text": text, "sent": bool(cfg["emails"])}
+
+    # -- backups (administrators) ---------------------------------------------------------------
+
+    backups_dir = cms_backup.data_dir_of(manager)
+
+    def app_exists(app_id: str) -> dict:
+        target = db.get_app(app_id)
+        if target is None:
+            raise HTTPException(404, "unknown site")
+        return target
+
+    @app.get("/api/cms/sites/{app_id}/backups")
+    def backups(app_id: str, s=Depends(current_session)) -> dict:
+        app_exists(app_id)
+        return {"items": cms_backup.listing(backups_dir, app_id), "auto": db.get_setting(f"backup_auto:{app_id}") == "1"}
+
+    @app.post("/api/cms/sites/{app_id}/backups")
+    async def backup_create(app_id: str, s=Depends(current_session)) -> dict:
+        app_exists(app_id)
+        raw = await asyncio.to_thread(call, cms_backup.build, db, manager, app_id, f"by {s.username}")
+        name = await asyncio.to_thread(cms_backup.save, backups_dir, app_id, raw)
+        db.audit(s.username, "cms-backup", True, service_id=app_id, detail=name)
+        return {"name": name, "size": len(raw)}
+
+    @app.put("/api/cms/sites/{app_id}/backups/auto")
+    def backup_auto(app_id: str, body: AutoBody, s=Depends(current_session)) -> dict:
+        app_exists(app_id)
+        db.set_setting(f"backup_auto:{app_id}", "1" if body.on else None)
+        db.audit(s.username, "cms-backup-auto", True, service_id=app_id, detail="on" if body.on else "off")
+        return {"auto": body.on}
+
+    @app.post("/api/cms/sites/{app_id}/backups/upload")
+    async def backup_upload(app_id: str, request: Request, s=Depends(current_session)) -> dict:
+        """A backup made elsewhere (or downloaded earlier): kept in the list, restored from there."""
+        app_exists(app_id)
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > cms_backup.MAX_TOTAL:
+                raise HTTPException(413, "backup larger than 80 MB")
+        manifest, _, _ = await asyncio.to_thread(call, cms_backup.read, bytes(data))
+        if manifest.get("app_id") != app_id:
+            raise HTTPException(400, f"this backup is of another site ({manifest.get('app_id')})")
+        name = await asyncio.to_thread(cms_backup.save, backups_dir, app_id, bytes(data))
+        db.audit(s.username, "cms-backup-upload", True, service_id=app_id, detail=name)
+        return {"name": name}
+
+    @app.get("/api/cms/sites/{app_id}/backups/{name}")
+    def backup_download(app_id: str, name: str, s=Depends(current_session)) -> FileResponse:
+        app_exists(app_id)
+        path = call(cms_backup.path_of, backups_dir, app_id, name)
+        return FileResponse(path, media_type="application/zip", filename=f"{app_id}-{name}")
+
+    @app.delete("/api/cms/sites/{app_id}/backups/{name}")
+    def backup_delete(app_id: str, name: str, s=Depends(current_session)) -> dict:
+        app_exists(app_id)
+        call(cms_backup.path_of, backups_dir, app_id, name).unlink(missing_ok=True)
+        db.audit(s.username, "cms-backup-delete", True, service_id=app_id, detail=name)
+        return {"ok": True}
+
+    @app.post("/api/cms/sites/{app_id}/backups/{name}/restore")
+    async def backup_restore(app_id: str, name: str, body: RestoreBody, s=Depends(current_session)) -> dict:
+        """Put a backup back. The site as it is now is saved first, so a restore can itself be undone."""
+        app_exists(app_id)
+        if not (body.data or body.content):
+            raise HTTPException(400, "choose what to restore")
+        path = call(cms_backup.path_of, backups_dir, app_id, name)
+        manifest, data, files = await asyncio.to_thread(call, cms_backup.read, path.read_bytes())
+        if manifest.get("app_id") != app_id:
+            raise HTTPException(400, f"this backup is of another site ({manifest.get('app_id')})")
+        files = call(cms_backup.checked_files, files)
+        safety = await asyncio.to_thread(call, cms_backup.build, db, manager, app_id, "before a restore")
+        kept = await asyncio.to_thread(cms_backup.save, backups_dir, app_id, safety)
+        result: dict = {"safety": kept, "rows": None, "commit": None, "files": 0}
+        if body.content and files:
+            restored = await asyncio.to_thread(call, manager.restore_files, app_id, files, s.username, name)
+            result.update(commit=restored["commit"], files=restored["files"])
+        if body.data:
+            result["rows"] = await asyncio.to_thread(call, cms_backup.restore_data, db, app_id, data)
+        db.audit(s.username, "cms-backup-restore", True, service_id=app_id, detail=f"{name} (safety {kept})")
+        return result
 
     @app.get("/api/cms/sites/{app_id}/overview")
     async def overview(app_id: str, s=Depends(any_session)) -> dict:
