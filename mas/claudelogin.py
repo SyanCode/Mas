@@ -83,6 +83,14 @@ def flat_token(text: str, final: bool) -> str | None:
     return token if (ended or final) and len(token) >= 60 else None
 
 
+def raw_window(raw: bytes) -> str:
+    """The raw bytes just around where the token starts (its first characters only): shows terminal codes, if any."""
+    i = raw.find(b"sk-ant-")
+    if i < 0:
+        return ""
+    return repr(raw[max(0, i - 40):i + 14])[2:-1]
+
+
 def shape(text: str) -> str:
     """The output with its long secret-looking runs masked: enough to see how it is laid out, nothing sensitive."""
     masked = re.sub(r"[A-Za-z0-9_-]{16,}", lambda m: (m.group(0)[:13] if m.group(0).startswith("sk-ant") else m.group(0)[:3]) + f"<{len(m.group(0))}>", text)
@@ -209,6 +217,9 @@ class ClaudeLogin:
                 os.write(s["fd"], b"\r")
                 token = self._read(s, find, 30)
             tail = shape(clean(s["buffer"]))
+            window = raw_window(s["buffer"])
+            if window:
+                tail += f" — raw: {window}"
             self._close()
             if not token:
                 raise LoginError("Claude did not give a token after the code" + (f" — what the tool printed: {tail}" if tail else "") + " — start again")
