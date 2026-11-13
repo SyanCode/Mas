@@ -19,6 +19,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from mas import preview as preview_mod
 from mas import __version__, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
@@ -26,7 +27,7 @@ from mas.cluster import Cluster
 from mas.resources import Resources
 from mas.deploy import Deployer, PendingEnvError
 from mas.github import GitHubApp
-from mas.cms import CmsManager
+from mas.cms import CmsError, CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
 from mas.compliance import Compliance
@@ -38,6 +39,7 @@ from mas.sitestats import SiteStats, service_target
 from mas.usage import Usage
 from mas import removesite
 from mas.maintenance import Maintenance
+from mas.siterules import SiteRules
 from mas.projects import Projects, project_env
 from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
@@ -176,6 +178,7 @@ def create_app(
     web_dir: Path | None = None,
     ovh_opener=None,  # tests: fake OVH API
     cluster_opener=None,  # tests: calls to the other Mas servers
+    seo_fetch=None,  # tests: pages of the site as the SEO look sees them
 ) -> FastAPI:
     host = host or Host()
     config = config or load_config(host)
@@ -220,6 +223,10 @@ def create_app(
                 await asyncio.to_thread(cms.run_due)
             except Exception:
                 log.exception("scheduled CMS publications failed")
+            try:  # sitemaps follow the entries
+                await asyncio.to_thread(site_rules.tick)
+            except Exception:
+                log.exception("sitemaps failed")
             try:  # daily backups of the sites that asked for them
                 await asyncio.to_thread(cms_backup.tick, db, cms)
             except Exception:
@@ -308,6 +315,7 @@ def create_app(
     restart_all = RestartAll(host, config, db, deployer, scanner)
     usage = Usage(host, config, db, scanner, resources)
     maintenance = Maintenance(host, config, db, deployer)
+    site_rules = SiteRules(db, host, maintenance, cms)
     projects = Projects(db, github_client)
     deployer.extra_env.append(lambda target: project_env(db, target))
 
@@ -345,6 +353,7 @@ def create_app(
     app.state.scanner, app.state.db, app.state.host = scanner, db, host
     mcp = mcp_endpoint.Endpoint(app, db, token_limiter, TRUSTED_PROXIES)
     app.state.cms = cms
+    app.state.site_rules = site_rules
     app.state.compliance = app_state_compliance
     app.state.notifier = notifier
     app.state.uptime = uptime
@@ -805,7 +814,8 @@ def create_app(
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,
-                     stats=site_stats, geo=geo, compliance=compliance, notifier=notifier, uptime=uptime)
+                     stats=site_stats, geo=geo, compliance=compliance, notifier=notifier, uptime=uptime,
+                     rules=site_rules, seo_fetch=seo_fetch)
 
     # -- dashboard ---------------------------------------------------------
 
@@ -847,6 +857,38 @@ def create_app(
             return Response("not found", status_code=404, media_type="text/plain")
         return Response(uptime.status_html(target), media_type="text/html; charset=utf-8",
                         headers={"Cache-Control": "public, max-age=30", "X-Robots-Tag": "noindex"})
+
+    PREVIEW_HEADERS = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow", "Referrer-Policy": "no-referrer",
+                       "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"}
+
+    @app.get("/preview/{token}", include_in_schema=False)
+    def preview_page(token: str) -> Response:
+        """A private preview of one CMS entry (see mas.preview): signed link, no account."""
+        ref = preview_mod.check(db, token)
+        target = db.get_app(ref["app_id"]) if ref else None
+        if ref is None or target is None:
+            return Response("This preview link is not valid anymore.", status_code=404, media_type="text/plain",
+                            headers=PREVIEW_HEADERS)
+        try:
+            schema, _ = cms.schema(ref["app_id"])
+            collection = next(c for c in schema["collections"] if c["id"] == ref["cid"])
+            entry = cms.load_entry(ref["app_id"], ref["cid"], ref["slug"])
+        except (CmsError, StopIteration):
+            return Response("This entry does not exist anymore.", status_code=404, media_type="text/plain",
+                            headers=PREVIEW_HEADERS)
+        return Response(preview_mod.page(target["name"], collection, entry, token, ref["expires"]),
+                        media_type="text/html; charset=utf-8", headers=PREVIEW_HEADERS)
+
+    @app.get("/preview/{token}/image", include_in_schema=False)
+    def preview_image(token: str, src: str = Query(max_length=500)) -> Response:
+        ref = preview_mod.check(db, token)
+        if ref is None:
+            return Response("not found", status_code=404, media_type="text/plain", headers=PREVIEW_HEADERS)
+        try:
+            data, mime = cms.read_image(ref["app_id"], src)
+        except CmsError:
+            return Response("not found", status_code=404, media_type="text/plain", headers=PREVIEW_HEADERS)
+        return Response(data, media_type=mime, headers=PREVIEW_HEADERS)
 
     @app.get("/cookies.js", include_in_schema=False)
     def cookies_script() -> Response:

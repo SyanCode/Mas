@@ -4,7 +4,8 @@ import { DatePicker } from "@/components/Pickers";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ExternalLink, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Link2, Loader2, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout";
 import { StatusBadge, parseUtc } from "@/components/cms/common";
 import { TimeField } from "@/components/cms/premium";
@@ -120,6 +121,16 @@ function Editor() {
     else load();
   }
 
+  async function shareLink() {
+    if (!slug) return;
+    try {
+      const r = await api<{ path: string }>(`${base}/${encodeURIComponent(slug)}/preview`, { method: "POST", body: { days: 7 } });
+      const url = `${window.location.origin}${r.path}`;
+      await navigator.clipboard?.writeText(url).catch(() => undefined);
+      toast.success(t("Preview link copied. Anyone with it can read this entry for 7 days."), { description: url });
+    } catch (e) { toast.error((e as ApiError).detail); }
+  }
+
   async function remove() {
     setDeleting(false);
     if (!slug) return;
@@ -192,6 +203,7 @@ function Editor() {
                 <div className="flex flex-col gap-2 pt-1">
                   <Button type="submit" disabled={busy || locked || (!dirty && slug !== null) || scheduleInvalid}>{busy && <Loader2 className="animate-spin" />}{mainLabel}</Button>
                   {dirty && slug !== null && <Button type="button" variant="ghost" onClick={() => { setValues(original); setStatus(origStatus); }}>{t("Discard")}</Button>}
+                  {slug !== null && <Button type="button" variant="outline" disabled={busy} onClick={shareLink}><Link2 />{t("Copy a preview link")}</Button>}
                   {slug !== null && !author && <Button type="button" variant="ghost" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => setDeleting(true)}><Trash2 />{t("Delete")}</Button>}
                 </div>
               </CardContent>

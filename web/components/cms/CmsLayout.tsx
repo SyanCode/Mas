@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Archive,
+import { Archive, ScanSearch,
   Activity, BarChart3, Bell, Cookie, FileSignature, HeartPulse, Search, ShieldCheck, ExternalLink, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Menu, Moon, Newspaper,
   Server, Settings as SettingsIcon, Sun, Users, X,
 } from "lucide-react";
@@ -101,6 +101,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
               <NavLink href={`/cms/media/?${q}`} icon={ImageIcon} active={here("/cms/media")}>{t("Media")}</NavLink>
               {site.domain && <NavLink href={`/cms/stats/?${q}`} icon={BarChart3} active={here("/cms/stats")}>{t("Statistics")}</NavLink>}
               {site.domain && <NavLink href={`/cms/uptime/?${q}`} icon={HeartPulse} active={here("/cms/uptime")}>{t("Availability")}</NavLink>}
+              {site.domain && <NavLink href={`/cms/seo/?${q}`} icon={ScanSearch} active={here("/cms/seo")}>{t("Search engines")}</NavLink>}
               <NavLink href={`/cms/compliance/?${q}`} icon={ShieldCheck} active={here("/cms/compliance")}>{t("Compliance")}</NavLink>
               <NavLink href={`/cms/legal/?${q}`} icon={FileSignature} active={here("/cms/legal")}>{t("Legal pages")}</NavLink>
               <NavLink href={`/cms/cookies/?${q}`} icon={Cookie} active={here("/cms/cookies")}>{t("Cookie banner")}</NavLink>

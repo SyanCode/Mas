@@ -128,6 +128,7 @@ def simple_page(title: str, message: str, back: str = "", accent: str = "#6366f1
 class Maintenance:
     def __init__(self, host: Host, config: Config, db: Database, deployer: Deployer) -> None:
         self.host, self.config, self.db, self.deployer = host, config, db, deployer
+        self.extra_rules = lambda app: ""  # nginx lines of the CMS (mas.siterules) written in the same snippet
         self.root = f"{config.pages_dir.rstrip('/')}/maintenance"
 
     # -- pages ------------------------------------------------------------------------------
@@ -378,16 +379,24 @@ class Maintenance:
     def apply(self) -> None:
         """Write the maps and the snippets of every site in maintenance; test, reload; restore if refused."""
         states = self._states()
-        wanted = {f"{SNIPPETS_DIR}/{app['id']}.conf": self._snippet(app, st) for app, st in states}
+        in_maintenance = {app["id"]: st for app, st in states}
+        wanted: dict[str, str] = {}
+        for app in self.db.list_apps():
+            st = in_maintenance.get(app["id"])
+            extra = self.extra_rules(app) if app.get("domain") else ""
+            text = (self._snippet(app, st) if st else "") + extra
+            if text:
+                wanted[f"{SNIPPETS_DIR}/{app['id']}.conf"] = text
         changes: dict[str, str | None] = {MAPS_PATH: self._maps(states) if states else None}
         for path in self.host.glob(f"{SNIPPETS_DIR}/*.conf"):
             if path not in wanted:
                 changes[path] = None
         changes.update(wanted)
-        for app, _ in states:
-            patched = self._include_vhost(app["id"])
+        for path in wanted:
+            app_id = path.rsplit("/", 1)[1][: -len(".conf")]
+            patched = self._include_vhost(app_id)
             if patched is not None:
-                changes[vhost_paths(app["id"])[0]] = patched
+                changes[vhost_paths(app_id)[0]] = patched
         before = {path: self.host.read_text(path) for path in changes}
         if all(before[p] == c for p, c in changes.items()):
             return

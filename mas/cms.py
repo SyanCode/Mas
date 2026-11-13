@@ -674,6 +674,7 @@ class CmsManager:
         self.notifier = None  # mas.notify.Notifier, set by the dashboard
         self._overviews: dict[str, tuple[float, dict]] = {}  # the dashboard asks again and again: 30 s
         self._compat: dict[str, tuple[float, dict]] = {}
+        self._searches: dict[str, tuple[float, str, list[dict]]] = {}
 
     def _store(self, app: dict) -> cms_supabase.SupabaseStore:
         """Supabase of the app: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in its environment, else this server's."""
@@ -1175,6 +1176,96 @@ class CmsManager:
                     raise CmsError("invalid file name")
                 changes[f"{folder}/{name}"] = text.encode()
             return self._commit(gh, app, changes, "cms(legal)", note, "legal pages", username, head, [])
+
+    # -- search in the content ----------------------------------------------------------------------
+
+    SEARCH_ENTRIES = 150  # bodies read per collection: each one is a GitHub call, kept for ten minutes
+
+    @staticmethod
+    def _flat(value: Any, out: list[str]) -> None:
+        if isinstance(value, str):
+            out.append(value)
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            out.append(str(value))
+        elif isinstance(value, list):
+            for v in value:
+                CmsManager._flat(v, out)
+        elif isinstance(value, dict):
+            for v in value.values():
+                CmsManager._flat(v, out)
+
+    def _search_docs(self, app_id: str) -> list[dict]:
+        gh, app = self._target(app_id)
+        schema, head = self.schema(app_id)
+        cached = self._searches.get(app_id)
+        if cached and cached[1] == head and cached[0] > time.time():
+            return cached[2]
+        jobs: list[tuple[str, dict | None, str, str, str]] = []  # (kind, collection, id, slug, file)
+        docs: list[dict] = []
+        for page in schema["pages"]:
+            jobs.append(("page", None, page["id"], page["id"], page["file"]))
+        for c in schema["collections"]:
+            if c["storage"] == "git":
+                for e in self._entries(gh, app, c, head)[1][: self.SEARCH_ENTRIES]:
+                    jobs.append(("entry", c, c["id"], e["slug"], f"{c['dir']}/{e['slug']}.json"))
+            else:
+                try:
+                    for row in self._store(app).list(c)[: self.SEARCH_ENTRIES]:
+                        parts: list[str] = []
+                        self._flat({k: v for k, v in row.items() if k not in ("slug", "updated_at")}, parts)
+                        docs.append({"kind": "entry", "cid": c["id"], "collection": c["label"], "slug": row["slug"],
+                                     "title": str(row.get(c["title_field"]) or row["slug"]), "text": " · ".join(parts), "status": None})
+                except CmsError:
+                    continue
+
+        def read(job):
+            kind, c, ident, slug, file = job
+            try:
+                raw, _ = gh.read_file(app["installation_id"], app["repo"], file, head)
+                data = self._decode(raw, file) if raw is not None else {}
+            except (GitHubError, CmsError):
+                return None
+            fields = (c["fields"] if c else next(p["fields"] for p in schema["pages"] if p["id"] == ident))
+            parts: list[str] = []
+            for f in fields:
+                if f["type"] in ("image", "color", "boolean", "url", "email"):
+                    continue
+                self._flat(data.get(f["key"]), parts)
+            title = str(data.get(c["title_field"]) or slug) if c else next(p["label"] for p in schema["pages"] if p["id"] == ident)
+            status = data.get("status") if c and c["drafts"] else None
+            return {"kind": kind, "cid": ident, "collection": c["label"] if c else "", "slug": slug, "title": title,
+                    "text": " · ".join(parts), "status": status}
+
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            docs += [d for d in pool.map(read, jobs) if d]
+        for d in docs:
+            d["hay"] = f"{d['title']} {d['text']}".lower()
+        self._searches[app_id] = (time.time() + 600, head, docs)
+        return docs
+
+    def search(self, app_id: str, query: str, limit: int = 20) -> list[dict]:
+        """Entries and pages whose words contain every word of the query, the best first, with a short extract."""
+        words = [w for w in query.lower().split() if w][:6]
+        if not words or sum(len(w) for w in words) < 2:
+            return []
+        hits = []
+        for d in self._search_docs(app_id):
+            if not all(w in d["hay"] for w in words):
+                continue
+            title = d["title"].lower()
+            score = 10 * sum(w in title for w in words) + min(5, d["hay"].count(words[0]))
+            text = d["text"]
+            low = text.lower()
+            i = low.find(words[0]) if len(low) == len(text) else -1
+            if i < 0:
+                extract = text[:120]
+            else:
+                a = max(0, i - 40)
+                extract = ("…" if a else "") + text[a: a + 140].strip() + ("…" if a + 140 < len(text) else "")
+            hits.append((score, {k: d[k] for k in ("kind", "cid", "collection", "slug", "title", "status")} | {"extract": extract}))
+        hits.sort(key=lambda h: -h[0])
+        return [h[1] for h in hits[:limit]]
 
     # -- backups: every file the CMS manages, and putting them back ---------------------------------
 

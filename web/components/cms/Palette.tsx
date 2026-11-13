@@ -2,13 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, BarChart3, Bell, ClipboardList, Cookie, FileSignature, FileText, HeartPulse, Image as ImageIcon, LayoutDashboard, Newspaper, Plus, Search, ShieldCheck, Users } from "lucide-react";
+import { Activity, Archive, BarChart3, Bell, ClipboardList, Cookie, FileSignature, FileText, HeartPulse, Image as ImageIcon, LayoutDashboard, Newspaper, Plus, ScanSearch, Search, ShieldCheck, Users } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/cms/ui/dialog";
 import { api, type CmsCollection, type CmsOverview, type CmsSite } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-interface Item { key: string; label: string; hint?: string; icon: typeof Search; href: string }
+interface Item { key: string; label: string; hint?: string; extract?: string; icon: typeof Search; href: string }
+interface Hit { kind: "page" | "entry"; cid: string; collection: string; slug: string; title: string; status: string | null; extract: string }
 
 /** ⌘K / Ctrl+K: jump to a page, a collection, an entry, or start a new entry. */
 export function Palette({ open, onClose, site, sites, overview, admin }: {
@@ -19,6 +20,7 @@ export function Palette({ open, onClose, site, sites, overview, admin }: {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [entries, setEntries] = useState<{ collection: CmsCollection; slug: string; title: string }[]>([]);
+  const [hits, setHits] = useState<Hit[]>([]);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -30,6 +32,17 @@ export function Palette({ open, onClose, site, sites, overview, admin }: {
       ).catch(() => setEntries([]));
     }
   }, [open, site]);
+
+  // the words inside the content, not only the titles
+  useEffect(() => {
+    const q = query.trim();
+    if (!open || !site || q.length < 3) { setHits([]); return; }
+    let live = true;
+    const timer = setTimeout(() => {
+      api<Hit[]>(`/cms/sites/${encodeURIComponent(site.id)}/search?q=${encodeURIComponent(q)}`).then((h) => live && setHits(h)).catch(() => live && setHits([]));
+    }, 250);
+    return () => { live = false; clearTimeout(timer); };
+  }, [query, open, site]);
 
   const items = useMemo<Item[]>(() => {
     if (!site) return [];
@@ -45,10 +58,12 @@ export function Palette({ open, onClose, site, sites, overview, admin }: {
       { key: "media", label: t("Media"), icon: ImageIcon, href: `/cms/media/?${q}` },
       { key: "stats", label: t("Statistics"), icon: BarChart3, href: `/cms/stats/?${q}` },
       { key: "up", label: t("Availability"), icon: HeartPulse, href: `/cms/uptime/?${q}` },
+      { key: "seo", label: t("Search engines"), icon: ScanSearch, href: `/cms/seo/?${q}` },
       { key: "comp", label: t("Compliance"), icon: ShieldCheck, href: `/cms/compliance/?${q}` },
       { key: "legal", label: t("Legal pages"), icon: FileSignature, href: `/cms/legal/?${q}` },
       { key: "cook", label: t("Cookie banner"), icon: Cookie, href: `/cms/cookies/?${q}` },
       { key: "hist", label: t("History"), icon: Activity, href: `/cms/activity/?${q}` },
+      ...(admin ? [{ key: "backups", label: t("Backups"), icon: Archive, href: `/cms/backups/?${q}` }] : []),
       ...(admin ? [{ key: "users", label: t("Users"), icon: Users, href: "/cms/users/" }, { key: "notif", label: t("Notifications"), icon: Bell, href: `/cms/notifications/?${q}` }] : []),
       ...sites.filter((s) => s.id !== site.id).map((s) => ({ key: `s-${s.id}`, label: s.name, hint: t("Switch site"), icon: LayoutDashboard, href: `/cms/?app=${encodeURIComponent(s.id)}` })),
     ];
@@ -57,8 +72,15 @@ export function Palette({ open, onClose, site, sites, overview, admin }: {
 
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return items.filter((i) => words.every((w) => `${i.label} ${i.hint ?? ""}`.toLowerCase().includes(w))).slice(0, 30);
-  }, [items, query]);
+    const byTitle = items.filter((i) => words.every((w) => `${i.label} ${i.hint ?? ""}`.toLowerCase().includes(w))).slice(0, 30);
+    const q = site ? `app=${encodeURIComponent(site.id)}` : "";
+    const seen = new Set(byTitle.map((i) => i.href));
+    const inside: Item[] = hits.map((h) => ({
+      key: `h-${h.cid}-${h.slug}`, label: h.title, hint: h.collection || t("Pages"), extract: h.extract, icon: h.kind === "page" ? FileText : ClipboardList,
+      href: h.kind === "page" ? `/cms/pages/?${q}&p=${encodeURIComponent(h.cid)}` : `/cms/entry/?${q}&c=${encodeURIComponent(h.cid)}&slug=${encodeURIComponent(h.slug)}`,
+    })).filter((i) => !seen.has(i.href));
+    return [...byTitle, ...inside];
+  }, [items, query, hits, site, t]);
   useEffect(() => setActive(0), [query]);
 
   const go = (item: Item | undefined) => {
@@ -88,7 +110,7 @@ export function Palette({ open, onClose, site, sites, overview, admin }: {
             <li key={i.key} role="option" aria-selected={idx === active} onMouseEnter={() => setActive(idx)} onClick={() => go(i)}
               className={cn("flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-sm", idx === active && "bg-accent")}>
               <i.icon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate">{i.label}</span>
+              <span className="min-w-0 flex-1"><span className="block truncate">{i.label}</span>{i.extract && <span className="block truncate text-xs text-muted-foreground">{i.extract}</span>}</span>
               {i.hint && <span className="truncate text-xs text-muted-foreground">{i.hint}</span>}
             </li>
           ))}
