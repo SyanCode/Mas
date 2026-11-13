@@ -423,6 +423,16 @@ an administrator can change it later from the users list.
   language, viewport, images without alt text, canonical address, `noindex`, social preview, a
   `robots.txt` that blocks everything, a missing sitemap, `http://` not redirecting to `https://`.
   The Google-style snippet of each page is shown.
+  For titles and descriptions that are missing, too short or too long, Mas **suggests wording**
+  taken from the page itself (first paragraph, heading), with a copy button.
+- **Optimize** (administrators): *Fix with Mas* / *Optimize now* turns on a `robots.txt` and a
+  `sitemap.xml` in one step: the pages found on the live site are listed, collection entries are
+  added by a pattern Mas guesses from the site's own links (`/blog/{slug}`), a `robots.txt` that blocks
+  everything is replaced, and the sitemap is announced in `robots.txt`. The look runs again after.
+- **While writing** an entry, a *Search engines* box shows the Google-style preview, a score and checks
+  (title and description length, 300 words, subheadings, short address, an optional focus keyword in
+  the title, description and first 100 words) and writes the description from the text on request.
+  It finds the description field by its name (`description`, `excerpt`, `summary`, `intro`…).
 - **What Mas writes for the site** (administrators; apps Mas deploys, with a domain): **redirects**
   (`/old` to `/new` or to a full address, 301 or 302; `/blog/*` moves a whole section), a
   **robots.txt** (replaces the repository's file; default text points to the sitemap) and a

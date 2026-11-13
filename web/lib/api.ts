@@ -560,7 +560,7 @@ export function timeAgo(iso: string): string {
 // -- search engines (redirects, robots.txt, sitemap, SEO look) --------------------------
 
 export interface SeoIssue { id: string; level: "error" | "warn" | "info"; title: string; fix: string; vars?: Record<string, string | number> }
-export interface SeoPageResult { url: string; status: number; title: string; description?: string; issues: SeoIssue[] }
+export interface SeoPageResult { url: string; status: number; title: string; description?: string; issues: SeoIssue[]; suggestions?: { title?: string; description?: string } }
 export interface SeoAudit {
   domain: string; reachable: boolean; score: number; site: SeoIssue[]; pages: SeoPageResult[]; at?: number;
   counts?: { error: number; warn: number; info: number };

@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from mas import auth, cms_backup, preview as preview_mod, cookies as cookies_mod, legal as legal_mod, seo as seo_mod
+from mas import auth, cms_backup, siterules as siterules_mod, preview as preview_mod, cookies as cookies_mod, legal as legal_mod, seo as seo_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import EDITOR_ROLES, Database
 from mas.geo import ATTRIBUTION, GeoError
@@ -48,6 +48,10 @@ class InviteBody(BaseModel):
     apps: list[str] = Field(default_factory=list, max_length=500)
     note: str = Field(default="", max_length=100)  # who it is for, shown in the list
     days: int = Field(default=7, ge=1, le=30)
+
+
+class OptimizeBody(BaseModel):
+    fixes: list[str] = Field(default_factory=lambda: list(siterules_mod.FIXES), max_length=4)
 
 
 class PreviewBody(BaseModel):
@@ -781,6 +785,37 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
                         f"sitemap {'on' if state['sitemap']['enabled'] else 'off'}")
         return state
 
+    @app.post("/api/cms/sites/{app_id}/seo/optimize")
+    async def seo_optimize(app_id: str, body: OptimizeBody, s=Depends(current_session)) -> dict:
+        """Do what Mas can about the points of the SEO look: robots.txt and the sitemap, in one step."""
+        target = app_exists(app_id)
+        if rules is None or not target["domain"]:
+            raise HTTPException(400, "give the site a domain first")
+        fixes = [f for f in dict.fromkeys(body.fixes) if f in siterules_mod.FIXES]
+        if not fixes:
+            raise HTTPException(400, "nothing to optimize")
+        key = f"seo_audit:{app_id}"
+        last = json.loads(db.get_setting(key) or "null")
+        if last is None:
+            last = await asyncio.to_thread(seo_mod.audit, target["domain"], seo_fetch or seo_mod.http_fetch, target["name"])
+            last["at"] = time.time()
+            db.set_setting(key, json.dumps(last))
+        collections: list[dict] = []
+        if "sitemap" in fixes:
+            try:
+                collections = (await asyncio.to_thread(manager.load, app_id))["collections"]
+            except CmsError:
+                collections = []
+        new = siterules_mod.optimized(rules.get(app_id), fixes, target["domain"], last.get("paths", []), collections)
+        try:
+            state = await asyncio.to_thread(call, rules.put, app_id, new)
+        except HTTPException as exc:
+            db.audit(s.username, "cms-seo-optimize", False, service_id=app_id, detail=str(exc.detail)[:500])
+            raise
+        db.audit(s.username, "cms-seo-optimize", True, service_id=app_id, detail=", ".join(fixes))
+        db.set_setting(key, None)  # what it said is out of date: look again
+        return {"applied": fixes, "state": state}
+
     @app.post("/api/cms/sites/{app_id}/seo/audit")
     async def seo_audit(app_id: str, s=Depends(any_session)) -> dict:
         target = site(s, app_id)
@@ -791,7 +826,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         if last and time.time() - last.get("at", 0) < 20:
             return last
         fetch = seo_fetch or seo_mod.http_fetch
-        result = await asyncio.to_thread(seo_mod.audit, target["domain"], fetch)
+        result = await asyncio.to_thread(seo_mod.audit, target["domain"], fetch, target["name"])
         result["at"] = time.time()
         db.set_setting(key, json.dumps(result))
         return result

@@ -1,5 +1,6 @@
 "use client";
 
+import { SeoPanel } from "@/components/cms/SeoPanel";
 import { DatePicker } from "@/components/Pickers";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -208,6 +209,7 @@ function Editor() {
                 </div>
               </CardContent>
             </Card>
+            {collection && <SeoPanel collection={collection} values={values} slug={slug ?? address} url={site.url} onChange={(k, v) => setValues((cur) => ({ ...cur, [k]: v }))} />}
             {site.url && slug && (!drafts || origStatus === "published") && (
               <a href={site.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ExternalLink className="size-3.5" />{t("View site")}</a>
             )}
