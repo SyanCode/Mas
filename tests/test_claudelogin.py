@@ -36,7 +36,7 @@ def test_link_then_code_gives_the_token(login):
 def test_wrong_code_and_bad_input(login):
     cl, _ = login
     cl.start()
-    with pytest.raises(LoginError, match="did not accept"):
+    with pytest.raises(LoginError, match="did not give a token"):
         cl.finish("WRONG-CODE")
     cl.start()
     with pytest.raises(LoginError, match="does not look like"):
@@ -70,3 +70,13 @@ def test_extract_token_waits_for_the_end_of_the_token():
     assert extract_token(f"{token} Store this", False) == token
     assert extract_token(token, True) == token  # the CLI exited
     assert extract_token("sk-ant-oat01-short\n\nx", False) is None
+
+
+def test_flat_fallback_and_shape():
+    from mas.claudelogin import extract_token, shape
+    token = "sk-ant-oat01-" + "Qz9" * 30
+    weird = f"Your token:\nsk-ant-\noat01-{token[13:50]}\n  │ {token[50:]} │\nStore this token securely."
+    assert extract_token(weird, False) == token
+    assert extract_token(f"{token}Storethistokensecurely.", False) == token
+    out = shape(f"a\n{token}\nStore this")
+    assert token not in out and "sk-ant-oat01-<" in out and "⏎" in out
