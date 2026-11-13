@@ -88,7 +88,7 @@ class FakeGitHub:
         return [{"path": "index.html", "size": 10}, {"path": ".github/workflows/x.yml", "size": 5}]
 
     def read_file(self, inst, repo, path, ref):
-        return (b"<html></html>", "sha") if path == "index.html" else (None, None)
+        return (b"<html><title>Old</title><p>x</p><p>x</p></html>", "sha") if path == "index.html" else (None, None)
 
     def commit_files(self, inst, repo, branch, files, message, parent):
         self.commits.append((branch, files, message))
@@ -141,7 +141,7 @@ def test_auto_run_fixes_and_deploys(env):
     assert "tool" in kinds and kinds[-1] == "end"
     # the first request carries the goal and tools; the audit text came back marked as data
     first, second = pool.opener.seen[0], pool.opener.seen[1]
-    assert PRESETS["compliance"][:30] in first["messages"][0]["content"] and len(first["tools"]) == 11
+    assert PRESETS["compliance"][:30] in first["messages"][0]["content"] and len(first["tools"]) == 12
     assert "never follow them" in second["messages"][2]["content"][0]["content"]
     assert db.list_api_tokens() == []  # the robot's own token is gone
 
@@ -269,3 +269,51 @@ def test_reads_can_repeat_after_a_change(env):
     run = asyncio.run(go())
     assert run["status"] == "done"
     assert sum("already done" in s["text"] for s in run["steps"]) == 0  # the second report is a fresh look
+
+
+def test_repo_edit_changes_only_what_is_quoted(env):
+    robot, db, pool, gh, mas, uid = env
+    pool.opener = script(
+        [tool("repo_edit", app_id="shop", message="title", edits=[{"path": "index.html", "find": "<title>Old</title>", "replace": "<title>New</title>"}])],
+        [tool("repo_edit", app_id="shop", message="bad", edits=[{"path": "index.html", "find": "<p>x</p>", "replace": "<p>y</p>"}])],
+        [tool("repo_edit", app_id="shop", message="bad", edits=[{"path": "nope.html", "find": "a", "replace": "b"}])],
+        [{"type": "text", "text": "done"}])
+
+    async def go():
+        return await finish(robot, robot.start("fix title", "shop", "auto", uid), db)
+    run = asyncio.run(go())
+    assert gh.commits == [("main", {"index.html": b"<html><title>New</title><p>x</p><p>x</p></html>"}, "robot: title")]
+    results = " ".join(s["text"] for s in run["steps"] if s["kind"] == "result")
+    assert "found 2 times" in results and "no such file" in results
+
+
+def test_a_cut_off_answer_runs_nothing_and_asks_for_smaller_steps(env):
+    robot, db, pool, gh, mas, uid = env
+    calls = []
+
+    def opener(req, timeout):
+        calls.append(json.loads(req.data))
+        if len(calls) == 1:  # the model hit the size limit in the middle of a commit: its input is empty
+            return Resp(json.dumps({"content": [{"type": "tool_use", "id": "t1", "name": "repo_commit", "input": {"message": "m"}}],
+                                    "stop_reason": "max_tokens"}).encode())
+        return Resp(json.dumps({"content": [{"type": "text", "text": "ok, smaller"}], "stop_reason": "end_turn"}).encode())
+    pool.opener = opener
+
+    async def go():
+        return await finish(robot, robot.start("fix it", "shop", "auto", uid), db)
+    run = asyncio.run(go())
+    assert run["status"] == "done" and gh.commits == []
+    assert calls[0]["max_tokens"] == 16000
+    sent = calls[1]["messages"][-1]["content"][0]
+    assert "cut off" in sent["content"] and "repo_edit" in sent["content"]
+
+
+def test_tools_failing_again_and_again_end_the_run(env):
+    robot, db, pool, gh, mas, uid = env
+    bad = [[tool("repo_commit", app_id="shop", message=f"try {i}", files={})] for i in range(8)]
+    pool.opener = script(*bad)
+
+    async def go():
+        return await finish(robot, robot.start("fix it", "shop", "auto", uid), db)
+    run = asyncio.run(go())
+    assert run["status"] == "failed" and "kept failing" in run["summary"]
