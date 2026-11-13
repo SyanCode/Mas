@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from mas import auth, cms_backup, cookies as cookies_mod, legal as legal_mod
+from mas import auth, cms_backup, preview as preview_mod, cookies as cookies_mod, legal as legal_mod, seo as seo_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
 from mas.db import EDITOR_ROLES, Database
 from mas.geo import ATTRIBUTION, GeoError
@@ -47,6 +47,10 @@ class InviteBody(BaseModel):
     role: str = Field(default="editor", max_length=10)
     apps: list[str] = Field(default_factory=list, max_length=500)
     note: str = Field(default="", max_length=100)  # who it is for, shown in the list
+    days: int = Field(default=7, ge=1, le=30)
+
+
+class PreviewBody(BaseModel):
     days: int = Field(default=7, ge=1, le=30)
 
 
@@ -104,7 +108,8 @@ class NewEntryBody(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, any_session: Callable, current_session: Callable,
-             manager: CmsManager, stats: SiteStats | None = None, geo=None, compliance=None, notifier=None, uptime=None) -> None:
+             manager: CmsManager, stats: SiteStats | None = None, geo=None, compliance=None, notifier=None, uptime=None,
+             rules=None, seo_fetch=None) -> None:
 
     def call(fn, *args):
         try:
@@ -734,8 +739,86 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             result.update(commit=restored["commit"], files=restored["files"])
         if body.data:
             result["rows"] = await asyncio.to_thread(call, cms_backup.restore_data, db, app_id, data)
+            if rules is not None:  # redirects, robots.txt and sitemap come back with the data
+                try:
+                    await asyncio.to_thread(rules.refresh, app_id)
+                except Exception:  # noqa: BLE001 - the data is restored; nginx can be refreshed from the SEO page
+                    result["nginx"] = "not refreshed"
         db.audit(s.username, "cms-backup-restore", True, service_id=app_id, detail=f"{name} (safety {kept})")
         return result
+
+    # -- search engines: redirects, robots.txt, sitemap and a look at the live site -------------------
+
+    @app.get("/api/cms/sites/{app_id}/seo")
+    async def seo_get(app_id: str, s=Depends(any_session)) -> dict:
+        target = site(s, app_id)
+        last = json.loads(db.get_setting(f"seo_audit:{app_id}") or "null")
+        state = await asyncio.to_thread(call, rules.state, app_id) if rules else None
+        if state is not None and s.role == "author":
+            state = {k: v for k, v in state.items() if k != "redirects"}
+        collections = []
+        try:
+            schema, _ = await asyncio.to_thread(manager.schema, app_id)
+            collections = [{"id": c["id"], "label": c["label"]} for c in schema["collections"] if c["storage"] == "git"]
+        except CmsError:
+            pass
+        return {"domain": target["domain"], "rules": state, "audit": last, "collections": collections}
+
+    @app.put("/api/cms/sites/{app_id}/seo/rules")
+    async def seo_rules(app_id: str, body: dict, s=Depends(current_session)) -> dict:
+        if db.get_app(app_id) is None or rules is None:
+            raise HTTPException(404, "unknown site")
+        try:
+            state = await asyncio.to_thread(call, rules.put, app_id, body)
+        except HTTPException as exc:
+            db.audit(s.username, "cms-seo-rules", False, service_id=app_id, detail=str(exc.detail)[:500])
+            raise
+        except Exception as exc:  # nginx refused the file: the previous settings were kept
+            db.audit(s.username, "cms-seo-rules", False, service_id=app_id, detail=str(exc)[:500])
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "cms-seo-rules", True, service_id=app_id,
+                 detail=f"{len(state['redirects'])} redirects, robots {'on' if state['robots']['enabled'] else 'off'}, "
+                        f"sitemap {'on' if state['sitemap']['enabled'] else 'off'}")
+        return state
+
+    @app.post("/api/cms/sites/{app_id}/seo/audit")
+    async def seo_audit(app_id: str, s=Depends(any_session)) -> dict:
+        target = site(s, app_id)
+        if not target["domain"]:
+            raise HTTPException(400, "give the site a domain first")
+        key = f"seo_audit:{app_id}"
+        last = json.loads(db.get_setting(key) or "null")
+        if last and time.time() - last.get("at", 0) < 20:
+            return last
+        fetch = seo_fetch or seo_mod.http_fetch
+        result = await asyncio.to_thread(seo_mod.audit, target["domain"], fetch)
+        result["at"] = time.time()
+        db.set_setting(key, json.dumps(result))
+        return result
+
+    # -- private preview links ------------------------------------------------------------------
+
+    @app.post("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}/preview")
+    async def preview_link(app_id: str, cid: str, slug: str, body: PreviewBody, s=Depends(any_session)) -> dict:
+        """A link that shows this entry, draft included, to someone without an account."""
+        site(s, app_id)
+        await asyncio.to_thread(call, manager.load_entry, app_id, cid, slug)  # it exists, and the schema knows it
+        token, expires = preview_mod.make(db, app_id, cid, slug, body.days)
+        db.audit(s.username, "cms-preview", True, service_id=app_id, detail=f"{cid}/{slug} {body.days} d")
+        return {"path": f"/preview/{token}", "expires_at": expires}
+
+    @app.post("/api/cms/sites/{app_id}/preview/revoke")
+    def preview_revoke(app_id: str, s=Depends(current_session)) -> dict:
+        app_exists(app_id)
+        preview_mod.revoke(db, app_id)
+        db.audit(s.username, "cms-preview-revoke", True, service_id=app_id)
+        return {"ok": True}
+
+    @app.get("/api/cms/sites/{app_id}/search")
+    async def search(app_id: str, q: str = Query(max_length=100), s=Depends(any_session)) -> list[dict]:
+        """Full-text search in the pages and entries of one site (the command palette)."""
+        site(s, app_id)
+        return await asyncio.to_thread(call, manager.search, app_id, q)
 
     @app.get("/api/cms/sites/{app_id}/overview")
     async def overview(app_id: str, s=Depends(any_session)) -> dict:

@@ -556,3 +556,23 @@ export function timeAgo(iso: string): string {
   if (s < 86400) return tr("{n} h ago", { n: Math.floor(s / 3600) });
   return tr("{n} d ago", { n: Math.floor(s / 86400) });
 }
+
+// -- search engines (redirects, robots.txt, sitemap, SEO look) --------------------------
+
+export interface SeoIssue { id: string; level: "error" | "warn" | "info"; title: string; fix: string; vars?: Record<string, string | number> }
+export interface SeoPageResult { url: string; status: number; title: string; description?: string; issues: SeoIssue[] }
+export interface SeoAudit {
+  domain: string; reachable: boolean; score: number; site: SeoIssue[]; pages: SeoPageResult[]; at?: number;
+  counts?: { error: number; warn: number; info: number };
+}
+export interface SiteRulesConfig {
+  redirects: { from: string; to: string; code: 301 | 302 }[];
+  robots: { enabled: boolean; text: string };
+  sitemap: { enabled: boolean; pages: string[]; collections: Record<string, string> };
+}
+export interface SeoState {
+  domain: string | null;
+  rules: (Partial<SiteRulesConfig> & { supported: boolean; default_robots: string }) | null;
+  audit: SeoAudit | null;
+  collections: { id: string; label: string }[];
+}

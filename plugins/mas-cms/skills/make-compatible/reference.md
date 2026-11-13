@@ -392,4 +392,50 @@ not that the site is legal: how data is handled behind the site (register of pro
 with processors, retention, rights requests, breach procedure) stays on a checklist for a human.
 Mas does not give legal advice.
 
+### Backups
+
+*Backups* (administrators) makes a zip of one site: its content files (`mas.cms.json`, pages,
+entries of the collections kept in the repository, the media folders) and what Mas keeps about it
+(daily statistics, goals, cookie proofs and banner versions, compliance audits, uptime, the settings
+of the banner, goals, status page, redirects). Not in a backup: notification secrets (sealed with the
+server's key), visitor hashes and the list of CMS commits. Backups stay on the server
+(`cms-backups/<site>/`), can be downloaded and uploaded again (a backup restores into the site it
+came from only), and a switch makes one every day (the 14 latest automatic ones are kept).
+
+A restore asks what to put back (content and media, statistics and settings). The site as it is now is
+saved first, so a restore can be undone. Content comes back in **one commit** of files that differ
+from the repository; files created since are kept, and only paths the CMS itself writes are accepted.
+
+### Roles
+
+Three roles: **administrator**, **editor** (writes and publishes the sites they were given) and
+**author** (writes **drafts** only: cannot publish, schedule, edit what is online, delete, undo a
+change, or touch the cookie banner, goals, legal pages and audits; collections need `"drafts": true`
+for an author to write in them). The role is chosen when creating an account or an invitation, and
+an administrator can change it later from the users list.
+
+### Search engines
+
+*Search engines* in the sidebar has two parts.
+
+- **A look at the live site**: Mas reads the home page and a few pages of the sitemap and reports,
+  each with a fix: titles and descriptions (missing, too short or long, duplicated), headings, page
+  language, viewport, images without alt text, canonical address, `noindex`, social preview, a
+  `robots.txt` that blocks everything, a missing sitemap, `http://` not redirecting to `https://`.
+  The Google-style snippet of each page is shown.
+- **What Mas writes for the site** (administrators; apps Mas deploys, with a domain): **redirects**
+  (`/old` to `/new` or to a full address, 301 or 302; `/blog/*` moves a whole section), a
+  **robots.txt** (replaces the repository's file; default text points to the sitemap) and a
+  **sitemap.xml** (listed pages, plus one address per *published* entry of the collections you give a
+  pattern like `/blog/{slug}`; rewritten every 15 minutes). Paths are checked against a narrow
+  alphabet before they reach nginx; if `nginx -t` refuses the result, the previous settings are kept.
+
+### Preview links and search
+
+An entry has a **Copy a preview link** button: a signed link, valid 7 days, that shows the entry
+(draft included) to someone without an account, as plain content (not the site's design). Links are
+`noindex`, and an administrator can revoke every link of a site at once. The command palette (⌘K)
+searches the **words inside** the pages and entries of the site, not only the titles (the first 150
+entries of each collection are read and kept for ten minutes).
+
 Images of Supabase collections live in Supabase Storage and are not part of the media library.
