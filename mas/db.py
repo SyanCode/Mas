@@ -288,10 +288,12 @@ MIGRATIONS = [
     ("apps", "replica_of TEXT"),   # copy driven by another Mas: its name
     ("apps", "resources TEXT"),    # JSON {memory_mb, sleep_after_min, autoscale: {min, max}} (mas.resources)
     ("apps", "project TEXT"),      # id of the project (mas.projects) the app belongs to
+    ("invites", "role TEXT NOT NULL DEFAULT 'editor'"),
     ("apps", "pending TEXT"),
     ("apps", "pending_env TEXT"),  # JSON names of the variables a human must fill before the first build      # frozen app: JSON {sha, message, author, commits, at} of the pushes not built
 ]
-ROLES = ("admin", "editor")
+ROLES = ("admin", "editor", "author")  # author: writes drafts, an editor or an administrator publishes
+EDITOR_ROLES = ("editor", "author")
 API_TOKEN_SCOPES = ("read", "write", "create")  # create: write + new apps (allowed repositories)
 FOLDER_COLORS = ("zinc", "red", "orange", "amber", "emerald", "teal", "sky", "indigo", "violet", "pink")
 FOLDER_KINDS = ("app", "service")
@@ -445,6 +447,12 @@ class Database:
             return c.execute("SELECT 1 FROM app_access WHERE user_id = ? AND app_id = ?",
                              (user_id, app_id)).fetchone() is not None
 
+    def set_user_role(self, user_id: int, role: str) -> None:
+        if role not in EDITOR_ROLES:
+            raise ValueError(f"invalid role {role}")
+        with self.tx() as c:
+            c.execute("UPDATE users SET role = ? WHERE id = ? AND role != 'admin'", (role, user_id))
+
     def delete_user_by_id(self, user_id: int) -> bool:
         with self.tx() as c:
             return c.execute("DELETE FROM users WHERE id = ?", (user_id,)).rowcount > 0
@@ -452,11 +460,13 @@ class Database:
     # -- invites -----------------------------------------------------------
 
     def create_invite(self, token_hash: str, apps: list[str], note: str | None, created_by: str,
-                      expires_at: float) -> int:
+                      expires_at: float, role: str = "editor") -> int:
+        if role not in EDITOR_ROLES:
+            raise ValueError(f"invalid role {role}")
         with self.tx() as c:
-            cur = c.execute("INSERT INTO invites (token_hash, apps, note, created_by, created_at, expires_at) "
-                            "VALUES (?, ?, ?, ?, ?, ?)",
-                            (token_hash, json.dumps(apps), note, created_by, _now(), expires_at))
+            cur = c.execute("INSERT INTO invites (token_hash, apps, note, created_by, created_at, expires_at, role) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (token_hash, json.dumps(apps), note, created_by, _now(), expires_at, role))
             return int(cur.lastrowid)
 
     def pending_invites(self) -> list[dict]:

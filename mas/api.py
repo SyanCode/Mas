@@ -500,7 +500,8 @@ def create_app(
             invite = db.consume_invite(invite_hash, username)
             if invite is None:
                 raise HTTPException(403, "this invitation link was already used or has expired")
-        user_id = db.create_user(username, auth.hash_password(body.password), role="editor")
+        role = invite["role"] if invite else "editor"
+        user_id = db.create_user(username, auth.hash_password(body.password), role=role)
         if invite:
             db.set_user_apps(user_id, [a for a in invite["apps"] if db.get_app(a)])
         db.audit(username, "signup", True,
@@ -508,7 +509,7 @@ def create_app(
         new = auth.create_session(db, user_id, session_ttl, ip)
         response.set_cookie(cookie_name, new.token, max_age=session_ttl, httponly=True,
                             secure=config.cookie_secure, samesite="strict", path="/")
-        return {"username": username, "csrf": new.csrf, "totp_enabled": False, "role": "editor",
+        return {"username": username, "csrf": new.csrf, "totp_enabled": False, "role": role,
                 "version": __version__}
 
     @app.get("/api/signup/settings")

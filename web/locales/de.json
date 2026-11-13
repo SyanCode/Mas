@@ -1700,5 +1700,12 @@
   "Visits, goals, cookie proofs and settings of this site.": "Besuche, Ziele, Cookie-Nachweise und Einstellungen dieser Website.",
   "Backup restored.": "Sicherung wiederhergestellt.",
   "Delete this backup?": "Diese Sicherung löschen?",
-  "Backup deleted.": "Sicherung gelöscht."
+  "Backup deleted.": "Sicherung gelöscht.",
+  "Author": "Autor",
+  "Role changed.": "Rolle geändert.",
+  "Let them publish (editor)": "Veröffentlichen erlauben (Editor)",
+  "Drafts only (author)": "Nur Entwürfe (Autor)",
+  "Editor: writes and publishes": "Editor: schreibt und veröffentlicht",
+  "Author: writes drafts, an editor publishes": "Autor: schreibt Entwürfe, ein Editor veröffentlicht",
+  "Your account writes drafts: an editor changes what is already online.": "Ihr Konto schreibt Entwürfe: ein Editor ändert, was bereits online ist."
 }

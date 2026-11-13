@@ -41,7 +41,7 @@ export default function LoginPage() {
     try {
       const s = await api<{ role: string }>("/login", { method: "POST", body: { username, password, otp: needOtp ? otp : undefined } });
       const next = safeNext();
-      window.location.href = s.role === "editor" && !/^\/(cms|settings)/.test(next) ? "/cms/" : next;
+      window.location.href = s.role !== "admin" && !/^\/(cms|settings)/.test(next) ? "/cms/" : next;
     } catch (err) {
       const detail = (err as ApiError).detail;
       if (detail === "otp_required") {

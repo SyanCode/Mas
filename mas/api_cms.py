@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mas import auth, cms_backup, cookies as cookies_mod, legal as legal_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
-from mas.db import Database
+from mas.db import EDITOR_ROLES, Database
 from mas.geo import ATTRIBUTION, GeoError
 from mas.notify import EVENTS, NotifyError
 from mas.sitestats import SiteStats
@@ -28,6 +28,11 @@ MANUAL_CHECKS = ["register", "processors", "retention", "rights", "breach", "dpo
 
 class NewUser(BaseModel):
     username: str = Field(max_length=32)
+    role: str = Field(default="editor", max_length=10)  # editor | author
+
+
+class RoleBody(BaseModel):
+    role: str = Field(max_length=10)
 
 
 class AppIds(BaseModel):
@@ -39,6 +44,7 @@ class UserIds(BaseModel):
 
 
 class InviteBody(BaseModel):
+    role: str = Field(default="editor", max_length=10)
     apps: list[str] = Field(default_factory=list, max_length=500)
     note: str = Field(default="", max_length=100)  # who it is for, shown in the list
     days: int = Field(default=7, ge=1, le=30)
@@ -110,13 +116,13 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     def editor(user_id: int):
         user = db.get_user_by_id(user_id)
-        if user is None or user["role"] != "editor":
+        if user is None or user["role"] not in EDITOR_ROLES:
             raise HTTPException(404, "unknown editor")
         return user
 
     def user_payload(u) -> dict:
         return {"id": u["id"], "username": u["username"], "role": u["role"], "totp_enabled": bool(u["totp_secret"]),
-                "created_at": u["created_at"], "apps": db.user_apps(u["id"]) if u["role"] == "editor" else []}
+                "created_at": u["created_at"], "apps": db.user_apps(u["id"]) if u["role"] in EDITOR_ROLES else []}
 
     def new_password() -> str:
         return secrets.token_urlsafe(12)
@@ -134,10 +140,21 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             raise HTTPException(400, "username: 2-32 chars, lowercase letters, digits, . _ -")
         if db.get_user(username):
             raise HTTPException(409, f"{username} already exists")
+        if body.role not in EDITOR_ROLES:
+            raise HTTPException(400, "role: editor or author")
         password = new_password()
-        user_id = db.create_user(username, auth.hash_password(password), role="editor")
-        db.audit(s.username, "editor-create", True, detail=username)
+        user_id = db.create_user(username, auth.hash_password(password), role=body.role)
+        db.audit(s.username, "editor-create", True, detail=f"{username} ({body.role})")
         return {**user_payload(db.get_user_by_id(user_id)), "password": password}
+
+    @app.put("/api/users/{user_id}/role")
+    def set_role(user_id: int, body: RoleBody, s=Depends(current_session)) -> dict:
+        user = editor(user_id)
+        if body.role not in EDITOR_ROLES:
+            raise HTTPException(400, "role: editor or author")
+        db.set_user_role(user_id, body.role)
+        db.audit(s.username, "editor-role", True, detail=f"{user['username']}: {body.role}")
+        return user_payload(db.get_user_by_id(user_id))
 
     @app.post("/api/users/{user_id}/password")
     def reset_password(user_id: int, s=Depends(current_session)) -> dict:
@@ -174,7 +191,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/invites")
     def list_invites(_=Depends(current_session)) -> list[dict]:
-        return [{k: i[k] for k in ("id", "apps", "note", "created_by", "created_at", "expires_at")}
+        return [{k: i[k] for k in ("id", "apps", "note", "created_by", "created_at", "expires_at", "role")}
                 for i in db.pending_invites()]
 
     @app.post("/api/invites")
@@ -182,10 +199,12 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         unknown = [a for a in body.apps if db.get_app(a) is None]
         if unknown:
             raise HTTPException(400, f"unknown apps: {', '.join(unknown)}")
+        if body.role not in EDITOR_ROLES:
+            raise HTTPException(400, "role: editor or author")
         token = secrets.token_urlsafe(24)
         expires_at = time.time() + body.days * 86400
         invite_id = db.create_invite(auth.hash_token(token), body.apps, body.note.strip() or None, s.username,
-                                     expires_at)
+                                     expires_at, body.role)
         db.audit(s.username, "invite-create", True,
                  detail=f"#{invite_id} {body.note.strip()} → {', '.join(body.apps) or 'no site'}".strip())
         # URL fragments stay in the browser and are not sent in HTTP requests,
@@ -206,7 +225,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         check = await asyncio.to_thread(manager.check, app_id)
         allowed = set(db.app_editors(app_id))
         editors = [{"id": u["id"], "username": u["username"], "allowed": u["id"] in allowed}
-                   for u in db.list_users() if u["role"] == "editor"]
+                   for u in db.list_users() if u["role"] in EDITOR_ROLES]
         return {**check, "editors": editors}
 
     @app.put("/api/apps/{app_id}/cms/editors")
@@ -255,6 +274,11 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     # -- editing (editors and administrators) ------------------------------
 
+    def publisher(s) -> None:
+        """Authors write drafts: whatever goes live, or changes how the site behaves, is for an editor."""
+        if s.role == "author":
+            raise HTTPException(403, "your account can write drafts only: an editor publishes")
+
     def site(s, app_id: str) -> dict:
         target = db.get_app(app_id)
         if target is None or not db.can_edit(s.user_id, s.role, app_id):
@@ -292,6 +316,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.put("/api/cms/sites/{app_id}/goals")
     def goals_config(app_id: str, body: dict, s=Depends(any_session)) -> dict:
         """Pages that count as a goal ("/merci", "/blog/*") and the steps of the funnel."""
+        publisher(s)
         site(s, app_id)
 
         def clean(items, pattern) -> list[str]:
@@ -324,6 +349,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.put("/api/cms/sites/{app_id}/pages/{page_id}")
     async def save(app_id: str, page_id: str, body: SaveBody, s=Depends(any_session)) -> dict:
+        publisher(s)
         site(s, app_id)
         try:
             result = await asyncio.to_thread(call, manager.save, app_id, page_id, body.values, body.sha,
@@ -340,6 +366,11 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
                          new_slug: str | None = None, status: str | None = None,
                          publish_at: str | None = None) -> dict:
         site(s, app_id)
+        if s.role == "author":  # drafts only, and only drafts
+            if status != "draft":
+                raise HTTPException(403, "your account can write drafts only: an editor publishes")
+            if slug and (await asyncio.to_thread(call, manager.load_entry, app_id, cid, slug)).get("status") != "draft":
+                raise HTTPException(403, "this entry is published: an editor changes it")
         what = f"{cid}/{slug or new_slug or 'new'}"
         try:
             result = await asyncio.to_thread(call, manager.save_entry, app_id, cid, slug, values, sha, s.user_id,
@@ -370,6 +401,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.post("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}/status")
     async def entry_status(app_id: str, cid: str, slug: str, body: StatusBody, s=Depends(any_session)) -> dict:
         """Publish, unpublish or schedule an entry from the list, without opening it."""
+        publisher(s)
         site(s, app_id)
         try:
             result = await asyncio.to_thread(call, manager.set_status, app_id, cid, slug, body.status,
@@ -416,7 +448,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         return {"sites": sites_, "totals": totals,
                 "countries": [{"code": k, "visitors": v} for k, v in sorted(countries.items(), key=lambda kv: -kv[1])], "days": sorted(daily.values(), key=lambda r: r["day"]),
                 "scheduled": len(scheduled), "activity": activity,
-                "editors": len([u for u in db.list_users() if u["role"] == "editor"]) if s.role == "admin" else None}
+                "editors": len([u for u in db.list_users() if u["role"] in EDITOR_ROLES]) if s.role == "admin" else None}
 
     @app.get("/api/cms/activity")
     def activity(app_id: str | None = Query(None, max_length=100), limit: int = Query(100, ge=1, le=500),
@@ -455,6 +487,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.put("/api/cms/sites/{app_id}/cookies")
     def cookies_put(app_id: str, body: dict, s=Depends(any_session)) -> dict:
+        publisher(s)
         site(s, app_id)
         try:
             config = cookies_mod.save(db, app_id, body)
@@ -473,6 +506,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.post("/api/cms/sites/{app_id}/compliance/run")
     async def compliance_run(app_id: str, s=Depends(any_session)) -> dict:
+        publisher(s)
         target = site(s, app_id)
         if compliance is None or not target["domain"]:
             raise HTTPException(400, "the site needs a domain to be audited")
@@ -504,6 +538,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.put("/api/cms/sites/{app_id}/legal")
     def legal_put(app_id: str, body: dict, lang: str = Query("fr", max_length=2), s=Depends(any_session)) -> dict:
+        publisher(s)
         site(s, app_id)
         try:
             legal_mod.save(db, app_id, body)
@@ -515,6 +550,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.post("/api/cms/sites/{app_id}/legal/publish")
     async def legal_publish(app_id: str, body: dict, s=Depends(any_session)) -> dict:
         """Write the three pages as Markdown files in a folder of the repository."""
+        publisher(s)
         site(s, app_id)
         lang = str(body.get("lang", "fr"))
         docs = legal_payload(app_id, lang)["documents"]
@@ -532,6 +568,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.post("/api/cms/sites/{app_id}/changes/{change_id}/revert")
     async def revert(app_id: str, change_id: int, s=Depends(any_session)) -> dict:
         """Undo a change with a new commit (the history keeps both)."""
+        publisher(s)
         site(s, app_id)
         try:
             result = await asyncio.to_thread(call, manager.revert, app_id, change_id, s.username)
@@ -726,6 +763,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.post("/api/cms/sites/{app_id}/media/delete")
     async def media_delete(app_id: str, body: MediaRef, s=Depends(any_session)) -> dict:
+        publisher(s)
         site(s, app_id)
         result = await asyncio.to_thread(call, manager.delete_media, app_id, body.value, s.username)
         db.audit(s.username, "cms-media", True, service_id=app_id, detail=f"delete {body.value.rsplit('/', 1)[-1]}")
@@ -734,6 +772,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.delete("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}")
     async def delete_entry(app_id: str, cid: str, slug: str, sha: str = Query(max_length=64),
                            s=Depends(any_session)) -> dict:
+        publisher(s)
         site(s, app_id)
         try:
             result = await asyncio.to_thread(call, manager.delete_entry, app_id, cid, slug, sha, s.username)
