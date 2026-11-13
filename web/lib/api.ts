@@ -576,3 +576,12 @@ export interface SeoState {
   audit: SeoAudit | null;
   collections: { id: string; label: string }[];
 }
+
+// -- updating Mas ----------------------------------------------------------------------
+
+export interface UpdateStatus {
+  version: string; on_disk: string | null; restart_pending: boolean; branch: string | null; sha: string | null;
+  busy: boolean; behind: number; commits: { sha: string; message: string; date: string }[];
+  latest_version: string | null; unknown: boolean; checked_at: number | null; error: string | null; note?: string;
+}
+export interface UpdateProgress { state: "idle" | "running" | "done" | "failed"; log: string; from?: string }

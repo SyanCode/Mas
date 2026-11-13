@@ -1,5 +1,6 @@
 "use client";
 
+import { UpdateBanner } from "@/components/Update";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
@@ -182,7 +183,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <UserMenu session={session} />
             </div>
           </header>
-          <main className="mx-auto max-w-6xl px-5 py-10 sm:px-10">{children}</main>
+          <main className="mx-auto max-w-6xl px-5 py-10 sm:px-10">{!editor && <UpdateBanner />}{children}</main>
         </div>
       </div>
       {!editor && <CommandPalette open={palette} onClose={() => setPalette(false)} />}

@@ -1,5 +1,6 @@
 "use client";
 
+import { UpdateCard } from "@/components/Update";
 import { useEffect, useState, type FormEvent } from "react";
 import { Shell, useSession } from "@/components/Shell";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
@@ -845,6 +846,7 @@ function Settings() {
     <div className="space-y-4">
       <PageHeader eyebrow={t("Configuration")} title={t("Settings")} subtitle={t("Domains, GitHub, people and account security.")} />
       <AppearanceCard />
+      <UpdateCard />
       <DomainsCard />
       <GitHubCard />
       <PeopleCard />
