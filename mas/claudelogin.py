@@ -27,7 +27,8 @@ from mas.host import Host
 CANDIDATES = ("/usr/local/bin/claude", "/usr/bin/claude", "/root/.local/bin/claude", "/root/.npm-global/bin/claude")
 INSTALL = ["npm", "install", "-g", "@anthropic-ai/claude-code"]
 URL_RE = re.compile(r"https://[^\s\x1b\"'<>]*(?:claude\.(?:ai|com)|anthropic\.com)[^\s\x1b\"'<>]*")
-TOKEN_RE = re.compile(r"sk-ant-oat[0-9]*-[A-Za-z0-9_-]{20,}")
+TOKEN_START = re.compile(r"sk-ant-oat[0-9]*-")
+TOKEN_PART = re.compile(r"[A-Za-z0-9_-]+")
 CODE_RE = re.compile(r"^[A-Za-z0-9_#.:~-]{4,300}$")
 ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Za-z0-9]|[@-Z\\-_])")
 LIFETIME = 600
@@ -39,6 +40,31 @@ class LoginError(Exception):
 
 def clean(raw: bytes) -> str:
     return ANSI_RE.sub("", raw.decode("utf-8", "replace")).replace("\r", "")
+
+
+def extract_token(text: str, final: bool) -> str | None:
+    """The token printed by the CLI, even when the terminal broke it over several lines.
+
+    It ends at the first line that is not made of token characters (a blank line, the "store it securely" advice). While
+    the output is still arriving a last, unfinished line could be cut in the middle: it counts only once ``final``."""
+    m = TOKEN_START.search(text)
+    if not m:
+        return None
+    lines = text[m.start():].split("\n")
+    first = lines[0].split()
+    token = first[0] if first else ""
+    ended = len(first) > 1  # text after the token on its line: it ended there
+    for raw in lines[1:]:
+        if ended:
+            break
+        line = raw.strip()
+        if not TOKEN_PART.fullmatch(line):
+            ended = True  # a blank line, or the advice that follows
+            break
+        token += line
+    if not (ended or final):
+        return None
+    return token if len(token) >= 40 else None
 
 
 def binary(host: Host, override: str | None = None) -> str | None:
@@ -103,7 +129,7 @@ class ClaudeLogin:
         """Read the CLI's output until ``until(text)`` returns something, the CLI exits or the time is up."""
         end = time.monotonic() + timeout
         while time.monotonic() < end:
-            found = until(clean(s["buffer"]))
+            found = until(clean(s["buffer"]), False)
             if found:
                 return found
             ready, _, _ = select.select([s["fd"]], [], [], 0.2)
@@ -113,9 +139,9 @@ class ClaudeLogin:
                 except OSError:
                     chunk = b""
                 if not chunk:
-                    return until(clean(s["buffer"]))
+                    return until(clean(s["buffer"]), True)
                 s["buffer"] += chunk
-        return until(clean(s["buffer"]))
+        return until(clean(s["buffer"]), True)
 
     def start(self) -> str:
         """Start the CLI login and return the link to open."""
@@ -133,7 +159,7 @@ class ClaudeLogin:
                                     start_new_session=True, close_fds=True)
             os.close(slave)
             self._session = {"proc": proc, "fd": master, "buffer": b"", "started": time.monotonic()}
-            url = self._read(self._session, lambda text: (m := URL_RE.search(text)) and m.group(0), 25)
+            url = self._read(self._session, lambda text, final: (m := URL_RE.search(text)) and m.group(0), 25)
             if not url:
                 tail = clean(self._session["buffer"]).strip()[-300:]
                 self._close()
@@ -150,9 +176,7 @@ class ClaudeLogin:
             if not s or not self._alive():
                 self._close()
                 raise LoginError("no login is waiting: start again")
-            def find(text):
-                m = TOKEN_RE.search(text)
-                return m and m.group(0)
+            find = extract_token
             # The CLI's input line takes a quick burst for a paste: the code first, then Return on its own, a moment later
             # (and once more if nothing happened: some versions drop the first one).
             os.write(s["fd"], code.encode())
