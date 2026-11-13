@@ -84,8 +84,8 @@ export function DomainPicker({ suggestion, onChange }: { suggestion: string; onC
               className="mono min-w-0 flex-1 bg-white/80 px-3 py-2 text-sm outline-none dark:bg-black/40"
             />
             <span className="flex items-center bg-zinc-100 px-1 text-zinc-500 dark:bg-white/[0.04]">.</span>
-            <Select value={zone} onChange={(e) => setZone(e.target.value)} aria-label={t("Domain")} className="mono !w-auto max-w-[55%] !rounded-none !border-0 !bg-zinc-100 !ring-0 dark:!bg-white/[0.04]">
-              {zones.map((z) => <option key={z.zone} value={z.zone}>{z.zone} · {z.label}</option>)}
+            <Select value={zone} onChange={(e) => setZone(e.target.value)} aria-label={t("Domain")} className="mono !w-auto min-w-[8rem] max-w-[65%] !rounded-none !border-0 !bg-zinc-100 !ring-0 dark:!bg-white/[0.04]">
+              {zones.map((z) => <option key={z.zone} value={z.zone} label={z.zone}><span className="mono">{z.zone}</span> <span className="ml-1 text-xs text-zinc-400">{z.label}</span></option>)}
             </Select>
           </div>
           {!status.ipv4 && (

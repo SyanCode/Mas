@@ -40,6 +40,7 @@ from mas.usage import Usage
 from mas import removesite
 from mas.maintenance import Maintenance
 from mas.siterules import SiteRules
+from mas.webupdate import UpdateError, Updater, github_fetch
 from mas.projects import Projects, project_env
 from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
@@ -179,6 +180,7 @@ def create_app(
     ovh_opener=None,  # tests: fake OVH API
     cluster_opener=None,  # tests: calls to the other Mas servers
     seo_fetch=None,  # tests: pages of the site as the SEO look sees them
+    update_fetch=None,  # tests: what the official repository has
 ) -> FastAPI:
     host = host or Host()
     config = config or load_config(host)
@@ -316,6 +318,7 @@ def create_app(
     usage = Usage(host, config, db, scanner, resources)
     maintenance = Maintenance(host, config, db, deployer)
     site_rules = SiteRules(db, host, maintenance, cms)
+    updater = Updater(host, config, db, update_fetch or github_fetch)
     projects = Projects(db, github_client)
     deployer.extra_env.append(lambda target: project_env(db, target))
 
@@ -818,6 +821,29 @@ def create_app(
                      rules=site_rules, seo_fetch=seo_fetch)
 
     # -- dashboard ---------------------------------------------------------
+
+    # -- updating Mas from the dashboard -----------------------------------
+
+    @app.get("/api/update")
+    def update_status(force: bool = Query(False), _=Depends(current_session)) -> dict:
+        """Is the official repository ahead of this server? Looked at most once an hour (a button forces a look)."""
+        return updater.status(force)
+
+    @app.post("/api/update")
+    def update_start(s=Depends(current_session)) -> dict:
+        """Run ``mas self-update`` in its own systemd unit: this service restarts during it."""
+        before = updater.status()
+        try:
+            result = updater.start(s.username)
+        except UpdateError as exc:
+            db.audit(s.username, "mas-update", False, detail=str(exc)[:500])
+            raise HTTPException(409 if "already" in str(exc) else 500, str(exc)) from None
+        db.audit(s.username, "mas-update", True, detail=f"from {before['version']} ({before['sha']}), {before['behind']} commit(s) behind")
+        return result
+
+    @app.get("/api/update/progress")
+    def update_progress(_=Depends(current_session)) -> dict:
+        return updater.progress()
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])
     def api_not_found(path: str) -> JSONResponse:

@@ -122,6 +122,8 @@ When a newer version is published, every `sudo mas …` command starts with a on
 run `sudo mas self-update` (checked against GitHub at most every 6 hours, 2 s timeout, silent when
 offline; `MAS_NO_UPDATE_CHECK=1` turns it off).
 
+**From the dashboard.** An administrator sees a banner when the official repository is ahead (and *Settings → Updates* has a *Check now* button): it lists the new commits, then runs `mas self-update` in its own systemd unit (`mas-self-update`, output in `/var/lib/mas/update.log`) so the update survives the restart of Mas. The dashboard follows the log and reloads when it is done. API tokens cannot start an update.
+
 ## CLI
 
 ```console
