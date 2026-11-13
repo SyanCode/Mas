@@ -86,3 +86,15 @@ def test_raw_window_shows_only_the_start_of_the_token():
     from mas.claudelogin import raw_window
     out = raw_window(b"\x1b[1Cyear):\x1b[1Csk-ant-oat01-SECRETSECRETSECRET")
     assert "sk-ant-oat01-S" in out and "SECRETSECRET" not in out and "\\x1b[1C" in out
+
+
+def test_render_replays_a_full_screen_redraw():
+    """The real tool wrote `sk-ant-`, jumped to column 10 and went on: the 'o' was already on screen."""
+    from mas.claudelogin import extract_token, render
+    first = b"Your OAuth token (valid for 1 year):\r\n\r\nsk-ant-oat01-" + b"A" * 40 + b"\r\n\r\nStore this token securely.\r\n"
+    redraw = b"\x1b[3A\rsk-ant-\x1b[9Gat01-" + b"B" * 40 + b"\x1b[3B\r"
+    screen = render(first + redraw)
+    assert "sk-ant-oat01-" + "B" * 40 in screen and "Store this token securely." in screen
+    assert extract_token(screen, False) == "sk-ant-oat01-" + "B" * 40
+    assert render(b"abc\r\x1b[2Kxy\x1b[1Cz\x1b[?25h") == "xy z"
+    assert render(b"one\r\ntwo\x1b[2J\x1b[Hnew") == "new"

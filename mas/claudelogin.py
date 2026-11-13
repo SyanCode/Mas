@@ -42,6 +42,78 @@ def clean(raw: bytes) -> str:
     return ANSI_RE.sub("", raw.decode("utf-8", "replace")).replace("\r", "")
 
 
+_SEQ = re.compile(r"\x1b\[([0-?]*)[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b.|([\r\n\b\t])|([^\x00-\x1f\x7f])", re.S)
+WIDTH = 1000
+
+
+def render(raw: bytes) -> str:
+    """What the terminal screen shows after this output.
+
+    The login tool is a full-screen interface: it redraws only what changed, moving the cursor over the cells that are
+    already right (it writes ``sk-ant-``, jumps to column 10 and goes on, because the "o" was drawn earlier). The text of
+    the stream alone is therefore missing letters; replaying it on a grid, like a terminal does, gives the real text."""
+    rows: dict[int, list[str]] = {}
+    row = col = 0
+
+    def put(ch: str) -> None:
+        nonlocal row, col
+        if col >= WIDTH:
+            row, col = row + 1, 0
+        line = rows.setdefault(row, [])
+        if len(line) <= col:
+            line.extend(" " * (col + 1 - len(line)))
+        line[col] = ch
+        col += 1
+
+    for m in _SEQ.finditer(raw.decode("utf-8", "replace")):
+        params, final, ctrl, char = m.groups()
+        if char:
+            put(char)
+        elif ctrl:
+            if ctrl == "\r":
+                col = 0
+            elif ctrl == "\n":
+                row += 1
+            elif ctrl == "\b":
+                col = max(0, col - 1)
+            else:
+                col = (col // 8 + 1) * 8
+        elif final:
+            nums = [int(x) if x.isdigit() else 0 for x in params.lstrip("?").split(";")] if params else []
+            n = nums[0] if nums and nums[0] else 1
+            if final == "G":
+                col = n - 1
+            elif final == "C":
+                col += n
+            elif final == "D":
+                col = max(0, col - n)
+            elif final == "A":
+                row = max(0, row - n)
+            elif final == "B":
+                row += n
+            elif final in "Hf":
+                row = (nums[0] or 1) - 1 if nums else 0
+                col = (nums[1] or 1) - 1 if len(nums) > 1 else 0
+            elif final == "K":
+                line = rows.setdefault(row, [])
+                mode = nums[0] if nums else 0
+                if mode == 0:
+                    del line[col:]
+                elif mode == 1:
+                    line[:col + 1] = [" "] * min(len(line), col + 1)
+                else:
+                    rows[row] = []
+            elif final == "J":
+                mode = nums[0] if nums else 0
+                if mode in (2, 3):
+                    rows.clear()
+                elif mode == 0:
+                    for r in [r for r in rows if r > row]:
+                        del rows[r]
+                    del rows.setdefault(row, [])[col:]
+    return "\n".join("".join(rows.get(r, [])).rstrip() for r in range(min(rows, default=0), max(rows, default=-1) + 1))
+
+
 def extract_token(text: str, final: bool) -> str | None:
     """The token printed by the CLI, even when the terminal broke it over several lines.
 
@@ -155,11 +227,11 @@ class ClaudeLogin:
         except OSError:
             pass
 
-    def _read(self, s: dict, until, timeout: float) -> str | None:
+    def _read(self, s: dict, until, timeout: float, view=clean) -> str | None:
         """Read the CLI's output until ``until(text)`` returns something, the CLI exits or the time is up."""
         end = time.monotonic() + timeout
         while time.monotonic() < end:
-            found = until(clean(s["buffer"]), False)
+            found = until(view(s["buffer"]), False)
             if found:
                 return found
             ready, _, _ = select.select([s["fd"]], [], [], 0.2)
@@ -169,9 +241,9 @@ class ClaudeLogin:
                 except OSError:
                     chunk = b""
                 if not chunk:
-                    return until(clean(s["buffer"]), True)
+                    return until(view(s["buffer"]), True)
                 s["buffer"] += chunk
-        return until(clean(s["buffer"]), True)
+        return until(view(s["buffer"]), True)
 
     def start(self) -> str:
         """Start the CLI login and return the link to open."""
@@ -212,11 +284,11 @@ class ClaudeLogin:
             os.write(s["fd"], code.encode())
             time.sleep(0.6)
             os.write(s["fd"], b"\r")
-            token = self._read(s, find, 12)
+            token = self._read(s, find, 12, render)
             if not token and s["proc"].poll() is None:
                 os.write(s["fd"], b"\r")
-                token = self._read(s, find, 30)
-            tail = shape(clean(s["buffer"]))
+                token = self._read(s, find, 30, render)
+            tail = shape(render(s["buffer"]))
             window = raw_window(s["buffer"])
             if window:
                 tail += f" — raw: {window}"
