@@ -49,7 +49,7 @@ def extract_token(text: str, final: bool) -> str | None:
     the output is still arriving a last, unfinished line could be cut in the middle: it counts only once ``final``."""
     m = TOKEN_START.search(text)
     if not m:
-        return None
+        return flat_token(text, final)
     lines = text[m.start():].split("\n")
     first = lines[0].split()
     token = first[0] if first else ""
@@ -62,9 +62,31 @@ def extract_token(text: str, final: bool) -> str | None:
             ended = True  # a blank line, or the advice that follows
             break
         token += line
-    if not (ended or final):
+    if (ended or final) and len(token) >= 40 and "Store" not in token[40:]:
+        return token
+    return flat_token(text, final)
+
+
+def flat_token(text: str, final: bool) -> str | None:
+    """Last resort: the text with every space and line break removed, in case the terminal cut the token (or its prefix)
+    somewhere unexpected. The advice printed after the token is cut off where it starts."""
+    flat = re.sub(r"[\s\u2500-\u257f|]+", "", text)  # spaces, line breaks, box borders
+    m = TOKEN_START.search(flat)
+    if not m:
         return None
-    return token if len(token) >= 40 else None
+    run = re.match(r"[A-Za-z0-9_-]+", flat[m.start():])
+    token = run.group(0) if run else ""
+    ended = m.start() + len(token) < len(flat)  # something else follows it
+    cut = token.find("Store", 40)
+    if cut > 0:
+        token, ended = token[:cut], True
+    return token if (ended or final) and len(token) >= 60 else None
+
+
+def shape(text: str) -> str:
+    """The output with its long secret-looking runs masked: enough to see how it is laid out, nothing sensitive."""
+    masked = re.sub(r"[A-Za-z0-9_-]{16,}", lambda m: (m.group(0)[:13] if m.group(0).startswith("sk-ant") else m.group(0)[:3]) + f"<{len(m.group(0))}>", text)
+    return masked.replace("\n", "⏎").strip()[-500:]
 
 
 def binary(host: Host, override: str | None = None) -> str | None:
@@ -186,8 +208,8 @@ class ClaudeLogin:
             if not token and s["proc"].poll() is None:
                 os.write(s["fd"], b"\r")
                 token = self._read(s, find, 30)
-            tail = re.sub(r"\*{4,}", "***", clean(s["buffer"])).strip()[-200:]
+            tail = shape(clean(s["buffer"]))
             self._close()
             if not token:
-                raise LoginError("Claude did not accept the code" + (f" ({tail})" if tail else "") + ": start again")
+                raise LoginError("Claude did not give a token after the code" + (f" — what the tool printed: {tail}" if tail else "") + " — start again")
             return token
