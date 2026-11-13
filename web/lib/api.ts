@@ -75,7 +75,7 @@ export interface Session {
   username: string;
   csrf: string;
   totp_enabled: boolean;
-  role: "admin" | "editor";
+  role: "admin" | "editor" | "author";
   version: string;
 }
 
@@ -245,7 +245,7 @@ export interface CmsSite {
 export interface CmsUser {
   id: number;
   username: string;
-  role: "admin" | "editor";
+  role: "admin" | "editor" | "author";
   totp_enabled: boolean;
   created_at: string;
   apps: string[];

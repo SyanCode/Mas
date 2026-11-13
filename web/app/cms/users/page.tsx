@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Copy, KeyRound, MoreHorizontal, ShieldOff, Trash2, UserPlus } from "lucide-react";
+import { Copy, KeyRound, MoreHorizontal, Pencil, ShieldOff, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { CmsLayout, PageTitle, useCms } from "@/components/cms/CmsLayout";
 import { Avatar } from "@/components/cms/ui/avatar";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/cms/ui/badge";
 import { Button } from "@/components/cms/ui/button";
 import { Card } from "@/components/cms/ui/card";
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/cms/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/cms/ui/dropdown-menu";
 import { Input } from "@/components/cms/ui/input";
 import { Label } from "@/components/cms/ui/label";
@@ -26,6 +27,7 @@ function People() {
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
   const [username, setUsername] = useState("");
+  const [role, setRole] = useState("editor");
   const [secret, setSecret] = useState<{ username: string; password: string } | null>(null);
   const [access, setAccess] = useState<{ user: CmsUser; apps: string[] } | null>(null);
   const [removing, setRemoving] = useState<CmsUser | null>(null);
@@ -56,15 +58,16 @@ function People() {
             {users?.map((u) => (
               <TableRow key={u.id}>
                 <TableCell><span className="flex items-center gap-2.5"><Avatar name={u.username} /><span className="font-medium">{u.username}</span></span></TableCell>
-                <TableCell><Badge variant={u.role === "admin" ? "default" : "secondary"}>{u.role === "admin" ? t("Administrator") : t("Editor")}</Badge></TableCell>
+                <TableCell><Badge variant={u.role === "admin" ? "default" : "secondary"}>{u.role === "admin" ? t("Administrator") : u.role === "author" ? t("Author") : t("Editor")}</Badge></TableCell>
                 <TableCell>{u.role === "admin" ? <span className="text-muted-foreground">{t("All sites")}</span> : u.apps.length === 0 ? <span className="text-muted-foreground">{t("None")}</span> : <span className="flex flex-wrap gap-1">{u.apps.map((a) => <Badge key={a} variant="outline">{siteName(a)}</Badge>)}</span>}</TableCell>
                 <TableCell>{u.totp_enabled ? <Badge variant="success">{t("On")}</Badge> : <Badge variant="outline">{t("Off")}</Badge>}</TableCell>
                 <TableCell>
-                  {u.role === "editor" && (
+                  {u.role !== "admin" && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-8" aria-label={t("Actions")}><MoreHorizontal /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onSelect={() => setAccess({ user: u, apps: u.apps })}><UserPlus />{t("Manage sites")}</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => act(async () => { await api(`/users/${u.id}/role`, { method: "PUT", body: { role: u.role === "author" ? "editor" : "author" } }); toast.success(t("Role changed.")); })}><Pencil />{u.role === "author" ? t("Let them publish (editor)") : t("Drafts only (author)")}</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => act(async () => { const r = await api<{ password: string }>(`/users/${u.id}/password`, { method: "POST" }); setSecret({ username: u.username, password: r.password }); })}><KeyRound />{t("Reset password")}</DropdownMenuItem>
                         {u.totp_enabled && <DropdownMenuItem onSelect={() => act(async () => { await api(`/users/${u.id}/totp/reset`, { method: "POST" }); toast.success(t("2FA reset.")); })}><ShieldOff />{t("Reset 2FA")}</DropdownMenuItem>}
                         <DropdownMenuSeparator />
@@ -82,9 +85,12 @@ function People() {
 
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent>
-          <form onSubmit={(e) => { e.preventDefault(); act(async () => { const r = await api<CmsUser & { password: string }>("/users", { method: "POST", body: { username } }); setAdding(false); setSecret({ username: r.username, password: r.password }); }); }} className="grid gap-4">
+          <form onSubmit={(e) => { e.preventDefault(); act(async () => { const r = await api<CmsUser & { password: string }>("/users", { method: "POST", body: { username, role } }); setAdding(false); setSecret({ username: r.username, password: r.password }); }); }} className="grid gap-4">
             <DialogHeader><DialogTitle>{t("Add editor")}</DialogTitle><DialogDescription>{t("A password is generated. Give access to a site afterwards.")}</DialogDescription></DialogHeader>
             <div className="space-y-1.5"><Label htmlFor="u">{t("Username")}</Label><Input id="u" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} maxLength={32} autoFocus /></div>
+            <div className="space-y-1.5"><Label>{t("Role")}</Label>
+              <Select value={role} onValueChange={setRole}><SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="editor">{t("Editor: writes and publishes")}</SelectItem><SelectItem value="author">{t("Author: writes drafts, an editor publishes")}</SelectItem></SelectContent></Select></div>
             <DialogFooter><Button type="submit" disabled={username.length < 2}>{t("Create")}</Button></DialogFooter>
           </form>
         </DialogContent>

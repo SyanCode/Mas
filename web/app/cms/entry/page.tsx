@@ -54,7 +54,7 @@ function Editor() {
   const params = useSearchParams();
   const cid = params.get("c") ?? "";
   const slug = params.get("slug");
-  const { site, reloadOverview } = useCms();
+  const { site, session, reloadOverview } = useCms();
   const publisher = usePublisher(site);
   const [collection, setCollection] = useState<CmsCollection | null>(null);
   const [original, setOriginal] = useState<Values | null>(null);
@@ -131,6 +131,8 @@ function Editor() {
   const busy = publisher.busy;
   const drafts = !!collection?.drafts;
   const mainLabel = !drafts ? t("Publish") : status === "draft" ? t("Save draft") : status === "scheduled" ? t("Schedule") : origStatus === "published" && slug ? t("Update") : t("Publish");
+  const author = session.role === "author";
+  const locked = author && (!drafts || (slug !== null && origStatus !== "draft"));  // an author never touches what is online
   const scheduleInvalid = status === "scheduled" && (!when || new Date(when).getTime() <= Date.now());
 
   return (
@@ -139,6 +141,7 @@ function Editor() {
       <PageTitle title={slug === null ? `${t("New")} ${collection?.item_label.toLowerCase() ?? ""}` : title || slug || "…"}
         actions={drafts && slug ? <StatusBadge status={origStatus} /> : undefined} />
       <PublishBanner state={publisher.state} site={site} />
+      {locked && <p className="mb-4 rounded-lg bg-muted px-4 py-3 text-sm text-muted-foreground">{t("Your account writes drafts: an editor changes what is already online.")}</p>}
       {(error || publisher.error) && <p className="mb-4 text-sm text-destructive">{error || publisher.error}</p>}
 
       {!collection || original === null ? <Skeleton className="h-96" /> : (
@@ -158,7 +161,7 @@ function Editor() {
                 {drafts && (
                   <FormItem>
                     <Label>{t("Status")}</Label>
-                    <Select value={status} onValueChange={(v) => { setStatus(v as CmsStatus); if (v === "scheduled" && !when) setWhen(defaultWhen()); }}>
+                    <Select value={status} disabled={author} onValueChange={(v) => { setStatus(v as CmsStatus); if (v === "scheduled" && !when) setWhen(defaultWhen()); }}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="draft">{t("Draft")}</SelectItem>
@@ -187,9 +190,9 @@ function Editor() {
                   <Input id="note" value={note} maxLength={100} placeholder={t("What did you change? (optional)")} onChange={(e) => setNote(e.target.value)} />
                 </div>
                 <div className="flex flex-col gap-2 pt-1">
-                  <Button type="submit" disabled={busy || (!dirty && slug !== null) || scheduleInvalid}>{busy && <Loader2 className="animate-spin" />}{mainLabel}</Button>
+                  <Button type="submit" disabled={busy || locked || (!dirty && slug !== null) || scheduleInvalid}>{busy && <Loader2 className="animate-spin" />}{mainLabel}</Button>
                   {dirty && slug !== null && <Button type="button" variant="ghost" onClick={() => { setValues(original); setStatus(origStatus); }}>{t("Discard")}</Button>}
-                  {slug !== null && <Button type="button" variant="ghost" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => setDeleting(true)}><Trash2 />{t("Delete")}</Button>}
+                  {slug !== null && !author && <Button type="button" variant="ghost" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => setDeleting(true)}><Trash2 />{t("Delete")}</Button>}
                 </div>
               </CardContent>
             </Card>

@@ -1704,5 +1704,12 @@
   "Visits, goals, cookie proofs and settings of this site.": "Visites, objectifs, preuves de cookies et réglages de ce site.",
   "Backup restored.": "Sauvegarde restaurée.",
   "Delete this backup?": "Supprimer cette sauvegarde ?",
-  "Backup deleted.": "Sauvegarde supprimée."
+  "Backup deleted.": "Sauvegarde supprimée.",
+  "Author": "Auteur",
+  "Role changed.": "Rôle modifié.",
+  "Let them publish (editor)": "Autoriser à publier (éditeur)",
+  "Drafts only (author)": "Brouillons seulement (auteur)",
+  "Editor: writes and publishes": "Éditeur : écrit et publie",
+  "Author: writes drafts, an editor publishes": "Auteur : écrit des brouillons, un éditeur publie",
+  "Your account writes drafts: an editor changes what is already online.": "Votre compte écrit des brouillons : un éditeur modifie ce qui est déjà en ligne."
 }

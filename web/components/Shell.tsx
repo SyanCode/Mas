@@ -92,7 +92,7 @@ function UserMenu({ session }: { session: Session }) {
             <LanguagePicker className="w-full" />
           </div>
           <div className="my-1 h-px bg-zinc-200 dark:bg-white/[0.06]" />
-          <Link href="/settings/" className="block rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]">{session.role === "editor" ? t("Account") : t("Settings")}</Link>
+          <Link href="/settings/" className="block rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]">{session.role !== "admin" ? t("Account") : t("Settings")}</Link>
           <button onClick={logout} className="block w-full rounded-md px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-zinc-100 dark:text-rose-400 dark:hover:bg-white/[0.06]">{t("Log out")}</button>
         </div>
       )}
@@ -112,7 +112,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const t = useT();
   const pathname = usePathname();
   const router = useRouter();
-  const editor = session?.role === "editor";
+  const editor = !!session && session.role !== "admin";
 
   useEffect(() => {
     api<Session>("/session").then((s) => {

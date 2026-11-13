@@ -451,6 +451,7 @@ interface Invite { id: number; apps: string[]; note: string | null; created_by: 
 function InviteLinks({ apps }: { apps: App[] }) {
   const t = useT();
   const [invites, setInvites] = useState<Invite[]>([]);
+  const [role, setRole] = useState("editor");
   const [creating, setCreating] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [note, setNote] = useState("");
@@ -474,7 +475,7 @@ function InviteLinks({ apps }: { apps: App[] }) {
   }
 
   const create = () => run(async () => {
-    const r = await api<{ path: string }>("/invites", { method: "POST", body: { apps: picked, note } });
+    const r = await api<{ path: string }>("/invites", { method: "POST", body: { apps: picked, note, role } });
     setLink(`${window.location.origin}${r.path}`);
     setCreating(false);
     setPicked([]);
@@ -492,6 +493,10 @@ function InviteLinks({ apps }: { apps: App[] }) {
       {creating && (
         <div className="space-y-2">
           <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("For whom? (e.g. Acme bakery)")} maxLength={100} />
+          <Select value={role} onChange={(e) => setRole(e.target.value)} aria-label={t("Role")}>
+            <option value="editor">{t("Editor: writes and publishes")}</option>
+            <option value="author">{t("Author: writes drafts, an editor publishes")}</option>
+          </Select>
           {apps.map((a) => (
             <label key={a.id} className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={picked.includes(a.id)}
@@ -579,7 +584,7 @@ function PeopleCard() {
     setEditing(null);
   });
 
-  const editors = users.filter((u) => u.role === "editor");
+  const editors = users.filter((u) => u.role !== "admin");
   const admins = users.filter((u) => u.role === "admin");
   const appName = (id: string) => apps.find((a) => a.id === id)?.name ?? id;
   const linked = apps.filter((a) => a.installation_id);
@@ -825,7 +830,7 @@ function AppearanceCard() {
 function Settings() {
   const t = useT();
   const session = useSession();
-  if (session?.role === "editor") {
+  if (session && session.role !== "admin") {
     return (
       <div className="space-y-4">
         <PageHeader eyebrow={t("Account")} title={t("Your account")} subtitle={t("Password and two-factor authentication.")} />
