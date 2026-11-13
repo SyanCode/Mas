@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { isRootDomain } from "@/components/DomainStatus";
-import { Input, Spinner } from "@/components/ui";
+import { Input, Select, Spinner } from "@/components/ui";
 import { api, type DnsCheck, type DnsStatus, type DnsZone } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -84,9 +84,9 @@ export function DomainPicker({ suggestion, onChange }: { suggestion: string; onC
               className="mono min-w-0 flex-1 bg-white/80 px-3 py-2 text-sm outline-none dark:bg-black/40"
             />
             <span className="flex items-center bg-zinc-100 px-1 text-zinc-500 dark:bg-white/[0.04]">.</span>
-            <select value={zone} onChange={(e) => setZone(e.target.value)} className="mono max-w-[55%] bg-zinc-100 px-2 text-sm outline-none dark:bg-white/[0.04]">
+            <Select value={zone} onChange={(e) => setZone(e.target.value)} aria-label={t("Domain")} className="mono !w-auto max-w-[55%] !rounded-none !border-0 !bg-zinc-100 !ring-0 dark:!bg-white/[0.04]">
               {zones.map((z) => <option key={z.zone} value={z.zone}>{z.zone} · {z.label}</option>)}
-            </select>
+            </Select>
           </div>
           {!status.ipv4 && (
             <p className={`${line} border-amber-400/30 bg-amber-400/10 text-amber-700 dark:text-amber-300`}>

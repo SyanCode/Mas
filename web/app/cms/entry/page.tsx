@@ -1,5 +1,6 @@
 "use client";
 
+import { DatePicker } from "@/components/Pickers";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -41,7 +42,7 @@ function SchedulePicker({ value, onChange }: { value: string; onChange: (v: stri
   const pad = (n: number) => String(n).padStart(2, "0");
   return (
     <div className="space-y-2">
-      <Input id="when" type="date" aria-label={t("Publish on")} value={date} min={soon.slice(0, 10)} onChange={(e) => onChange(`${e.target.value}T${time}`)} />
+      <DatePicker id="when" aria-label={t("Publish on")} value={date} min={soon.slice(0, 10)} onChange={(d) => onChange(`${d || soon.slice(0, 10)}T${time}`)} />
       <TimeField hour={h} minute={m} onChange={(hh, mm) => onChange(`${date}T${pad(hh)}:${pad(mm)}`)} />
     </div>
   );
