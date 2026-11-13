@@ -201,7 +201,7 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
         return out
 
     @app.post("/api/robot/runs")
-    def robot_start(body: RunBody, s=Depends(current_session)) -> dict:
+    async def robot_start(body: RunBody, s=Depends(current_session)) -> dict:
         try:
             run_id = robot.start(body.goal, body.app_id, body.autonomy or robot.settings()["autonomy"], s.user_id)
         except AiError as exc:
@@ -217,14 +217,14 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
         return run
 
     @app.post("/api/robot/runs/{run_id}/decision")
-    def robot_decide(run_id: int, body: DecisionBody, s=Depends(current_session)) -> dict:
+    async def robot_decide(run_id: int, body: DecisionBody, s=Depends(current_session)) -> dict:
         if not robot.decide(run_id, body.approve):
             raise HTTPException(409, "nothing is waiting for an answer")
         db.audit(s.username, "robot-approve" if body.approve else "robot-refuse", True, detail=str(run_id))
         return {"ok": True}
 
     @app.post("/api/robot/runs/{run_id}/stop")
-    def robot_stop(run_id: int, s=Depends(current_session)) -> dict:
+    async def robot_stop(run_id: int, s=Depends(current_session)) -> dict:
         if not robot.stop(run_id):
             raise HTTPException(409, "this run is not going on")
         db.audit(s.username, "robot-stop", True, detail=str(run_id))
