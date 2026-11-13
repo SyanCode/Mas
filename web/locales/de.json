@@ -1928,5 +1928,8 @@
   "1. Sign in to Claude": "1. Bei Claude anmelden",
   "Open Claude": "Claude öffnen",
   "2. Paste the code Claude shows": "2. Den von Claude angezeigten Code einfügen",
-  "Paste a token by hand instead": "Stattdessen ein Token von Hand einfügen"
+  "Paste a token by hand instead": "Stattdessen ein Token von Hand einfügen",
+  "The robot needs you": "Der Roboter braucht Sie",
+  "Robot working…": "Roboter arbeitet…",
+  "{n} steps": "{n} Schritte"
 }

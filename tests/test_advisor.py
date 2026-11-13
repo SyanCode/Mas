@@ -169,3 +169,23 @@ def test_robot_routes_start_a_run_and_answer(env):
     assert run["status"] == "done" and run["summary"] == "All good, nothing to change."
     assert client.post(f"/api/robot/runs/{run_id}/stop", headers=csrf).status_code == 409  # already over
     assert client.post(f"/api/robot/runs/{run_id}/decision", headers=csrf, json={"approve": True}).status_code == 409
+
+
+def test_the_active_run_is_found_again(env):
+    import time
+    client, csrf, db = env
+    assert client.get("/api/robot/active").json() is None
+    client.post("/api/ai/accounts", headers=csrf, json={"provider": "anthropic", "secret": API, "name": "Pro", "password": PASSWORD})
+
+    def slow(req, timeout):
+        time.sleep(0.4)
+        return answer("done")
+    client.app.state.pool.opener = slow
+    run_id = client.post("/api/robot/runs", headers=csrf, json={"goal": "seo", "app_id": "", "autonomy": "auto"}).json()["id"]
+    active = client.get("/api/robot/active").json()
+    assert active["id"] == run_id and active["status"] == "running" and active["goal"]
+    for _ in range(100):
+        if client.get("/api/robot/active").json() is None:
+            break
+        time.sleep(0.05)
+    assert client.get("/api/robot/active").json() is None

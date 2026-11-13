@@ -1,5 +1,6 @@
 "use client";
 
+import { RobotPill } from "@/components/RobotPill";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -166,6 +167,7 @@ function Topbar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
         </a>
       )}
       <div className="ml-auto flex items-center gap-1">
+        <RobotPill admin={session.role === "admin"} />
         <button type="button" onClick={onSearch} className="hidden h-9 items-center gap-8 rounded-lg bg-card px-3 text-xs text-muted-foreground shadow-[0_0_0_1px_var(--border)] transition hover:text-foreground sm:flex" aria-label={t("Search…")}>
           <span className="flex items-center gap-2"><Search className="size-3.5" />{t("Search…")}</span><kbd className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium">⌘K</kbd>
         </button>

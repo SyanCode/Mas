@@ -8,6 +8,7 @@ import { Activity, Database, Gauge, HeartPulse, LayoutDashboard, Menu, Newspaper
 import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
+import { RobotPill } from "@/components/RobotPill";
 import { api, rememberSession, type Session } from "@/lib/api";
 import { LanguagePicker, msg, useT } from "@/lib/i18n";
 
@@ -178,6 +179,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </button>
             <Link href={editor ? "/cms/" : "/"} className="flex items-center gap-2 lg:hidden"><Logo /><span className="text-[15px] font-semibold tracking-tight">mas</span></Link>
             <div className="ml-auto flex shrink-0 items-center gap-3">
+              <RobotPill admin={!editor} />
               {!session.totp_enabled && (
                 <Link href="/settings/" className="hidden whitespace-nowrap rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-xs text-amber-600 sm:inline dark:text-amber-300">
                   {t("Enable 2FA")}
