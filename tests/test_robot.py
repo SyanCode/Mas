@@ -178,7 +178,7 @@ def test_guards(env):
         [{"type": "text", "text": "stop"}])
 
     async def go():
-        return await finish(robot, robot.start("x", "shop", "auto", uid), db)
+        return await finish(robot, robot.start("check it", "shop", "auto", uid), db)
     run = asyncio.run(go())
     results = [s["text"] for s in run["steps"] if s["kind"] == "result"]
     assert gh.commits == []
@@ -205,16 +205,16 @@ def test_one_run_at_a_time_and_no_account(env):
 
     async def go():
         pool.opener = script([tool("list_sites")] * 1, [{"type": "text", "text": "x"}])
-        run_id = robot.start("a", "", "ask", uid)
+        run_id = robot.start("task one", "", "ask", uid)
         with pytest.raises(AiError, match="already working"):
-            robot.start("b", "", "ask", uid)
+            robot.start("task two", "", "ask", uid)
         assert robot.stop(run_id)
         run = await finish(robot, run_id, db)
         return run
     asyncio.run(go())
     db.delete_ai_account(pool.accounts()[0]["id"])
     with pytest.raises(AiError, match="connect an AI account"):
-        asyncio.run(asyncio.sleep(0)) or robot.start("a", "", "ask", uid)
+        asyncio.run(asyncio.sleep(0)) or robot.start("task one", "", "ask", uid)
 
 
 def test_recover_and_schedule(env):

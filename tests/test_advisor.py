@@ -150,3 +150,22 @@ def test_claude_login_routes(env):
     r = client.post("/api/ai/claude-login/code", headers=csrf, json={"code": "GOOD-CODE#1234", "name": "Claude Pro"})
     assert r.status_code == 200 and r.json()["accounts"][0]["kind"] == "claude-code" and "sk-ant-oat" not in r.text
     assert not auth.api_token_allowed("/api/ai/claude-login/start")
+
+
+def test_robot_routes_start_a_run_and_answer(env):
+    import time
+    client, csrf, db = env
+    client.post("/api/ai/accounts", headers=csrf, json={"provider": "anthropic", "secret": API, "name": "Pro", "password": PASSWORD})
+    client.app.state.pool.opener = lambda req, timeout: answer("All good, nothing to change.")
+    assert client.post("/api/robot/runs", headers=csrf, json={"goal": "x", "app_id": "", "autonomy": "auto"}).status_code == 409  # too short
+    r = client.post("/api/robot/runs", headers=csrf, json={"goal": "seo", "app_id": "", "autonomy": "auto"})
+    assert r.status_code == 200, r.text
+    run_id = r.json()["id"]
+    for _ in range(100):
+        run = client.get(f"/api/robot/runs/{run_id}").json()
+        if run["status"] not in ("running", "waiting"):
+            break
+        time.sleep(0.05)
+    assert run["status"] == "done" and run["summary"] == "All good, nothing to change."
+    assert client.post(f"/api/robot/runs/{run_id}/stop", headers=csrf).status_code == 409  # already over
+    assert client.post(f"/api/robot/runs/{run_id}/decision", headers=csrf, json={"approve": True}).status_code == 409

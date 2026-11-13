@@ -134,7 +134,7 @@ class Robot:
 
     def start(self, goal: str, app_id: str, autonomy: str, user_id: int) -> int:
         goal = PRESETS.get(goal, goal).strip()
-        if not goal or len(goal) > 4000:
+        if len(goal) < 5 or len(goal) > 4000:
             raise AiError("describe the goal in a few sentences")
         if autonomy not in AUTONOMY:
             raise AiError("autonomy must be ask or auto")
