@@ -109,8 +109,14 @@ TOOLS: list[dict] = [
      "schema": _schema({"app_id": APP}, ["app_id"])},
     {"name": "legal_publish", "gated": True, "description": "Write the legal pages (notice, privacy, cookies) as Markdown "
      "files of the repository from the site's legal profile.", "schema": _schema({"app_id": APP, "lang": {"type": "string"}}, ["app_id"])},
-    {"name": "repo_commit", "gated": True, "description": "One commit on the app's branch: files = {path: complete new text}. "
-     "Send each file in full. Use null to delete a file.",
+    {"name": "repo_edit", "gated": True, "description": "PREFERRED to change existing files: one commit made of small "
+     "replacements, so you send only the changed parts, never the whole file. Each edit = {path, find, replace}; `find` must "
+     "match exactly one place of the file (include enough surrounding text).",
+     "schema": _schema({"app_id": APP, "message": {"type": "string"}, "edits": {"type": "array", "items": _schema(
+         {"path": {"type": "string"}, "find": {"type": "string"}, "replace": {"type": "string"}}, ["path", "find", "replace"])}},
+         ["app_id", "message", "edits"])},
+    {"name": "repo_commit", "gated": True, "description": "One commit on the app's branch: files = {path: complete new text}, "
+     "for NEW files or short ones (a long answer gets cut off: for existing files use repo_edit). Use null to delete a file.",
      "schema": _schema({"app_id": APP, "message": {"type": "string"}, "files": {"type": "object"}}, ["app_id", "message", "files"])},
     {"name": "deploy_app", "gated": True, "description": "Deploy the head of the app's branch (build, health check, automatic "
      "rollback on failure). Waits for the result.", "schema": _schema({"app_id": APP}, ["app_id"])},
@@ -122,6 +128,7 @@ def clip(text: str, size: int = MAX_RESULT) -> str:
     return text if len(text) <= size else text[:size] + f"\n… ({len(text) - size} more characters)"
 
 
+MAX_ERRORS = 5  # tool errors in a row: the robot is not getting anywhere
 MAX_REPEATS = 3  # the same call with the same arguments this many times: the robot is stuck
 
 
@@ -201,7 +208,7 @@ class Robot:
                     if state["stop"] or time.monotonic() > deadline:
                         status, summary = "stopped", "stopped" if state["stop"] else "out of time"
                         break
-                    reply = await asyncio.to_thread(self.pool.ask, SYSTEM, messages, TOOLS, 4000, 180)
+                    reply = await asyncio.to_thread(self.pool.ask, SYSTEM, messages, TOOLS, 16000, 300)
                     if reply.text.strip():
                         self._note(run_id, steps, "say", reply.text, account=reply.account)
                     messages.append({"role": "assistant", "content": reply.blocks or [{"type": "text", "text": "(no answer)"}]})
@@ -209,6 +216,14 @@ class Robot:
                         summary = reply.text.strip()
                         break
                     results = []
+                    if reply.stop == "length":  # the answer hit the size limit: its last call is cut in the middle, run none
+                        self._note(run_id, steps, "result", "the answer was cut off (too long): asking for smaller steps")
+                        for call in reply.tool_calls:
+                            results.append({"type": "tool_result", "tool_use_id": call["id"], "is_error": True, "content": (
+                                "error: your answer was cut off because it was too long, so this call was NOT run. Send smaller "
+                                "steps: use repo_edit with short replacements instead of whole files, and at most 3 files per call.")})
+                        messages.append({"role": "user", "content": results})
+                        continue
                     for call in reply.tool_calls:
                         out = await self._tool(run_id, steps, mas, call, app_id, autonomy, state)
                         results.append({"type": "tool_result", "tool_use_id": call["id"], "content": clip(out)})
@@ -246,6 +261,9 @@ class Robot:
                 self._note(run_id, steps, "result", f"{label}: repeated {seen[key]['n']} times, stopping")
                 raise Stuck(label)
             self._note(run_id, steps, "result", f"{label}: already done, not repeated ({seen[key]['n']}/{MAX_REPEATS})")
+            if seen[key]["out"].startswith("error"):
+                return (f"This exact call already failed: {seen[key]['out'][:500]}\nDo not send it again: change the call "
+                        "(smaller, different arguments), or go on to something else.")
             return (f"You already called {name} with exactly these arguments. Its result was:\n{seen[key]['out'][:800]}\n"
                     "Do not repeat it: go on to the next step, or finish with your report.")
         if spec["gated"] and autonomy == "ask":
@@ -275,6 +293,9 @@ class Robot:
             out = f"error: {exc}"
         self._note(run_id, steps, "result", out[:300])
         seen[key] = {"n": 1, "out": out}
+        state["errors"] = state.get("errors", 0) + 1 if out.startswith("error") else 0
+        if state["errors"] >= MAX_ERRORS:
+            raise Stuck("the tools kept failing: " + out[:120])
         if spec["gated"] and not out.startswith("error"):  # something changed: looking again can now give another answer
             for k in [k for k in seen if not BY_NAME[k.split("{", 1)[0]]["gated"]]:
                 del seen[k]
@@ -282,9 +303,13 @@ class Robot:
 
     @staticmethod
     def _describe(name: str, args: dict) -> str:
-        if name == "repo_commit":
-            files = args.get("files") if isinstance(args.get("files"), dict) else {}
-            return f"commit “{str(args.get('message', ''))[:120]}” — " + ", ".join(sorted(files)[:12]) + (" …" if len(files) > 12 else "")
+        if name in ("repo_commit", "repo_edit"):
+            if name == "repo_commit":
+                names = sorted(args.get("files")) if isinstance(args.get("files"), dict) else []
+            else:
+                edits = args.get("edits") if isinstance(args.get("edits"), list) else []
+                names = sorted({str(e.get("path")) for e in edits if isinstance(e, dict)})
+            return f"commit “{str(args.get('message', ''))[:120]}” — " + (", ".join(names[:12]) + (" …" if len(names) > 12 else "") or "(no files)")
         return {"deploy_app": "deploy the site", "seo_optimize": "write robots.txt and the sitemap",
                 "legal_publish": "publish the legal pages"}.get(name, name)
 
@@ -348,9 +373,46 @@ class Robot:
             return f"published {len(r.get('files', []))} legal pages"
         if name == "repo_commit":
             return await self._commit(app_id, args)
+        if name == "repo_edit":
+            return await self._edit(app_id, args)
         if name == "deploy_app":
             return await self._deploy(app_id, mas)
         return "unknown tool"
+
+    async def _edit(self, app_id: str, args: dict) -> str:
+        """Small replacements applied to the current files, then one commit: nothing to resend but the changes."""
+        edits, message = args.get("edits"), str(args.get("message") or "").strip()[:200]
+        if not isinstance(edits, list) or not 1 <= len(edits) <= 60 or not message:
+            raise ValueError("give a message and 1 to 60 edits {path, find, replace}")
+        gh, app = self._repo(app_id)
+        head = await asyncio.to_thread(gh.head, app["installation_id"], app["repo"], app["branch"])
+        texts: dict[str, str] = {}
+        for e in edits:
+            if not isinstance(e, dict) or not all(isinstance(e.get(k), str) for k in ("path", "find", "replace")) or not e["find"]:
+                raise ValueError("each edit needs path, find (not empty) and replace")
+            path = safe_path(e["path"], writing=True)
+            if path not in texts:
+                raw, _ = await asyncio.to_thread(gh.read_file, app["installation_id"], app["repo"], path, head)
+                if raw is None:
+                    raise ValueError(f"{path}: no such file (use repo_commit to create it)")
+                try:
+                    texts[path] = raw.decode()
+                except UnicodeDecodeError:
+                    raise ValueError(f"{path}: binary file") from None
+            found = texts[path].count(e["find"])
+            if found != 1:
+                raise ValueError(f"{path}: the text to replace was found {found} times, it must match exactly once "
+                                 f"(start: {e['find'][:60]!r}). Read the file again and quote more of it.")
+            texts[path] = texts[path].replace(e["find"], e["replace"], 1)
+        changes = {}
+        for path, text in texts.items():
+            if len(text.encode()) > MAX_FILE:
+                raise ValueError(f"{path}: the result would be over {MAX_FILE // 1000} KB")
+            changes[path] = text.encode()
+        sha = await asyncio.to_thread(gh.commit_files, app["installation_id"], app["repo"], app["branch"], changes,
+                                      f"robot: {message}", head)
+        self.db.audit("robot", "robot-commit", True, service_id=app_id, detail=f"{sha[:8]} {message} ({len(changes)} files, edits)")
+        return f"committed {sha[:8]} on {app['branch']} ({len(edits)} edits in {len(changes)} files). Deploy it with deploy_app."
 
     async def _commit(self, app_id: str, args: dict) -> str:
         files = args.get("files")
