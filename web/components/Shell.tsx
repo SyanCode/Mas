@@ -4,7 +4,7 @@ import { UpdateBanner } from "@/components/Update";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { Activity, Database, Gauge, HeartPulse, LayoutDashboard, Menu, Newspaper, Rocket, Search, Server, Settings, type LucideIcon } from "lucide-react";
+import { Activity, Database, Gauge, HeartPulse, LayoutDashboard, Menu, Newspaper, Rocket, Search, Server, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
@@ -41,6 +41,7 @@ const NAV_GROUPS: { title: string; items: NavEntry[] }[] = [
   { title: msg("Server"), items: [
     { href: "/resources/", label: msg("Resources"), icon: Gauge, match: (p) => p.startsWith("/resources") },
     { href: "/cluster/", label: msg("Servers"), icon: Server, match: (p) => p.startsWith("/cluster") },
+    { href: "/advisor/", label: msg("Advisor"), icon: Sparkles, match: (p) => p.startsWith("/advisor") },
     { href: "/health/", label: msg("Health"), icon: HeartPulse, match: (p) => p.startsWith("/health") },
     { href: "/history/", label: msg("Activity"), icon: Activity, match: (p) => p.startsWith("/history") },
   ] },
@@ -78,7 +79,7 @@ function UserMenu({ session }: { session: Session }) {
         {session.username.slice(0, 1).toUpperCase()}
       </button>
       {open && (
-        <div className="panel absolute right-0 top-10 z-40 w-72 rounded-xl p-1.5" onMouseLeave={() => setOpen(false)}>
+        <div className="panel absolute right-0 top-10 z-40 w-[min(18rem,calc(100vw-2rem))] animate-pop rounded-xl p-1.5 origin-top-right" onMouseLeave={() => setOpen(false)}>
           <div className="px-3 py-2">
             <div className="text-sm font-medium">{session.username}</div>
             <div className="text-xs text-zinc-500">{session.totp_enabled ? t("2FA enabled") : t("2FA off")} · v{session.version}</div>
@@ -124,6 +125,15 @@ export function Shell({ children }: { children: ReactNode }) {
 
   useEffect(() => setDrawer(false), [pathname]);
 
+  useEffect(() => {  // the page behind the menu does not scroll; Escape closes it
+    if (!drawer) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrawer(false);
+    window.addEventListener("keydown", onKey);
+    return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", onKey); };
+  }, [drawer]);
+
   useEffect(() => {
     if (editor && !EDITOR_PATHS.some((p) => pathname.startsWith(p))) router.replace("/cms/");
   }, [editor, pathname, router]);
@@ -156,8 +166,9 @@ export function Shell({ children }: { children: ReactNode }) {
         <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 lg:block"><SideNav editor={editor} pathname={pathname} version={session.version} /></aside>
         {drawer && (
           <div className="fixed inset-0 z-50 lg:hidden">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDrawer(false)} />
-            <aside className="absolute inset-y-0 left-0 w-64"><SideNav editor={editor} pathname={pathname} version={session.version} /></aside>
+            <div className="absolute inset-0 animate-fade-in bg-black/40 backdrop-blur-sm" onClick={() => setDrawer(false)} />
+            <button type="button" onClick={() => setDrawer(false)} aria-label={t("Close")} className="absolute right-3 top-3 z-10 flex h-9 w-9 animate-fade-in items-center justify-center rounded-full bg-white/10 text-white backdrop-blur"><X className="size-5" /></button>
+            <aside className="absolute inset-y-0 left-0 w-[min(16rem,85vw)] animate-slide-in shadow-2xl"><SideNav editor={editor} pathname={pathname} version={session.version} /></aside>
           </div>
         )}
         <div className="lg:pl-60">
@@ -183,7 +194,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <UserMenu session={session} />
             </div>
           </header>
-          <main className="mx-auto max-w-6xl px-5 py-10 sm:px-10">{!editor && <UpdateBanner />}{children}</main>
+          <main key={pathname} className="page-in mx-auto max-w-6xl px-4 py-6 sm:px-10 sm:py-10">{!editor && <UpdateBanner />}{children}</main>
         </div>
       </div>
       {!editor && <CommandPalette open={palette} onClose={() => setPalette(false)} />}
@@ -194,7 +205,7 @@ export function Shell({ children }: { children: ReactNode }) {
 function SideLink({ href, active, icon: Icon, children }: { href: string; active: boolean; icon: LucideIcon; children: ReactNode }) {
   return (
     <Link href={href}
-      className={`group flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] transition ${active
+      className={`group flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13.5px] transition-all duration-200 hover:translate-x-0.5 lg:py-2 ${active
         ? "bg-zinc-900/[0.05] font-medium text-zinc-900 dark:bg-white/[0.08] dark:text-white"
         : "text-zinc-500 hover:bg-zinc-900/[0.04] hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/[0.05] dark:hover:text-white"}`}>
       <Icon className={`size-4 shrink-0 transition ${active ? "text-indigo-500" : "opacity-70 group-hover:opacity-100"}`} />

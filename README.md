@@ -76,7 +76,7 @@ Mas starts from the other end:
 | Idle apps               | Always running               | Can sleep and wake on the next visit  |
 
 Every detection is deterministic: config file parsing, `/proc`, `ss`, `systemctl`, `pm2 jlist`
-and the Docker socket. No AI model is involved anywhere, and discovery needs no external API
+and the Docker socket. No AI model is involved in discovery, which needs no external API
 (only the optional GitHub and DNS-provider integrations talk to their own APIs).
 
 ## Installation
@@ -165,6 +165,15 @@ build logs; and with a write token, service actions, `nginx_reload`, `deploy_app
 whitelists, `nginx -t`, automatic rollbacks and the audit log apply. Logs reach the model marked
 as untrusted data. The endpoint is off by default and answers 404 while off. Mas itself contains
 no AI: `/mcp` is only a protocol in front of the API.
+
+### Claude advisor (proposals on its own)
+
+**Settings → Claude advisor** (or the **Advisor** page): paste a Claude Code token (`claude setup-token` on your
+computer, it uses your Claude subscription) or an Anthropic API key, and Claude analyses the server every day
+or week and writes improvement proposals (stability, security, memory, certificates…) that you mark done or
+dismiss. It is off until a token is connected. Claude only receives a summary of statuses (services, health
+checks, resource advice, apps): no logs, variables, files or credentials. The token is stored encrypted, never
+shown again, and API tokens cannot reach these routes. Proposals are advice: nothing is applied by itself.
 
 ### Creating an app from MCP
 

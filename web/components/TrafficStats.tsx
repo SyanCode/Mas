@@ -92,10 +92,10 @@ export function TrafficStats({ url, title }: { url: string; title?: string }) {
 
           <details className="text-sm">
             <summary className="cursor-pointer text-xs text-zinc-500">{t("Table")}</summary>
-            <table className="mt-2 w-full text-xs tabular-nums">
+            <div className="overflow-x-auto"><table className="mt-2 w-full min-w-[18rem] text-xs tabular-nums">
               <thead><tr className="text-left text-zinc-500"><th className="py-1 font-normal">{t("Day")}</th><th className="font-normal">{t("Requests")}</th><th className="font-normal">{t("Page views")}</th><th className="font-normal">{t("Visitors")}</th></tr></thead>
               <tbody>{[...series].reverse().map((d) => <tr key={d.day}><td className="py-0.5">{fmtDay(d.day, lang)}</td><td>{d.requests}</td><td>{d.pageviews}</td><td>{d.visitors}</td></tr>)}</tbody>
-            </table>
+            </table></div>
           </details>
 
           <p className="text-xs text-zinc-500">

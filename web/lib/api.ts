@@ -585,3 +585,27 @@ export interface UpdateStatus {
   latest_version: string | null; unknown: boolean; checked_at: number | null; error: string | null; note?: string;
 }
 export interface UpdateProgress { state: "idle" | "running" | "done" | "failed"; log: string; from?: string }
+
+/** A proposal written by the Claude advisor (GET /advisor). */
+export interface Suggestion {
+  id: number;
+  created_at: number;
+  severity: "info" | "warning" | "critical";
+  title: string;
+  detail: string;
+  target: string;
+  status: "new" | "done" | "dismissed";
+}
+
+/** The Claude advisor: connection (never the token itself), schedule and proposals. */
+export interface AdvisorState {
+  connected: boolean;
+  kind: "claude-code" | "api" | null;
+  hint: string;
+  interval: "off" | "daily" | "weekly";
+  model: string;
+  last_run: number | null;
+  error: string;
+  new: number;
+  suggestions: Suggestion[];
+}

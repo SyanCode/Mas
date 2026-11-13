@@ -241,6 +241,16 @@ CREATE TABLE IF NOT EXISTS site_visitors (   -- visitors of today and yesterday 
     hash BLOB NOT NULL,
     PRIMARY KEY (app_id, day, hash)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS advisor_suggestions (  -- improvement proposals written by the Claude advisor
+    id INTEGER PRIMARY KEY,
+    fingerprint TEXT NOT NULL UNIQUE,          -- same proposal twice: kept once (and not shown again once dismissed)
+    created_at REAL NOT NULL,
+    severity TEXT NOT NULL,                    -- info | warning | critical
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    target TEXT NOT NULL DEFAULT '',           -- the service or app it is about
+    status TEXT NOT NULL DEFAULT 'new'         -- new | done | dismissed
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -838,6 +848,26 @@ class Database:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM site_stats WHERE app_id = ? AND day >= ? ORDER BY day",
                                                (app_id, since))]
+
+    # -- advisor suggestions ---------------------------------------------
+
+    def add_suggestion(self, fingerprint: str, severity: str, title: str, detail: str, target: str) -> bool:
+        """False when this very proposal is already known (open, done or dismissed)."""
+        with self.tx() as c:
+            cur = c.execute("INSERT OR IGNORE INTO advisor_suggestions (fingerprint, created_at, severity, title, detail, "
+                            "target) VALUES (?, ?, ?, ?, ?, ?)",
+                            (fingerprint, time.time(), severity, title, detail, target))
+        return cur.rowcount > 0
+
+    def list_suggestions(self, status: str | None = None) -> list[dict]:
+        with self.tx() as c:
+            rows = c.execute("SELECT * FROM advisor_suggestions" + (" WHERE status = ?" if status else "") +
+                             " ORDER BY created_at DESC, id DESC LIMIT 200", (status,) if status else ()).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_suggestion_status(self, suggestion_id: int, status: str) -> bool:
+        with self.tx() as c:
+            return c.execute("UPDATE advisor_suggestions SET status = ? WHERE id = ?", (status, suggestion_id)).rowcount > 0
 
     def get_setting(self, key: str) -> str | None:
         with self.tx() as c:

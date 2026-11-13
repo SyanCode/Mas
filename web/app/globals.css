@@ -9,6 +9,37 @@
   --animate-aurora: aurora 22s ease-in-out infinite alternate;
   --animate-shimmer: shimmer 2.2s linear infinite;
   --animate-ping-slow: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+  --animate-pop: pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  --animate-slide-in: slide-in 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-fade-in: fade-in 0.2s ease-out both;
+  --animate-float: float 5s ease-in-out infinite;
+  --animate-glow: glow 2.6s ease-in-out infinite;
+  --animate-sweep: sweep 1.6s linear infinite;
+}
+
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.94) translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes slide-in {
+  from { transform: translateX(-100%); }
+  to { transform: none; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.0); }
+  50% { box-shadow: 0 0 24px 2px rgba(129, 140, 248, 0.35); }
+}
+@keyframes sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
 }
 
 @keyframes fade-up {
@@ -375,6 +406,86 @@ pre,
   border-color: color-mix(in srgb, var(--color-indigo-500) 40%, transparent);
 }
 :root.dark[data-style="studio"] input:focus, :root.dark[data-style="studio"] textarea:focus, :root.dark[data-style="studio"] select:focus { background-color: #141415; }
+
+/* -- Motion ---------------------------------------------------------------------------------
+   .stagger: the children come in one after the other. .lift: a card that rises under the pointer.
+   .page-in: the page content fades in on every navigation. .progress-sweep: a bar for work in progress. */
+.stagger > * {
+  animation: var(--animate-fade-up);
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 45ms; }
+.stagger > *:nth-child(3) { animation-delay: 90ms; }
+.stagger > *:nth-child(4) { animation-delay: 135ms; }
+.stagger > *:nth-child(5) { animation-delay: 180ms; }
+.stagger > *:nth-child(6) { animation-delay: 225ms; }
+.stagger > *:nth-child(7) { animation-delay: 270ms; }
+.stagger > *:nth-child(8) { animation-delay: 315ms; }
+.stagger > *:nth-child(n + 9) { animation-delay: 360ms; }
+.lift {
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s, border-color 0.2s;
+}
+@media (hover: hover) {
+  .lift:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--color-indigo-500) 35%, transparent);
+    box-shadow: 0 14px 40px -24px rgba(99, 102, 241, 0.55);
+  }
+}
+.page-in {
+  animation: var(--animate-fade-up);
+}
+.progress-sweep {
+  position: relative;
+  overflow: hidden;
+  height: 2px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-indigo-500) 18%, transparent);
+}
+.progress-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 50%;
+  background: linear-gradient(90deg, transparent, var(--color-indigo-400), transparent);
+  animation: sweep 1.2s ease-in-out infinite;
+}
+.sparkle {
+  animation: var(--animate-float);
+}
+a, button, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* -- Responsive ------------------------------------------------------------------------------
+   Phones: wide content scrolls inside its own box instead of the page, controls are easy to hit,
+   inputs stay at 16px so iOS does not zoom when one is focused. */
+html, body {
+  overflow-x: clip;
+}
+img, video, svg:not([class*="size-"]) {
+  max-width: 100%;
+}
+table {
+  max-width: 100%;
+}
+@media (max-width: 640px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+  main pre {
+    max-width: 100%;
+  }
+  button, a[role="button"], summary {
+    min-height: 2.25rem;
+  }
+}
+@supports (padding: max(0px)) {
+  .mas-header {
+    padding-left: max(1.25rem, env(safe-area-inset-left));
+    padding-right: max(1.25rem, env(safe-area-inset-right));
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,
