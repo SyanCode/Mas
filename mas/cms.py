@@ -1176,6 +1176,53 @@ class CmsManager:
                 changes[f"{folder}/{name}"] = text.encode()
             return self._commit(gh, app, changes, "cms(legal)", note, "legal pages", username, head, [])
 
+    # -- backups: every file the CMS manages, and putting them back ---------------------------------
+
+    def snapshot_files(self, app_id: str) -> dict[str, bytes]:
+        """The schema, the pages, the entries of the collections kept in the repository and the media folders."""
+        gh, app = self._target(app_id)
+        schema, head = self.schema(app_id)
+        inst, repo = app["installation_id"], app["repo"]
+        paths: list[str] = [SCHEMA_FILE] + [p["file"] for p in schema["pages"]]
+        try:
+            for c in schema["collections"]:
+                if c["storage"] == "git":
+                    paths += [f["path"] for f in gh.list_dir(inst, repo, c["dir"], head)]
+            for folder_ in self._media_dirs(schema):
+                paths += [f["path"] for f in gh.list_dir(inst, repo, folder_, head)]
+            out: dict[str, bytes] = {}
+            total = 0
+            for path in dict.fromkeys(paths):
+                blob, _ = gh.read_file(inst, repo, path, head)
+                if blob is None:
+                    continue
+                total += len(blob)
+                if total > 80 * 1024 * 1024:
+                    raise CmsError("the site's content is too large for a backup (80 MB)")
+                out[path] = blob
+        except GitHubError as exc:
+            raise CmsError(str(exc)) from None
+        return out
+
+    def restore_files(self, app_id: str, files: dict[str, bytes], username: str, note: str = "") -> dict:
+        """One commit that puts back every file that differs from the repository (nothing is deleted)."""
+        lock = self._locks.setdefault(app_id, threading.Lock())
+        with lock:
+            gh, app = self._target(app_id)
+            _, head = self.schema(app_id)
+            changes: dict[str, bytes | None] = {}
+            try:
+                for path, blob in files.items():
+                    current, _ = gh.read_file(app["installation_id"], app["repo"], path, head)
+                    if current != blob:
+                        changes[path] = blob
+            except GitHubError as exc:
+                raise self._github_error(exc) from None
+            if not changes:
+                return {"commit": None, "unchanged": True, "files": 0}
+            result = self._commit(gh, app, changes, "cms(backup)", note, "restore a backup", username, head, [])
+            return {**result, "files": len(changes)}
+
     # -- history: show and undo what the CMS committed -----------------------------------------------
 
     def changes(self, app_id: str, limit: int = 50) -> list[dict]:

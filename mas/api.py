@@ -19,7 +19,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from mas import __version__, agent_apps, api_cluster, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -220,6 +220,10 @@ def create_app(
                 await asyncio.to_thread(cms.run_due)
             except Exception:
                 log.exception("scheduled CMS publications failed")
+            try:  # daily backups of the sites that asked for them
+                await asyncio.to_thread(cms_backup.tick, db, cms)
+            except Exception:
+                log.exception("CMS backups failed")
             try:  # is each site answering?
                 await asyncio.to_thread(uptime.tick)
             except Exception:
