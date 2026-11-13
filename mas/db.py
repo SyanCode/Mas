@@ -251,6 +251,33 @@ CREATE TABLE IF NOT EXISTS advisor_suggestions (  -- improvement proposals writt
     target TEXT NOT NULL DEFAULT '',           -- the service or app it is about
     status TEXT NOT NULL DEFAULT 'new'         -- new | done | dismissed
 );
+CREATE TABLE IF NOT EXISTS ai_accounts (      -- Claude / Codex / compatible accounts, tried in the order of priority
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL,                    -- anthropic | openai | openai_compat
+    secret TEXT NOT NULL,                      -- the key or token, encrypted (mas.envcrypt)
+    model TEXT NOT NULL,
+    base_url TEXT NOT NULL DEFAULT '',
+    priority INTEGER NOT NULL,                 -- 1 = tried first
+    enabled INTEGER NOT NULL DEFAULT 1,
+    cooldown_until REAL,                       -- at its limit until then
+    last_error TEXT,
+    last_used REAL,
+    uses INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS robot_runs (        -- the robot: a goal given to Claude, what it did, what it asks
+    id INTEGER PRIMARY KEY,
+    goal TEXT NOT NULL,
+    app_id TEXT NOT NULL DEFAULT '',
+    autonomy TEXT NOT NULL,                    -- ask | auto
+    status TEXT NOT NULL,                      -- running | waiting | done | failed | stopped
+    steps TEXT NOT NULL DEFAULT '[]',          -- JSON list of {at, kind, text}
+    pending TEXT,                              -- JSON of the change waiting for approval
+    summary TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL,
+    finished_at REAL
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -848,6 +875,83 @@ class Database:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM site_stats WHERE app_id = ? AND day >= ? ORDER BY day",
                                                (app_id, since))]
+
+    # -- AI accounts ------------------------------------------------------
+
+    def list_ai_accounts(self) -> list[dict]:
+        with self.tx() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM ai_accounts ORDER BY priority, id")]
+
+    def add_ai_account(self, name: str, provider: str, secret: str, model: str, base_url: str) -> dict:
+        with self.tx() as c:
+            top = c.execute("SELECT COALESCE(MAX(priority), 0) FROM ai_accounts").fetchone()[0]
+            new_id = c.execute("INSERT INTO ai_accounts (name, provider, secret, model, base_url, priority, created_at) "
+                               "VALUES (?, ?, ?, ?, ?, ?, ?)", (name, provider, secret, model, base_url, top + 1, time.time())).lastrowid
+            return dict(c.execute("SELECT * FROM ai_accounts WHERE id = ?", (new_id,)).fetchone())
+
+    def update_ai_account(self, account_id: int, used: float | None = None, **fields: Any) -> dict | None:
+        cols = {"name", "model", "enabled", "secret", "cooldown_until", "last_error"}
+        if not set(fields) <= cols:
+            raise ValueError(f"invalid account fields: {set(fields) - cols}")
+        with self.tx() as c:
+            if fields:
+                c.execute(f"UPDATE ai_accounts SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+                          (*fields.values(), account_id))
+            if used is not None:
+                c.execute("UPDATE ai_accounts SET last_used = ?, uses = uses + 1 WHERE id = ?", (used, account_id))
+            row = c.execute("SELECT * FROM ai_accounts WHERE id = ?", (account_id,)).fetchone()
+        return dict(row) if row else None
+
+    def move_ai_account(self, account_id: int, direction: int) -> bool:
+        """Swap with the neighbour above (-1) or below (+1); priorities are renumbered 1..n."""
+        with self.tx() as c:
+            ids = [r[0] for r in c.execute("SELECT id FROM ai_accounts ORDER BY priority, id")]
+            if account_id not in ids:
+                return False
+            i, j = ids.index(account_id), ids.index(account_id) + direction
+            if 0 <= j < len(ids):
+                ids[i], ids[j] = ids[j], ids[i]
+            for n, aid in enumerate(ids, 1):
+                c.execute("UPDATE ai_accounts SET priority = ? WHERE id = ?", (n, aid))
+        return True
+
+    def delete_ai_account(self, account_id: int) -> bool:
+        with self.tx() as c:
+            return c.execute("DELETE FROM ai_accounts WHERE id = ?", (account_id,)).rowcount > 0
+
+    # -- robot runs --------------------------------------------------------
+
+    def create_robot_run(self, goal: str, app_id: str, autonomy: str) -> int:
+        with self.tx() as c:
+            return int(c.execute("INSERT INTO robot_runs (goal, app_id, autonomy, status, created_at) VALUES (?, ?, ?, 'running', ?)",
+                                 (goal, app_id, autonomy, time.time())).lastrowid)
+
+    def get_robot_run(self, run_id: int) -> dict | None:
+        with self.tx() as c:
+            row = c.execute("SELECT * FROM robot_runs WHERE id = ?", (run_id,)).fetchone()
+        return self._run(row) if row else None
+
+    def list_robot_runs(self, limit: int = 20) -> list[dict]:
+        with self.tx() as c:
+            rows = c.execute("SELECT * FROM robot_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [self._run(r, brief=True) for r in rows]
+
+    @staticmethod
+    def _run(row, brief: bool = False) -> dict:
+        d = dict(row)
+        d["steps"] = json.loads(d["steps"] or "[]")
+        d["pending"] = json.loads(d["pending"]) if d["pending"] else None
+        if brief:
+            d["steps"] = len(d["steps"])
+        return d
+
+    def update_robot_run(self, run_id: int, **fields: Any) -> None:
+        cols = {"status", "steps", "pending", "summary", "finished_at"}
+        if not set(fields) <= cols:
+            raise ValueError(f"invalid run fields: {set(fields) - cols}")
+        values = [json.dumps(v) if k in ("steps", "pending") and v is not None else v for k, v in fields.items()]
+        with self.tx() as c:
+            c.execute(f"UPDATE robot_runs SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?", (*values, run_id))
 
     # -- advisor suggestions ---------------------------------------------
 

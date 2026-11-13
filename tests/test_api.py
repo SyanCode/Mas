@@ -228,3 +228,24 @@ def test_remove_the_site_of_a_stopped_service(env):
     assert r.status_code == 200, r.text
     assert all(not host.exists(f) for f in files)
     assert client.get("/api/services/shop.example.com").status_code == 404
+
+
+def test_a_browser_sent_to_a_data_file_gets_the_page(tmp_path):
+    """After an update an old tab falls back to /cms/stats/index.txt: show the page, not the raw payload."""
+    from fastapi.testclient import TestClient
+    import server
+    from mas.api import create_app
+    from mas.config import Config
+    from mas.db import Database
+    from mas.host import FixtureHost
+    web = tmp_path / "out" / "cms" / "stats"
+    web.mkdir(parents=True)
+    (web / "index.html").write_text("<html>page</html>")
+    (web / "index.txt").write_text("1:payload")
+    app = create_app(FixtureHost(server.build(tmp_path / "srv")), Config(cookie_secure=False), Database(tmp_path / "m.db"),
+                     background=False, web_dir=tmp_path / "out")
+    c = TestClient(app, follow_redirects=False)
+    r = c.get("/cms/stats/index.txt?app=x&_rsc=1", headers={"Accept": "text/html,*/*"})
+    assert r.status_code == 302 and r.headers["location"] == "/cms/stats/?app=x"
+    rsc = c.get("/cms/stats/index.txt", headers={"RSC": "1", "Accept": "*/*"})
+    assert rsc.status_code == 200 and rsc.text == "1:payload" and rsc.headers["cache-control"] == "no-cache"
