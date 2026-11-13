@@ -597,15 +597,54 @@ export interface Suggestion {
   status: "new" | "done" | "dismissed";
 }
 
-/** The Claude advisor: connection (never the token itself), schedule and proposals. */
+/** The advisor: schedule and proposals (the accounts are in AiAccount). */
 export interface AdvisorState {
   connected: boolean;
-  kind: "claude-code" | "api" | null;
-  hint: string;
   interval: "off" | "daily" | "weekly";
-  model: string;
   last_run: number | null;
   error: string;
   new: number;
   suggestions: Suggestion[];
+}
+
+/** A Claude / Codex / compatible account of the pool (never its key). */
+export interface AiAccount {
+  id: number;
+  name: string;
+  provider: "anthropic" | "openai" | "openai_compat";
+  model: string;
+  base_url: string;
+  kind: "claude-code" | "api" | null;
+  hint: string;
+  enabled: boolean;
+  priority: number;
+  limited_until: number | null;
+  error: string;
+  last_used: number | null;
+  uses: number;
+}
+export interface AiAccounts {
+  accounts: AiAccount[];
+  providers: Record<string, { label: string; model: string }>;
+}
+
+export interface RobotStep { at: number; kind: "say" | "tool" | "result" | "ask" | "approved" | "denied" | "end"; text: string; account?: string }
+export interface RobotRun {
+  id: number;
+  goal: string;
+  app_id: string;
+  autonomy: "ask" | "auto";
+  status: "running" | "waiting" | "done" | "failed" | "stopped";
+  steps: RobotStep[] | number;
+  pending: { tool: string; app_id: string; detail: string } | null;
+  summary: string;
+  created_at: number;
+  finished_at: number | null;
+}
+export interface RobotState {
+  schedule: "off" | "daily" | "weekly";
+  autonomy: "ask" | "auto";
+  presets: string[];
+  active: number | null;
+  runs: RobotRun[];
 }

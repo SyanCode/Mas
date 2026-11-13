@@ -141,7 +141,7 @@ API_TOKEN_PREFIX = "mas_pat_"
 API_TOKEN_FORBIDDEN = (
     "/api/account/", "/api/users", "/api/invites", "/api/logout", "/api/signup",
     "/api/cluster/tokens", "/api/github/manifest", "/api/supabase/credentials", "/api/dns/providers",
-    "/api/tokens", "/api/mcp", "/api/update", "/api/advisor",
+    "/api/tokens", "/api/mcp", "/api/update", "/api/advisor", "/api/ai", "/api/robot",
 )
 API_TOKEN_FORBIDDEN_RE = re.compile(r"^/api/apps/[^/]+/env$")
 

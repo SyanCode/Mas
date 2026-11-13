@@ -166,14 +166,26 @@ whitelists, `nginx -t`, automatic rollbacks and the audit log apply. Logs reach 
 as untrusted data. The endpoint is off by default and answers 404 while off. Mas itself contains
 no AI: `/mcp` is only a protocol in front of the API.
 
-### Claude advisor (proposals on its own)
+### AI accounts, advisor and robot
 
-**Settings → Claude advisor** (or the **Advisor** page): paste a Claude Code token (`claude setup-token` on your
-computer, it uses your Claude subscription) or an Anthropic API key, and Claude analyses the server every day
-or week and writes improvement proposals (stability, security, memory, certificates…) that you mark done or
-dismiss. It is off until a token is connected. Claude only receives a summary of statuses (services, health
-checks, resource advice, apps): no logs, variables, files or credentials. The token is stored encrypted, never
-shown again, and API tokens cannot reach these routes. Proposals are advice: nothing is applied by itself.
+**Advisor** (menu) and **Settings → AI accounts**. Off until an account is connected.
+
+- **Accounts.** Add a Claude Code token (`claude setup-token` on your computer, it uses your Claude subscription), an
+  Anthropic API key, an OpenAI key (Codex / GPT models, Responses API) or any OpenAI-compatible provider (Gemini, Mistral,
+  OpenRouter, DeepSeek, a local Ollama: give its base URL). The list is **ordered**: Mas uses the first account, and when
+  it reaches its limit (rate or usage limit, no credit) the next one takes over, even in the middle of a task; the first one
+  is used again once it resets. A refused key is switched off. Keys are encrypted, never shown again, and adding one asks
+  for your password. A ChatGPT subscription cannot be used through a key: Codex needs an OpenAI API key.
+- **Advisor.** Every day or week the AI reads a summary of statuses (services, health checks, resource advice, apps,
+  compliance and SEO scores: no logs, variables or credentials) and writes proposals, sites first (GDPR, SEO, style,
+  mobile), then the server. Each can be marked done, dismissed, or handed to the robot.
+- **Robot.** Give it a goal ("make the site GDPR compliant", "improve its SEO", "add a FAQ and round the buttons", or one
+  of the presets, or a scheduled maintenance round). It audits the site, reads its repository, commits the changes,
+  deploys through Mas and audits again, with every step shown live. *Ask me* mode waits for your click before each commit,
+  deployment and fix; *fully automatic* does it all, while Mas still runs `nginx -t`, health-checks the release and rolls
+  back by itself. The robot has no shell and no secret: it works through eleven tools with a short-lived token of its own
+  (deleted when the run ends) that cannot reach accounts, tokens or environment variables, only the repositories of your
+  apps, and never `.env`, keys or CI workflows. Audit texts and files are treated as data, never as instructions.
 
 ### Creating an app from MCP
 

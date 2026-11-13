@@ -5,9 +5,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Shell, useSession } from "@/components/Shell";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
-import { api, ApiError, timeAgo, type AdvisorState, type ApiToken, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
+import { api, ApiError, timeAgo, type ApiToken, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
-import { AdvisorConnect } from "@/components/AdvisorConnect";
+import { AiAccountsList } from "@/components/AiAccounts";
 import Link from "next/link";
 
 function PasswordForm() {
@@ -671,13 +671,10 @@ function PeopleCard() {
 
 function AdvisorCard() {
   const t = useT();
-  const [state, setState] = useState<AdvisorState | null>(null);
-  const load = () => { api<AdvisorState>("/advisor").then(setState).catch(() => {}); };
-  useEffect(load, []);
   return (
-    <Card title={t("Claude advisor")} actions={<Link href="/advisor/" className="text-xs text-indigo-500 hover:underline">{t("See the proposals")}{state?.new ? ` (${state.new})` : ""}</Link>}>
-      <p className="mb-4 text-sm text-zinc-500">{t("Plug in a Claude Code token and Claude analyses the server every day: stability, security, memory, certificates. You accept or dismiss each proposal.")}</p>
-      {state ? <AdvisorConnect state={state} onChange={(s) => (s.connected === undefined ? load() : setState((cur) => cur && { ...cur, ...s }))} /> : <Spinner />}
+    <Card title={t("AI accounts")} actions={<Link href="/advisor/" className="text-xs text-indigo-500 hover:underline">{t("Open the advisor")}</Link>}>
+      <p className="mb-4 text-sm text-zinc-500">{t("Connect Claude Code tokens, Codex or other providers: an AI proposes improvements for your sites (GDPR, SEO, style) and can make them and deploy by itself. Several accounts: when one reaches its limit the next one takes over.")}</p>
+      <AiAccountsList />
     </Card>
   );
 }

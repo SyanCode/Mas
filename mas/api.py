@@ -13,14 +13,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from mas import preview as preview_mod
-from mas import __version__, advisor as advisor_mod, api_advisor, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, advisor as advisor_mod, ai as ai_mod, api_advisor, robot as robot_mod, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -257,6 +257,11 @@ def create_app(
                 await asyncio.to_thread(advisor.tick)
             except Exception:
                 log.exception("advisor failed")
+            try:  # the scheduled maintenance round of the robot
+                admin = next((u["id"] for u in db.list_users() if u["role"] == "admin"), None)
+                robot.tick(admin)
+            except Exception:
+                log.exception("robot schedule failed")
             try:
                 await asyncio.to_thread(supabase.auto_backup)
             except Exception:
@@ -339,10 +344,20 @@ def create_app(
                 row["advice"] = [x["id"] for x in resources.advice(a)]
             except Exception:  # noqa: BLE001
                 pass
+            if a.get("domain"):
+                last = compliance.latest(a["id"])
+                if last:
+                    row["compliance"] = {"score": last["score"], "verdict": last["verdict"], "counts": last["counts"],
+                                         "blocking": [f["title"] for f in last["findings"] if f["level"] == "critical"][:8]}
+                seo_last = json.loads(db.get_setting(f"seo_audit:{a['id']}") or "null")
+                if seo_last:
+                    row["seo"] = {k: seo_last[k] for k in ("score", "verdict") if k in seo_last}
             apps.append(row)
         return {"version": __version__, "services": services, "health_checks": checks, "apps": apps}
 
-    advisor = advisor_mod.Advisor(host, config, db, advisor_snapshot)
+    pool = ai_mod.AiPool(host, config, db)
+    advisor = advisor_mod.Advisor(db, pool, advisor_snapshot)
+    robot = robot_mod.Robot(db, pool, github_client, lambda token: mcp_endpoint.MasClient(app, token, None))
     usage = Usage(host, config, db, scanner, resources)
     maintenance = Maintenance(host, config, db, deployer)
     site_rules = SiteRules(db, host, maintenance, cms)
@@ -357,6 +372,7 @@ def create_app(
                       "WHERE status IN ('queued', 'building')")
             c.execute("UPDATE supabase SET status = 'failed', error = 'interrupted (Mas restarted)' "
                       "WHERE status = 'installing'")
+        robot.recover()
         promoted = db.get_setting("cluster_promoted_deploys")
         if promoted:  # this server just became the primary: build its apps (nginx, certificates)
             db.set_setting("cluster_promoted_deploys", None)
@@ -389,6 +405,8 @@ def create_app(
     app.state.notifier = notifier
     app.state.uptime = uptime
     app.state.advisor = advisor
+    app.state.pool = pool
+    app.state.robot = robot
 
     # -- middleware --------------------------------------------------------
 
@@ -402,7 +420,15 @@ def create_app(
             if time.monotonic() - activity["at"] > IDLE_AFTER:
                 activity["wake"].set()
             activity["at"] = time.monotonic()
+        path = request.url.path
+        if path.endswith("/index.txt") and not request.headers.get("rsc") and "text/html" in request.headers.get("accept", ""):
+            # A browser sent to the page's data file (after an update, a tab still running the old build falls back
+            # to this address): show the page itself, freshly loaded, instead of the raw payload.
+            query = "&".join(p for p in request.url.query.split("&") if p and not p.startswith("_rsc="))
+            return RedirectResponse(path[:-len("index.txt")] + (f"?{query}" if query else ""), status_code=302)
         response = await call_next(request)
+        if not path.startswith(("/api/", "/_next/static/", "/mcp")) and response.status_code < 400:
+            response.headers.setdefault("Cache-Control", "no-cache")  # pages and their data files are revalidated
         for key, value in SECURITY_HEADERS.items():
             response.headers.setdefault(key, value)
         if request.url.path.startswith("/api/"):
@@ -841,7 +867,8 @@ def create_app(
     api_cluster.register(app, db=db, current_session=current_session, cluster=cluster, deployer=deployer)
     app.state.cluster = cluster
     api_resources.register(app, db=db, current_session=current_session, deployer=deployer, resources=resources)
-    api_advisor.register(app, db=db, current_session=current_session, advisor=advisor, require_password=require_password)
+    api_advisor.register(app, db=db, current_session=current_session, advisor=advisor, pool=pool, robot=robot,
+                         require_password=require_password)
     api_maintenance.register(app, db=db, current_session=current_session, maintenance=maintenance, client_ip=client_ip)
     app.state.resources = resources
     app.state.stacks = stacks

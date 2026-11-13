@@ -33,36 +33,52 @@ function Dashboard() {
   const describe = useDescribe();
   const [data, setData] = useState<CmsDashboard | null>(null);
   const [error, setError] = useState("");
+  const [scope, setScope] = useState<"site" | "all">("site");
   useEffect(() => {
     api<CmsDashboard>("/cms/dashboard").then(setData).catch((e: ApiError) => setError(e.detail));
   }, []);
 
   if (sites.length === 0) return <><PageTitle title={t("Dashboard")} /><NoSite /></>;
   const q = site ? `app=${encodeURIComponent(site.id)}` : "";
-  const hasTraffic = !!data?.sites.some((s) => s.visits);
+  // With a site selected the figures are that site's own; "All sites" shows the sum.
+  const one = scope === "site" && site ? data?.sites.find((s) => s.id === site.id) : undefined;
+  const view = !data ? null : one
+    ? { totals: one.visits?.totals ?? { pageviews: 0, visitors: 0, requests: 0 }, days: one.visits?.days ?? [], countries: one.visits?.countries ?? [], scheduled: one.scheduled.length, activity: data.activity.filter((a) => a.site === one.name) }
+    : { totals: data.totals, days: data.days, countries: data.countries, scheduled: data.scheduled, activity: data.activity };
+  const hasTraffic = !!(one ? one.visits : data?.sites.some((s) => s.visits));
+  const label = one ? one.name : t("all your sites");
 
   return (
     <>
       <PageTitle title={t("Dashboard")} description={t("Welcome back, {name}.", { name: session.username })} />
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
+      {site && sites.length > 1 && (
+        <div className="mb-4 inline-flex rounded-lg border p-0.5 text-xs">
+          {([["site", site.name], ["all", t("All sites")]] as const).map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={scope === k} onClick={() => setScope(k)}
+              className={`max-w-48 truncate rounded-md px-3 py-1 font-medium transition-all ${scope === k ? "bg-foreground text-background shadow" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
+          ))}
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {!data ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28" />) : (
           <>
-            <StatCard label={t("Page views · 7 days")} numeric={hasTraffic ? data.totals.pageviews : undefined} value="—" icon={<Eye />} trend={hasTraffic ? data.days.map((d) => d.pageviews) : undefined} hint={hasTraffic ? undefined : t("No traffic data yet")} />
-            <StatCard label={t("Visitors · 7 days")} numeric={hasTraffic ? data.totals.visitors : undefined} value="—" icon={<Users />} trend={hasTraffic ? data.days.map((d) => d.visitors) : undefined} trendColor={GOOD} />
+            <StatCard label={t("Page views · 7 days")} numeric={hasTraffic && view ? view.totals.pageviews : undefined} value="—" icon={<Eye />} trend={hasTraffic && view ? view.days.map((d) => d.pageviews) : undefined} hint={hasTraffic ? label : t("No traffic data yet")} />
+            <StatCard label={t("Visitors · 7 days")} numeric={hasTraffic && view ? view.totals.visitors : undefined} value="—" icon={<Users />} trend={hasTraffic && view ? view.days.map((d) => d.visitors) : undefined} trendColor={GOOD} hint={hasTraffic ? label : undefined} />
             <StatCard label={t("Sites")} numeric={data.sites.length} icon={<Globe />} />
-            <StatCard label={t("Scheduled")} numeric={data.scheduled} icon={<CalendarClock />} hint={session.role === "admin" && data.editors != null ? t("{n} editor(s)", { n: data.editors }) : undefined} />
+            <StatCard label={t("Scheduled")} numeric={view?.scheduled ?? data.scheduled} icon={<CalendarClock />} hint={session.role === "admin" && data.editors != null ? t("{n} editor(s)", { n: data.editors }) : undefined} />
           </>
         )}
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader><CardTitle>{t("Traffic")}</CardTitle><CardDescription>{t("Page views and visitors per day, all your sites")}</CardDescription></CardHeader>
+          <CardHeader><CardTitle>{t("Traffic")}</CardTitle><CardDescription>{t("Page views and visitors per day")} · {label}</CardDescription></CardHeader>
           <CardContent>
             {!data ? <Skeleton className="h-64" /> : hasTraffic
-              ? <TrafficChart days={data.days} lang={lang} />
+              ? <TrafficChart days={view?.days ?? []} lang={lang} />
               : <p className="py-16 text-center text-sm text-muted-foreground">{t("Visits appear here once your sites have a domain and receive traffic.")}</p>}
           </CardContent>
         </Card>
@@ -94,10 +110,10 @@ function Dashboard() {
         </Card>
       </div>
 
-      {data && (data.countries?.length ?? 0) > 0 && (
+      {view && (view.countries?.length ?? 0) > 0 && (
         <Card className="mt-6">
-          <CardHeader><CardTitle>{t("Visitors by country")}</CardTitle><CardDescription>{t("Last 7 days, all your sites")}</CardDescription></CardHeader>
-          <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]"><WorldMap countries={data.countries} /><CountryList countries={data.countries} limit={6} /></CardContent>
+          <CardHeader><CardTitle>{t("Visitors by country")}</CardTitle><CardDescription>{t("Last 7 days")} · {label}</CardDescription></CardHeader>
+          <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]"><WorldMap countries={view.countries} /><CountryList countries={view.countries} limit={6} /></CardContent>
         </Card>
       )}
 
@@ -127,7 +143,7 @@ function Dashboard() {
         <Card>
           <CardHeader className="flex-row items-center justify-between space-y-0"><CardTitle>{t("Recent activity")}</CardTitle><Button asChild variant="link" size="sm" className="h-auto p-0"><Link href={`/cms/activity/?${q}`}>{t("See all")}</Link></Button></CardHeader>
           <CardContent className="space-y-4">
-            {!data ? <Skeleton className="h-40" /> : data.activity.length === 0 ? <p className="text-sm text-muted-foreground">{t("Nothing yet.")}</p> : data.activity.slice(0, 7).map((a) => (
+            {!data ? <Skeleton className="h-40" /> : (view?.activity ?? []).length === 0 ? <p className="text-sm text-muted-foreground">{t("Nothing yet.")}</p> : (view?.activity ?? []).slice(0, 7).map((a) => (
               <div key={a.id} className="flex items-start gap-3">
                 <Avatar name={a.actor} className="size-7 text-[10px]" />
                 <div className="min-w-0 text-sm"><p className="break-words"><span className="font-medium">{a.actor}</span> {describe(a)}</p><p className="text-xs text-muted-foreground">{a.site ? `${a.site} · ` : ""}{timeAgo(a.at)}</p></div>
