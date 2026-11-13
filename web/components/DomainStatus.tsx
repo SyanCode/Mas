@@ -78,7 +78,7 @@ export function DomainStatus({ appId }: { appId: string }) {
               <p className="text-zinc-500">
                 {c.status === "missing" ? t("No DNS record yet. Set the following record at your registrar:") : t("It points to {ips}. Set the following record at your registrar:", { ips: c.ips.join(", ") })}
               </p>
-              <table className="mono w-full text-left">
+              <div className="overflow-x-auto"><table className="mono w-full min-w-[22rem] text-left">
                 <thead className="text-[10px] uppercase tracking-wider text-zinc-500"><tr><th className="pb-1 font-medium">{t("Type")}</th><th className="pb-1 font-medium">{t("Name")}</th><th className="pb-1 font-medium">{t("Value")}</th></tr></thead>
                 <tbody>
                   {c.records.map((r, i) => (
@@ -92,7 +92,7 @@ export function DomainStatus({ appId }: { appId: string }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </div>
           )}
         </div>

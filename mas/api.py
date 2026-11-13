@@ -20,7 +20,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from mas import preview as preview_mod
-from mas import __version__, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, advisor as advisor_mod, api_advisor, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -253,6 +253,10 @@ def create_app(
                 await asyncio.to_thread(resources.tick)
             except Exception:
                 log.exception("resources tick failed")
+            try:  # Claude's proposals, when a token is connected
+                await asyncio.to_thread(advisor.tick)
+            except Exception:
+                log.exception("advisor failed")
             try:
                 await asyncio.to_thread(supabase.auto_backup)
             except Exception:
@@ -315,6 +319,30 @@ def create_app(
         Cluster(host, config, db, deployer)
     resources = Resources(host, config, db, deployer, cluster)
     restart_all = RestartAll(host, config, db, deployer, scanner)
+
+    def advisor_snapshot() -> dict:
+        """What Claude is told about the server: statuses only, no log, no variable, no file, no credential."""
+        from mas.health import run_checks
+        services = [{"name": svc.display_name or svc.name, "type": svc.type.value, "manager": svc.manager.value,
+                     "status": svc.status.value, "domains": svc.domains[:5],
+                     "ssl_expires": svc.ssl_expires.date().isoformat() if svc.ssl_expires else None}
+                    for svc in scanner.result().services][:120]
+        try:
+            checks = [{k: c.as_dict()[k] for k in ("level", "category", "title", "detail")}
+                      for c in run_checks(host, config, dns=False)][:60]
+        except Exception:  # noqa: BLE001 - a failing check must not block the advice
+            checks = []
+        apps = []
+        for a in db.list_apps()[:80]:
+            row = {"name": a.get("name") or a["id"], "type": a.get("type"), "domain": a.get("domain"), "mode": a.get("mode")}
+            try:
+                row["advice"] = [x["id"] for x in resources.advice(a)]
+            except Exception:  # noqa: BLE001
+                pass
+            apps.append(row)
+        return {"version": __version__, "services": services, "health_checks": checks, "apps": apps}
+
+    advisor = advisor_mod.Advisor(host, config, db, advisor_snapshot)
     usage = Usage(host, config, db, scanner, resources)
     maintenance = Maintenance(host, config, db, deployer)
     site_rules = SiteRules(db, host, maintenance, cms)
@@ -360,6 +388,7 @@ def create_app(
     app.state.compliance = app_state_compliance
     app.state.notifier = notifier
     app.state.uptime = uptime
+    app.state.advisor = advisor
 
     # -- middleware --------------------------------------------------------
 
@@ -812,6 +841,7 @@ def create_app(
     api_cluster.register(app, db=db, current_session=current_session, cluster=cluster, deployer=deployer)
     app.state.cluster = cluster
     api_resources.register(app, db=db, current_session=current_session, deployer=deployer, resources=resources)
+    api_advisor.register(app, db=db, current_session=current_session, advisor=advisor, require_password=require_password)
     api_maintenance.register(app, db=db, current_session=current_session, maintenance=maintenance, client_ip=client_ip)
     app.state.resources = resources
     app.state.stacks = stacks

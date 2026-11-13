@@ -108,22 +108,22 @@ export function Card({ title, actions, children, className = "", padded = true }
   return (
     <section className={`glass animate-fade-up overflow-hidden rounded-2xl shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_20px_50px_-30px_rgba(0,0,0,0.6)] ${className}`}>
       {(title || actions) && (
-        <header className="flex items-center justify-between gap-2 border-b border-zinc-200/80 px-5 py-3 dark:border-white/[0.06]">
-          <h2 className="text-[13px] font-semibold tracking-tight">{title}</h2>
-          <div className="flex items-center gap-2">{actions}</div>
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200/80 px-4 py-3 sm:px-5 dark:border-white/[0.06]">
+          <h2 className="min-w-0 text-[13px] font-semibold tracking-tight">{title}</h2>
+          <div className="flex flex-wrap items-center gap-2">{actions}</div>
         </header>
       )}
-      <div className={padded ? "p-5" : ""}>{children}</div>
+      <div className={padded ? "p-4 sm:p-5" : ""}>{children}</div>
     </section>
   );
 }
 
 export function PageHeader({ title, subtitle, actions, eyebrow }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; eyebrow?: ReactNode }) {
   return (
-    <div className="mb-8 flex flex-wrap items-end justify-between gap-4 animate-fade-up">
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3 animate-fade-up sm:mb-8 sm:gap-4">
       <div className="min-w-0">
         {eyebrow && <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">{eyebrow}</div>}
-        <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em]">{title}</h1>
+        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-[28px]">{title}</h1>
         {subtitle && <div className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</div>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
