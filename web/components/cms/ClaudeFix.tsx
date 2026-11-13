@@ -26,6 +26,11 @@ export function ClaudeFix({ preset, title, description, onDone }: { preset: "com
     api<{ connected: boolean }>("/advisor").then((r) => setConnected(r.connected)).catch(() => setConnected(false));
   }, [admin]);
 
+  useEffect(() => {  // a refresh must not lose the run: pick it up again
+    if (!admin) return;
+    api<{ id: number } | null>("/robot/active").then((a) => a && api<RobotRun>(`/robot/runs/${a.id}`).then(setRun)).catch(() => {});
+  }, [admin]);
+
   const live = !!run && (run.status === "running" || run.status === "waiting");
   useEffect(() => {
     if (!live) return;

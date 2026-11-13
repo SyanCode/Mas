@@ -225,3 +225,47 @@ def test_recover_and_schedule(env):
     assert robot.configure("weekly", "auto") == {"schedule": "weekly", "autonomy": "auto", "last_scheduled": 0.0}
     with pytest.raises(AiError):
         robot.configure("hourly", None)
+
+
+def test_a_repeated_call_is_not_run_twice_and_a_loop_is_stopped(env):
+    robot, db, pool, gh, mas, uid = env
+    commit = tool("repo_commit", app_id="shop", message="m", files={"a.txt": "x"})
+    pool.opener = script([commit], [commit], [commit], [commit], [commit], [{"type": "text", "text": "never reached"}])
+
+    async def go():
+        return await finish(robot, robot.start("fix it", "shop", "auto", uid), db)
+    run = asyncio.run(go())
+    assert run["status"] == "failed" and "repeating the same action" in run["summary"]
+    assert len(gh.commits) == 1  # once, whatever the model did
+    assert sum("already done" in s["text"] for s in run["steps"]) == 2  # told twice, stopped on the fourth call
+
+
+def test_a_repeated_approved_call_is_not_asked_again(env):
+    robot, db, pool, gh, mas, uid = env
+    commit = tool("repo_commit", app_id="shop", message="m", files={"a.txt": "x"})
+    pool.opener = script([commit], [commit], [{"type": "text", "text": "done"}])
+
+    async def go():
+        run_id = robot.start("fix it", "shop", "ask", uid)
+        for _ in range(300):
+            await asyncio.sleep(0.01)
+            if db.get_robot_run(run_id)["status"] == "waiting":
+                robot.decide(run_id, True)
+                break
+        return await finish(robot, run_id, db)
+    run = asyncio.run(go())
+    assert run["status"] == "done" and len(gh.commits) == 1
+    assert sum(s["kind"] == "ask" for s in run["steps"]) == 1
+
+
+def test_reads_can_repeat_after_a_change(env):
+    robot, db, pool, gh, mas, uid = env
+    report = tool("compliance_report", app_id="shop")
+    pool.opener = script([report], [tool("repo_commit", app_id="shop", message="m", files={"a.txt": "x"})], [report],
+                         [{"type": "text", "text": "done"}])
+
+    async def go():
+        return await finish(robot, robot.start("fix it", "shop", "auto", uid), db)
+    run = asyncio.run(go())
+    assert run["status"] == "done"
+    assert sum("already done" in s["text"] for s in run["steps"]) == 0  # the second report is a fresh look
