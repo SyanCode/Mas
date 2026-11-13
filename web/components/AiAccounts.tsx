@@ -1,16 +1,70 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ArrowDown, ArrowUp, KeyRound, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ExternalLink, KeyRound, LogIn, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, ConfirmDialog, ErrorText, Input, Label, Select, Spinner } from "@/components/ui";
 import { api, ApiError, timeAgo, type AiAccount, type AiAccounts } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+
+/** "Connect Claude": Mas drives the official login of Claude Code on the server; the user only opens a link and pastes a code. */
+function ClaudeConnect({ onDone, onManual }: { onDone: (d: AiAccounts) => void; onManual: () => void }) {
+  const t = useT();
+  const [status, setStatus] = useState<{ installed: boolean; npm: boolean } | null>(null);
+  const [url, setUrl] = useState("");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => { api<{ installed: boolean; npm: boolean }>("/ai/claude-login").then(setStatus).catch((e: ApiError) => setError(e.detail)); }, []);
+  useEffect(() => () => { api("/ai/claude-login", { method: "DELETE" }).catch(() => {}); }, []);
+
+  async function step(label: string, fn: () => Promise<void>) {
+    setBusy(label); setError("");
+    try { await fn(); } catch (e) { setError((e as ApiError).detail); } finally { setBusy(""); }
+  }
+  const install = () => step("install", async () => { setStatus(await api("/ai/claude-login/install", { method: "POST" })); });
+  const start = (e: FormEvent) => { e.preventDefault(); step("start", async () => { setUrl((await api<{ url: string }>("/ai/claude-login/start", { method: "POST", body: { password } })).url); setPassword(""); }); };
+  const finish = (e: FormEvent) => { e.preventDefault(); step("finish", async () => { onDone(await api<AiAccounts>("/ai/claude-login/code", { method: "POST", body: { code, name } })); }); };
+
+  return (
+    <div className="animate-pop max-w-lg space-y-3 rounded-xl border border-zinc-200/80 p-4 dark:border-white/[0.06]">
+      <ErrorText>{error}</ErrorText>
+      {!status ? <Spinner /> : !status.installed ? (
+        <div className="space-y-3">
+          <p className="text-zinc-500">{t("Mas signs in to Claude with the official Claude Code tool, which is not installed on this server yet.")}</p>
+          <Button variant="glow" disabled={!!busy || !status.npm} onClick={install}>{busy === "install" ? <Spinner /> : <Plus className="size-3.5" />}{busy === "install" ? t("Installing… (a minute)") : t("Install Claude Code")}</Button>
+          {!status.npm && <p className="text-xs text-rose-500">{t("Node.js is needed first: apt install nodejs npm")}</p>}
+        </div>
+      ) : !url ? (
+        <form onSubmit={start} className="space-y-3">
+          <p className="text-zinc-500">{t("Mas gives you a link: sign in to Claude there, then paste the short code it shows. Mas keeps the rest.")}</p>
+          <Input type="password" placeholder={t("Your password")} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+          <Button variant="glow" type="submit" disabled={!!busy}>{busy === "start" ? <Spinner /> : <LogIn className="size-3.5" />}{t("Get the sign-in link")}</Button>
+        </form>
+      ) : (
+        <form onSubmit={finish} className="space-y-3">
+          <p className="font-medium">{t("1. Sign in to Claude")}</p>
+          <a href={url} target="_blank" rel="noopener noreferrer" className="mas-cta inline-flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white"><ExternalLink className="size-4" />{t("Open Claude")}</a>
+          <Label title={t("2. Paste the code Claude shows")}>
+            <Input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" spellCheck={false} placeholder="…#…" required />
+          </Label>
+          <Label title={t("Name")}><Input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder={t("Claude Pro 1")} /></Label>
+          <Button variant="glow" type="submit" disabled={!!busy || !code}>{busy === "finish" ? <Spinner /> : <KeyRound className="size-3.5" />}{t("Connect")}</Button>
+        </form>
+      )}
+      <button type="button" onClick={onManual} className="block text-xs text-zinc-500 hover:underline">{t("Paste a token by hand instead")}</button>
+    </div>
+  );
+}
 
 /** Claude, Codex and other accounts in order of priority: the next one takes over when one is at its limit. */
 export function AiAccountsList({ onChange }: { onChange?: (accounts: AiAccount[]) => void }) {
   const t = useT();
   const [data, setData] = useState<AiAccounts | null>(null);
   const [adding, setAdding] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [provider, setProvider] = useState("anthropic");
   const [name, setName] = useState("");
   const [secret, setSecret] = useState("");
@@ -80,9 +134,14 @@ export function AiAccountsList({ onChange }: { onChange?: (accounts: AiAccount[]
           </ol>
         </>
       )}
-      {!adding ? (
-        <Button variant="primary" onClick={() => setAdding(true)}><Plus className="size-3.5" />{t("Add an account")}</Button>
-      ) : (
+      {connecting && <ClaudeConnect onDone={(d) => { apply(d); setConnecting(false); }} onManual={() => { setConnecting(false); setAdding(true); }} />}
+      {!adding && !connecting && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="glow" onClick={() => setConnecting(true)}><LogIn className="size-3.5" />{t("Connect Claude")}</Button>
+          <Button variant="secondary" onClick={() => setAdding(true)}><Plus className="size-3.5" />{t("Add an account")}</Button>
+        </div>
+      )}
+      {adding && (
         <form onSubmit={add} className="animate-pop max-w-lg space-y-3 rounded-xl border border-zinc-200/80 p-4 dark:border-white/[0.06]">
           <Label title={t("Provider")}>
             <Select value={provider} onChange={(e) => { setProvider(e.target.value); setModel(""); }}>

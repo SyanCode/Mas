@@ -1918,5 +1918,15 @@
   "Improve the SEO with Claude": "SEO mit Claude verbessern",
   "Claude reads the site and its pages, fixes titles, descriptions, headings, robots.txt and the sitemap, deploys and checks again.": "Claude liest die Site und ihre Seiten, behebt Titel, Beschreibungen, Überschriften, robots.txt und Sitemap, deployt und prüft erneut.",
   "Run again": "Erneut starten",
-  "Fix with Claude": "Mit Claude beheben"
+  "Fix with Claude": "Mit Claude beheben",
+  "Mas signs in to Claude with the official Claude Code tool, which is not installed on this server yet.": "Mas meldet sich mit dem offiziellen Tool Claude Code bei Claude an, das auf diesem Server noch nicht installiert ist.",
+  "Installing… (a minute)": "Installation… (eine Minute)",
+  "Install Claude Code": "Claude Code installieren",
+  "Node.js is needed first: apt install nodejs npm": "Zuerst wird Node.js benötigt: apt install nodejs npm",
+  "Mas gives you a link: sign in to Claude there, then paste the short code it shows. Mas keeps the rest.": "Mas gibt Ihnen einen Link: Melden Sie sich dort bei Claude an und fügen Sie den kurzen Code ein. Den Rest übernimmt Mas.",
+  "Get the sign-in link": "Anmeldelink holen",
+  "1. Sign in to Claude": "1. Bei Claude anmelden",
+  "Open Claude": "Claude öffnen",
+  "2. Paste the code Claude shows": "2. Den von Claude angezeigten Code einfügen",
+  "Paste a token by hand instead": "Stattdessen ein Token von Hand einfügen"
 }

@@ -170,7 +170,9 @@ no AI: `/mcp` is only a protocol in front of the API.
 
 **Advisor** (menu) and **Settings → AI accounts**. Off until an account is connected.
 
-- **Accounts.** Add a Claude Code token (`claude setup-token` on your computer, it uses your Claude subscription), an
+- **Accounts.** **Connect Claude** drives the official Claude Code sign-in on the server (Mas installs the tool if
+  Node.js is there): open the link, sign in to Claude, paste the short code, and the account is added with your Claude
+  subscription. Or add a token by hand (`claude setup-token`), an
   Anthropic API key, an OpenAI key (Codex / GPT models, Responses API) or any OpenAI-compatible provider (Gemini, Mistral,
   OpenRouter, DeepSeek, a local Ollama: give its base URL). The list is **ordered**: Mas uses the first account, and when
   it reaches its limit (rate or usage limit, no credit) the next one takes over, even in the middle of a task; the first one
