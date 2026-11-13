@@ -80,3 +80,9 @@ def test_flat_fallback_and_shape():
     assert extract_token(f"{token}Storethistokensecurely.", False) == token
     out = shape(f"a\n{token}\nStore this")
     assert token not in out and "sk-ant-oat01-<" in out and "⏎" in out
+
+
+def test_raw_window_shows_only_the_start_of_the_token():
+    from mas.claudelogin import raw_window
+    out = raw_window(b"\x1b[1Cyear):\x1b[1Csk-ant-oat01-SECRETSECRETSECRET")
+    assert "sk-ant-oat01-S" in out and "SECRETSECRET" not in out and "\\x1b[1C" in out
