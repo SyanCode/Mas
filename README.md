@@ -142,6 +142,10 @@ $ sudo mas user passwd [name]
 $ sudo mas token create claude [--write|--create] [--days 90]  # API token for scripts / AI agents (shown once)
 $ sudo mas token list
 $ sudo mas token revoke <id>
+
+$ sudo mas backup create [-o DIR] [--keep 7]  # database, secret key, config, GitHub App key
+$ sudo mas backup list
+$ sudo mas backup restore <file>  # current files kept as *.before-restore, then restart mas
 ```
 
 API tokens (`Authorization: Bearer mas_pat_…`) are read-only unless created with `--write`,
@@ -857,7 +861,8 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Resources and operations**: Resources page, memory limits, sleep when idle, autoscaling,
       advice, restart everything identical, maintenance mode.
 - [x] **2FA recovery codes**: ten single-use codes at enrolment, regenerated from Settings.
-- [ ] Next: preview deployments per pull request, notifications.
+- [x] **Backup of Mas itself**: `mas backup create|list|restore`.
+- [ ] Next: preview deployments per pull request, host notifications.
 
 ## License
 

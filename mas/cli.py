@@ -39,7 +39,9 @@ router_app = typer.Typer(help="Router port forwarding for temporary replacements
                          no_args_is_help=True)
 app.add_typer(router_app, name="router")
 token_app = typer.Typer(help="Personal API tokens for scripts and AI agents (MCP).", no_args_is_help=True)
+backup_app = typer.Typer(help="Backups of Mas itself: its database, secret key and configuration.", no_args_is_help=True)
 app.add_typer(token_app, name="token")
+app.add_typer(backup_app, name="backup")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -1069,6 +1071,70 @@ def replacement_prepare(
     console.print(f"[green]✓[/] Replacement synchronized: {result['remote']}")
     console.print("  copied: " + ", ".join(result["paths"]))
     console.print("  " + result["next"])
+
+
+def _need_root(env: "Env") -> None:
+    if env.host.euid != 0:
+        fail(f"Mas needs administrator rights for this. Run: [bold]{sudo_hint(sys.argv[1:])}[/]")
+
+
+@backup_app.command("create")
+def backup_create(
+    ctx: typer.Context,
+    output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Folder to write into (default /var/lib/mas/backups/mas).")] = None,
+    keep: Annotated[int, typer.Option(help="Backups kept in the folder (0: keep all).")] = 7,
+) -> None:
+    """Back up Mas: database snapshot, secret key, config and GitHub App key, in one private archive."""
+    from mas import selfbackup
+
+    env: Env = ctx.obj
+    _need_root(env)
+    try:
+        path = selfbackup.create(env.config, output, keep)
+    except selfbackup.SelfBackupError as exc:
+        fail(str(exc))
+    env.db.audit(actor(), "mas-backup", True, detail=path.name)
+    console.print(f"[green]✓[/] {path} ({path.stat().st_size // 1024} KiB)")
+    console.print("[yellow]It holds the keys that decrypt your secrets:[/] copy it off this server, keep it private.")
+
+
+@backup_app.command("list")
+def backup_list(ctx: typer.Context, directory: Annotated[Optional[Path], typer.Argument()] = None) -> None:
+    """List the backups of Mas."""
+    from mas import selfbackup
+
+    rows = selfbackup.list_backups(directory or selfbackup.BACKUP_DIR)
+    if not rows:
+        console.print("[dim]no backup (create one with `sudo mas backup create`)[/]")
+    for r in rows:
+        console.print(f"{r['name']}  {r['size'] // 1024} KiB")
+
+
+@backup_app.command("restore")
+def backup_restore(
+    ctx: typer.Context,
+    archive: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="A mas-*.tar.gz backup.")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Do not ask for confirmation.")] = False,
+) -> None:
+    """Restore Mas from a backup (current files are kept as *.before-restore)."""
+    from mas import selfbackup
+
+    env: Env = ctx.obj
+    _need_root(env)
+    try:
+        info = selfbackup.inspect(archive)
+    except selfbackup.SelfBackupError as exc:
+        fail(str(exc))
+    console.print(f"Backup of Mas {info.get('version', '?')} made {info.get('created', '?')}: database + {', '.join(info.get('files', [])) or 'no file'}.")
+    if not yes:
+        typer.confirm("Replace the current database, keys and configuration?", abort=True)
+    try:
+        done = selfbackup.restore(env.config, archive)
+    except selfbackup.SelfBackupError as exc:
+        fail(str(exc))
+    for path in done:
+        console.print(f"[green]✓[/] {path}")
+    console.print("Restart Mas to use it: [bold]sudo systemctl restart mas[/]")
 
 
 @app.command("self-update")
