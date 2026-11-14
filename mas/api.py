@@ -32,6 +32,7 @@ from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
 from mas.compliance import Compliance
 from mas import profile as profile_mod
+from mas.autopilot import Autopilot
 from mas import selfbackup
 from mas.envcrypt import EnvError
 from mas.offsite import Offsite, OffsiteError
@@ -281,6 +282,10 @@ def create_app(
                 robot.tick(admin)
             except Exception:
                 log.exception("robot schedule failed")
+            try:  # the proposals of the advisor, applied one after the other when the autopilot is on
+                autopilot.tick(next((u["id"] for u in db.list_users() if u["role"] == "admin"), None))
+            except Exception:
+                log.exception("autopilot failed")
             try:
                 await asyncio.to_thread(supabase.auto_backup)
             except Exception:
@@ -380,6 +385,7 @@ def create_app(
     advisor = advisor_mod.Advisor(db, pool, advisor_snapshot)
     claude_login = claudelogin_mod.ClaudeLogin(host, str(Path(db.path).parent / "claude-login"))
     robot = robot_mod.Robot(db, pool, github_client, lambda token: mcp_endpoint.MasClient(app, token, None))
+    autopilot = Autopilot(db, robot, pool)
     usage = Usage(host, config, db, scanner, resources)
     maintenance = Maintenance(host, config, db, deployer)
     site_rules = SiteRules(db, host, maintenance, cms)
@@ -432,6 +438,7 @@ def create_app(
     app.state.pool = pool
     app.state.claude_login = claude_login
     app.state.robot = robot
+    app.state.autopilot = autopilot
 
     # -- middleware --------------------------------------------------------
 
@@ -1039,7 +1046,7 @@ def create_app(
     app.state.cluster = cluster
     api_resources.register(app, db=db, current_session=current_session, deployer=deployer, resources=resources)
     api_advisor.register(app, db=db, current_session=current_session, advisor=advisor, pool=pool, robot=robot,
-                         require_password=require_password, claude_login=claude_login)
+                         require_password=require_password, claude_login=claude_login, autopilot=autopilot)
     api_maintenance.register(app, db=db, current_session=current_session, maintenance=maintenance, client_ip=client_ip)
     app.state.resources = resources
     app.state.stacks = stacks

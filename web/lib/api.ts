@@ -604,7 +604,20 @@ export interface Suggestion {
   title: string;
   detail: string;
   target: string;
-  status: "new" | "done" | "dismissed";
+  status: "new" | "working" | "done" | "failed" | "dismissed";
+  run_id?: number | null;
+  attempts?: number;
+  result?: string | null;
+}
+
+/** Autopilot: the robot applies the proposals by itself and closes them. */
+export interface Autopilot {
+  enabled: boolean;
+  max_per_day: number;
+  paused: string;
+  started_today: number;
+  working: number | null;
+  applied: number;
 }
 
 /** The advisor: schedule and proposals (the accounts are in AiAccount). */
@@ -615,6 +628,7 @@ export interface AdvisorState {
   error: string;
   new: number;
   suggestions: Suggestion[];
+  autopilot: Autopilot;
 }
 
 /** A Claude / Codex / compatible account of the pool (never its key). */

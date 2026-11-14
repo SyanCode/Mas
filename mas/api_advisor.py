@@ -49,6 +49,11 @@ class AdvisorBody(BaseModel):
     interval: str | None = Field(default=None, max_length=10)
 
 
+class AutopilotBody(BaseModel):
+    enabled: bool | None = None
+    max_per_day: int | None = Field(default=None, ge=1, le=10)
+
+
 class StatusBody(BaseModel):
     status: str = Field(max_length=10)
 
@@ -69,7 +74,7 @@ class RobotSettings(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: Advisor, pool: AiPool, robot: Robot,
-             require_password: Callable, claude_login: ClaudeLogin) -> None:
+             require_password: Callable, claude_login: ClaudeLogin, autopilot) -> None:
 
     def bad(exc: Exception) -> HTTPException:
         return HTTPException(400, str(exc))
@@ -158,7 +163,16 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
 
     @app.get("/api/advisor")
     def overview(_=Depends(current_session)) -> dict:
-        return {**advisor.settings(), "suggestions": db.list_suggestions()}
+        return {**advisor.settings(), "suggestions": db.list_suggestions(), "autopilot": autopilot.settings()}
+
+    @app.put("/api/advisor/autopilot")
+    def autopilot_configure(body: AutopilotBody, s=Depends(current_session)) -> dict:
+        try:
+            out = autopilot.configure(body.enabled, body.max_per_day)
+        except AiError as exc:
+            raise bad(exc) from None
+        db.audit(s.username, "autopilot-settings", True, detail=("on" if out["enabled"] else "off") + f", {out['max_per_day']}/day")
+        return out
 
     @app.put("/api/advisor")
     def configure(body: AdvisorBody, _=Depends(current_session)) -> dict:
@@ -175,7 +189,7 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
         except AdvisorError as exc:
             raise HTTPException(409, str(exc)) from None
         db.audit(s.username, "advisor-run", True, detail=f"{result['added']} new")
-        return {**result, **advisor.settings(), "suggestions": db.list_suggestions()}
+        return {**result, **advisor.settings(), "suggestions": db.list_suggestions(), "autopilot": autopilot.settings()}
 
     @app.put("/api/advisor/suggestions/{suggestion_id}")
     def set_status(suggestion_id: int, body: StatusBody, _=Depends(current_session)) -> dict:
@@ -183,6 +197,8 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
             raise HTTPException(400, "status must be new, done or dismissed")
         if not db.set_suggestion_status(suggestion_id, body.status):
             raise HTTPException(404, "unknown proposal")
+        if body.status == "new":  # back to review: the autopilot may try it again from scratch
+            db.update_suggestion(suggestion_id, attempts=0, finished_at=None, result=None)
         return {"ok": True}
 
     # -- robot --------------------------------------------------------------------------------------

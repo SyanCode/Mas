@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS advisor_suggestions (  -- improvement proposals writt
     title TEXT NOT NULL,
     detail TEXT NOT NULL,
     target TEXT NOT NULL DEFAULT '',           -- the service or app it is about
-    status TEXT NOT NULL DEFAULT 'new'         -- new | done | dismissed
+    status TEXT NOT NULL DEFAULT 'new'         -- new | working | done | failed | dismissed
 );
 CREATE TABLE IF NOT EXISTS ai_accounts (      -- Claude / Codex / compatible accounts, tried in the order of priority
     id INTEGER PRIMARY KEY,
@@ -334,6 +334,11 @@ MIGRATIONS = [
     ("apps", "resources TEXT"),    # JSON {memory_mb, sleep_after_min, autoscale: {min, max}} (mas.resources)
     ("apps", "project TEXT"),      # id of the project (mas.projects) the app belongs to
     ("invites", "role TEXT NOT NULL DEFAULT 'editor'"),
+    ("advisor_suggestions", "run_id INTEGER"),          # autopilot: the robot run that applies it
+    ("advisor_suggestions", "attempts INTEGER NOT NULL DEFAULT 0"),
+    ("advisor_suggestions", "result TEXT"),             # the robot's report, or why it failed
+    ("advisor_suggestions", "started_at REAL"),
+    ("advisor_suggestions", "finished_at REAL"),
     ("users", "display_name TEXT"),   # profile: full name
     ("users", "nickname TEXT"),
     ("users", "bio TEXT"),
@@ -1020,6 +1025,14 @@ class Database:
             rows = c.execute("SELECT * FROM advisor_suggestions" + (" WHERE status = ?" if status else "") +
                              " ORDER BY created_at DESC, id DESC LIMIT 200", (status,) if status else ()).fetchall()
         return [dict(r) for r in rows]
+
+    def update_suggestion(self, suggestion_id: int, **fields: Any) -> None:
+        allowed = {"status", "run_id", "attempts", "result", "started_at", "finished_at"}
+        if not fields or not set(fields) <= allowed:
+            raise ValueError(f"invalid suggestion fields: {set(fields) - allowed}")
+        with self.tx() as c:
+            c.execute(f"UPDATE advisor_suggestions SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?",
+                      (*fields.values(), suggestion_id))
 
     def set_suggestion_status(self, suggestion_id: int, status: str) -> bool:
         with self.tx() as c:

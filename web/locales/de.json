@@ -1983,5 +1983,14 @@
   "About": "Über mich",
   "A few words about you (300 characters).": "Ein paar Worte über dich (300 Zeichen).",
   "Your login stays {name}.": "Dein Login bleibt {name}.",
-  "This file is not a picture the browser can read.": "Diese Datei ist kein Bild, das der Browser lesen kann."
+  "This file is not a picture the browser can read.": "Diese Datei ist kein Bild, das der Browser lesen kann.",
+  "Autopilot": "Autopilot",
+  "The robot applies every proposal about one of your sites by itself, one after the other, deploys it and closes it. Mas still checks nginx and the health of each release and goes back on its own if it fails. Proposals about the server itself stay for you.": "Der Roboter setzt jeden Vorschlag zu einer deiner Seiten selbst um, einen nach dem anderen, stellt ihn bereit und schließt ihn ab. Mas prüft weiterhin nginx und die Gesundheit jeder Version und geht bei einem Fehler selbst zurück. Vorschläge zum Server selbst bleiben bei dir.",
+  "Apply the proposals automatically": "Vorschläge automatisch umsetzen",
+  "At most": "Höchstens",
+  "per day": "pro Tag",
+  "{n} applied so far": "bisher {n} umgesetzt",
+  "Runs per day": "Durchläufe pro Tag",
+  "The robot is working on it…": "Der Roboter arbeitet daran…",
+  "The robot could not do it twice: it needs you.": "Der Roboter hat es in zwei Versuchen nicht geschafft: er braucht dich."
 }

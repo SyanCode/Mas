@@ -81,7 +81,7 @@ class Advisor:
         last = self.db.get_setting(S_LAST)
         return {"connected": self.pool.configured(), "interval": self.db.get_setting(S_INTERVAL) or "daily",
                 "last_run": float(last) if last else None, "error": self.db.get_setting(S_ERROR) or "",
-                "new": len(self.db.list_suggestions("new"))}
+                "new": len(self.db.list_suggestions("new")) + len(self.db.list_suggestions("failed"))}
 
     def configure(self, interval: str | None = None) -> None:
         if interval is not None:
