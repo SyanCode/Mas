@@ -60,3 +60,28 @@ def test_refuses_foreign_or_unsafe_archives(cfg, tmp_path):
     junk.write_bytes(b"not an archive")
     with pytest.raises(selfbackup.SelfBackupError):
         selfbackup.inspect(junk)
+
+
+def test_nightly_runs_once_in_the_window_and_can_be_turned_off(cfg):
+    from datetime import datetime
+    config, db, tmp = cfg
+    night = datetime(2026, 11, 14, 3, 30).timestamp()
+    day = datetime(2026, 11, 14, 15, 0).timestamp()
+    assert selfbackup.nightly(db, config, day, tmp / "n") is None  # not at 3 p.m.
+    first = selfbackup.nightly(db, config, night, tmp / "n")
+    assert first and first.exists()
+    assert selfbackup.nightly(db, config, night + 600, tmp / "n") is None  # once per night
+    db.set_setting("selfbackup:last", "0")
+    db.set_setting(selfbackup.AUTO, "0")
+    assert selfbackup.nightly(db, config, night, tmp / "n") is None
+
+
+def test_api_lists_and_runs_but_never_downloads(tmp_path, monkeypatch):
+    from tests.test_notify import make
+    monkeypatch.setattr(selfbackup, "BACKUP_DIR", str(tmp_path / "bk"))
+    client, db, n, hooks, h = make(tmp_path)
+    got = client.get("/api/self-backup").json()
+    assert got["auto"] is True and got["backups"] == []
+    assert client.put("/api/self-backup", headers=h, json={"auto": False}).json()["auto"] is False
+    from mas import auth
+    assert not auth.api_token_allowed("/api/self-backup")

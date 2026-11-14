@@ -895,6 +895,49 @@ function ClaudeCard({ totp }: { totp: boolean }) {
   );
 }
 
+function SelfBackupCard() {
+  const t = useT();
+  const [auto, setAuto] = useState(true);
+  const [dir, setDir] = useState("");
+  const [backups, setBackups] = useState<{ name: string; size: number; modified: number }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const apply = (r: { auto: boolean; directory: string; backups: { name: string; size: number; modified: number }[] }) => {
+    setAuto(r.auto); setDir(r.directory); setBackups(r.backups);
+  };
+  useEffect(() => { api<Parameters<typeof apply>[0]>("/self-backup").then(apply).catch(() => {}); }, []);
+
+  async function call(method: "PUT" | "POST", body?: object) {
+    setBusy(true); setError("");
+    try {
+      apply(await api<Parameters<typeof apply>[0]>("/self-backup", { method, body }));
+    } catch (err) {
+      setError((err as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title={t("Backup of Mas")}>
+      <div className="max-w-md space-y-3 text-sm">
+        <p className="text-zinc-600 dark:text-zinc-400">{t("The database, the secret key and the configuration of Mas, in one private archive on this server ({dir}). It holds the keys that decrypt your secrets: copy it somewhere else too (sudo mas backup create -o FOLDER).", { dir })}</p>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={auto} disabled={busy} onChange={(e) => call("PUT", { auto: e.target.checked })} />
+          {t("Back up every night (the last 7 are kept)")}
+        </label>
+        <ErrorText>{error}</ErrorText>
+        <Button variant="primary" disabled={busy} onClick={() => call("POST")}>{busy ? <Spinner /> : null}{t("Back up now")}</Button>
+        {backups.length > 0 && (
+          <ul className="space-y-1 text-xs text-zinc-500">
+            {backups.slice(0, 7).map((b) => <li key={b.name}>{b.name} · {Math.max(1, Math.round(b.size / 1024))} KiB</li>)}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function HostAlertsCard() {
   const t = useT();
   const [enabled, setEnabled] = useState(false);
@@ -996,6 +1039,7 @@ function Settings() {
       <PeopleCard />
       <AdvisorCard />
       <HostAlertsCard />
+      <SelfBackupCard />
       <ClaudeCard totp={!!session?.totp_enabled} />
       <TwoFactor enabled={!!session?.totp_enabled} />
       <PasswordForm />

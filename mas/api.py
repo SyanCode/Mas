@@ -31,6 +31,7 @@ from mas.cms import CmsError, CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
 from mas.compliance import Compliance
+from mas import selfbackup
 from mas.hostalerts import HostAlerts
 from mas.notify import NotifyError, Notifier
 from mas.uptime import Uptime
@@ -246,6 +247,10 @@ def create_app(
                 await asyncio.to_thread(host_alerts.tick)
             except Exception:
                 log.exception("host alerts failed")
+            try:  # Mas's own backup, once a night
+                await asyncio.to_thread(selfbackup.nightly, db, config)
+            except Exception:
+                log.exception("Mas backup failed")
             try:  # GDPR audit of the sites changed since the last one
                 await asyncio.to_thread(compliance.tick)
             except Exception:
@@ -778,6 +783,27 @@ def create_app(
         db.delete_user_sessions(user["id"], keep=s.token_hash)
         db.audit(s.username, "password-change", True)
         return {"ok": True}
+
+    @app.get("/api/self-backup")
+    def self_backup_get(_: SessionInfo = Depends(current_session)) -> dict:
+        return {"auto": selfbackup.auto_enabled(db), "directory": selfbackup.BACKUP_DIR,
+                "backups": [{k: b[k] for k in ("name", "size", "modified")} for b in selfbackup.list_backups()]}
+
+    @app.put("/api/self-backup")
+    def self_backup_put(body: dict, s: SessionInfo = Depends(current_session)) -> dict:
+        db.set_setting(selfbackup.AUTO, "1" if body.get("auto", True) else "0")
+        db.audit(s.username, "mas-backup-config", True, detail="nightly " + ("on" if body.get("auto", True) else "off"))
+        return self_backup_get(s)
+
+    @app.post("/api/self-backup")
+    async def self_backup_run(s: SessionInfo = Depends(current_session)) -> dict:
+        """Back up now. The archive stays on the server (it holds the keys of the secrets): no download here."""
+        try:
+            path = await asyncio.to_thread(selfbackup.create, config)
+        except (selfbackup.SelfBackupError, OSError) as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "mas-backup", True, detail=path.name)
+        return {"name": path.name, **self_backup_get(s)}
 
     @app.get("/api/host-alerts")
     def host_alerts_get(_: SessionInfo = Depends(current_session)) -> dict:

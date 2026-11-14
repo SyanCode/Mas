@@ -1960,5 +1960,8 @@
   "Also tell me when a service that was running stops": "Me prévenir aussi quand un service qui tournait s'arrête",
   "Editor (CMS of their sites)": "Éditeur (CMS de ses sites)",
   "Read-only (the whole dashboard, no change, no secret)": "Lecture seule (tout le tableau de bord, aucune modification, aucun secret)",
-  "Read-only accounts": "Comptes en lecture seule"
+  "Read-only accounts": "Comptes en lecture seule",
+  "Backup of Mas": "Sauvegarde de Mas",
+  "The database, the secret key and the configuration of Mas, in one private archive on this server ({dir}). It holds the keys that decrypt your secrets: copy it somewhere else too (sudo mas backup create -o FOLDER).": "La base, la clé secrète et la configuration de Mas, dans une archive privée sur ce serveur ({dir}). Elle contient les clés qui déchiffrent vos secrets : copiez-la aussi ailleurs (sudo mas backup create -o DOSSIER).",
+  "Back up every night (the last 7 are kept)": "Sauvegarder chaque nuit (les 7 dernières sont gardées)"
 }

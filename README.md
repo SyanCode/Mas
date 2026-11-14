@@ -861,7 +861,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Resources and operations**: Resources page, memory limits, sleep when idle, autoscaling,
       advice, restart everything identical, maintenance mode.
 - [x] **2FA recovery codes**: ten single-use codes at enrolment, regenerated from Settings.
-- [x] **Backup of Mas itself**: `mas backup create|list|restore`.
+- [x] **Backup of Mas itself**: `mas backup create|list|restore`, and one automatic backup every night (Settings → Backup of Mas).
 - [x] **Server alerts**: disk nearly full, certificate expired, nginx broken, a running service that stopped: one e-mail / webhook when it appears, one when it is fixed (Settings → Server alerts).
 - [x] **Preview deployments**: opt-in per app, one copy per pull request at `pr<N>.<domain>` (same-repo PRs only, no secrets copied unless asked, only the allowed IP addresses can open them, removed when the PR closes).
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.

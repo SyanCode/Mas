@@ -165,3 +165,32 @@ def restore(config: Config, archive: str | Path) -> list[str]:
         for suffix in ("-wal", "-shm"):  # leftovers of the replaced database
             Path(config.db_path + suffix).unlink(missing_ok=True)
     return done
+
+
+# -- every night ---------------------------------------------------------------------------------------------
+
+NIGHT = range(3, 5)  # hours (server time) of the nightly backup
+DAY = 20 * 3600  # at most one per window
+AUTO = "selfbackup:auto"  # setting: "0" turns the nightly backup off, on by default
+LAST = "selfbackup:last"
+
+
+def auto_enabled(db) -> bool:
+    return db.get_setting(AUTO) != "0"
+
+
+def nightly(db, config: Config, now: float | None = None, directory: str | Path | None = None, keep: int = 7) -> Path | None:
+    """Back up once a night, between 3 and 5 a.m., unless it was turned off. Returns the archive or None."""
+    now = now or time.time()
+    if not auto_enabled(db) or datetime.fromtimestamp(now).hour not in NIGHT:
+        return None
+    if now - float(db.get_setting(LAST) or 0) < DAY:
+        return None
+    db.set_setting(LAST, str(now))
+    try:
+        path = create(config, directory, keep, now)
+    except (SelfBackupError, OSError, sqlite3.Error) as exc:
+        db.audit("selfbackup", "mas-backup", False, detail=str(exc)[:300])
+        return None
+    db.audit("selfbackup", "mas-backup", True, detail=f"{path.name} (nightly)")
+    return path
