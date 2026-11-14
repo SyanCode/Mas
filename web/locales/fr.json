@@ -1974,5 +1974,6 @@
   "Secret key set (type a new one to replace it)": "Clé secrète définie (saisissez-en une autre pour la remplacer)",
   "Secret key": "Clé secrète",
   "Test the storage": "Tester le stockage",
-  "Test file written to the storage.": "Fichier de test écrit sur le stockage."
+  "Test file written to the storage.": "Fichier de test écrit sur le stockage.",
+  "Read-only account: you can look at everything, but nothing can be changed from here.": "Compte en lecture seule : vous pouvez tout consulter, mais rien ne peut être modifié d'ici."
 }

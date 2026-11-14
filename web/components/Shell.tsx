@@ -196,7 +196,12 @@ export function Shell({ children }: { children: ReactNode }) {
               <UserMenu session={session} />
             </div>
           </header>
-          <main key={pathname} className="page-in mx-auto max-w-6xl px-4 py-6 sm:px-10 sm:py-10">{!editor && <UpdateBanner />}{children}</main>
+          <main key={pathname} className="page-in mx-auto max-w-6xl px-4 py-6 sm:px-10 sm:py-10">{session?.role === "viewer" && (
+            <p className="mb-4 rounded-xl border border-sky-400/30 bg-sky-400/5 px-4 py-2 text-sm text-sky-800 dark:text-sky-300">
+              {t("Read-only account: you can look at everything, but nothing can be changed from here.")}
+            </p>
+          )}
+          {!editor && session?.role !== "viewer" && <UpdateBanner />}{children}</main>
         </div>
       </div>
       {!editor && <CommandPalette open={palette} onClose={() => setPalette(false)} />}

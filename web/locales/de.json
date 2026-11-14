@@ -1970,5 +1970,6 @@
   "Secret key set (type a new one to replace it)": "Geheimer Schlüssel gesetzt (neuen eingeben, um ihn zu ersetzen)",
   "Secret key": "Geheimer Schlüssel",
   "Test the storage": "Speicher testen",
-  "Test file written to the storage.": "Testdatei auf den Speicher geschrieben."
+  "Test file written to the storage.": "Testdatei auf den Speicher geschrieben.",
+  "Read-only account: you can look at everything, but nothing can be changed from here.": "Nur-Lese-Konto: Du kannst alles ansehen, aber von hier aus nichts ändern."
 }

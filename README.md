@@ -778,6 +778,17 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
 - **Agents (MCP)**: creating an app needs a `create` token and a repository in the allowed list
   (empty by default). Agents never read nor write a variable value; apps they create wait for the
   secrets a human fills in the dashboard. DNS records are only added, never replaced or deleted.
+- **Recovery codes**: ten single-use codes are given when 2FA is enabled; only their SHA-256 is stored, a
+  code is spent when used, and replacing the set (or turning 2FA off) invalidates the old ones. They go through
+  the same rate limits as the app's code. `sudo mas user 2fa-reset` stays the last resort for root.
+- **Read-only accounts** (`mas user create --role viewer`): the whole dashboard to look at, every change refused,
+  and the same forbidden routes as API tokens (accounts, tokens, environment variables, credentials, server alerts,
+  backups). No CMS access unless sites are given.
+- **Preview deployments**: off by default; pull requests from forks never run; production variables are not copied
+  unless the owner ticks it; only the listed IP addresses can open a preview (403 for the others, `noindex`); at
+  most 5 live per app.
+- **Backups of Mas** hold the database and the keys that decrypt the secrets: `0600`, never downloadable from the
+  dashboard, and the optional S3 copy keeps its secret key encrypted and never sends it back to the browser.
 - **Deployments**: the GitHub webhook is rejected unless its `X-Hub-Signature-256` HMAC is valid,
   before the payload is even parsed. Apps run as their own non-root user, listen on loopback, and
   get their secrets from a `0600` environment file; secrets are encrypted at rest in the database.
