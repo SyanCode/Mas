@@ -619,9 +619,10 @@ export interface Autopilot {
   working: number | null;
   applied: number;
   batch: boolean;  // "apply everything" is running
-  left: number;  // proposals the robot can still do
-  manual: number;  // proposals about the server itself: left to a person
+  left: number;  // proposals still to apply
   limited_until: number | null;  // every AI account is at its usage limit until then
+  next_try: number | null;  // a failed proposal is tried again at that time
+  current: { id: number; title: string; since: number | null; last_step: string } | null;  // what the robot is doing now
 }
 
 /** The advisor: schedule and proposals (the accounts are in AiAccount). */

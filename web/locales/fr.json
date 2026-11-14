@@ -2006,5 +2006,13 @@
   "One click: if nothing waits Claude analyses first, then the robot makes every change, deploys it and closes the proposal with its report. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.": "Un clic : si rien n'attend, Claude analyse d'abord, puis le robot fait chaque modification, la déploie et clôture la proposition avec son rapport. Mas vérifie toujours nginx et la santé de chaque version et revient en arrière tout seul en cas d'échec. Il va aussi loin que la limite d'utilisation de vos comptes IA le permet, et reprend tout seul quand la limite est remise à zéro.",
   "Every AI account is at its limit: waiting for the reset ({time}).": "Tous les comptes IA ont atteint leur limite : attente de la remise à zéro ({time}).",
   "{n} proposal(s) are about the server itself: the robot has no tool for them, they stay for you.": "{n} proposition(s) concernent le serveur lui-même : le robot n'a pas d'outil pour elles, elles restent pour vous.",
-  "Also apply every new proposal as soon as it comes, without a click": "Appliquer aussi chaque nouvelle proposition dès qu'elle arrive, sans clic"
+  "Also apply every new proposal as soon as it comes, without a click": "Appliquer aussi chaque nouvelle proposition dès qu'elle arrive, sans clic",
+  "Nothing waits for the robot.": "Rien n'attend le robot.",
+  "Stopped. Nothing else starts until you click again.": "Arrêté. Rien d'autre ne démarre tant que vous ne cliquez pas à nouveau.",
+  "Working on: {title}": "En cours : {title}",
+  "started at {time}": "commencé à {time}",
+  "A proposal failed: next try at {time}.": "Une proposition a échoué : prochaine tentative à {time}.",
+  "Starting the next proposal…": "Démarrage de la proposition suivante…",
+  "One click: if nothing waits Claude analyses first, then the robot makes every change (on your sites, or on the server with Mas's own fixes), deploys it and closes the proposal with its report. What the robot cannot do, it says so and leaves it to you. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.": "Un clic : si rien n'attend, Claude analyse d'abord, puis le robot fait chaque modification (sur vos sites, ou sur le serveur avec les correctifs propres à Mas), la déploie et clôture la proposition avec son rapport. Ce que le robot ne peut pas faire, il le dit et vous le laisse. Mas vérifie toujours nginx et la santé de chaque version et revient en arrière tout seul en cas d'échec. Il va aussi loin que la limite d'utilisation de vos comptes IA le permet, et reprend tout seul quand la limite est remise à zéro.",
+  "The robot could not do it: it needs you.": "Le robot n'a pas pu le faire : il a besoin de vous."
 }

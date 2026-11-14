@@ -11,9 +11,18 @@ from mas.autopilot import MAX_ATTEMPTS, Autopilot
 from mas.db import Database
 
 
+class _Task:
+    def done(self):
+        return False
+
+
 class FakeRobot:
     def __init__(self, db):
-        self.db, self.busy, self.started = db, False, []
+        self.db, self.busy, self.started, self.live, self.stopped = db, False, [], {}, []
+
+    def stop(self, run_id):
+        self.stopped.append(run_id)
+        return True
 
     def active(self):
         return 1 if self.busy else None
@@ -23,6 +32,7 @@ class FakeRobot:
             raise AiError("the robot is already working")
         run_id = self.db.create_robot_run(goal, app_id, autonomy)
         self.started.append((run_id, goal, app_id, autonomy))
+        self.live[run_id] = {"task": _Task()}
         return run_id
 
 
@@ -57,19 +67,25 @@ def finish(db, run_id, status, summary=""):
     db.update_robot_run(run_id, status=status, summary=summary, finished_at=time.time())
 
 
-def test_off_by_default_and_never_touches_the_server_proposals(ap):
+def test_off_by_default_and_the_server_proposals_run_in_server_mode(ap):
     a, db, robot, pool = ap
     propose(db, "Add a cookie banner", "Shop")
     assert a.tick(1) == [] and robot.started == []  # off
     a.configure(enabled=True)
-    propose(db, "Free some memory", "")  # about the server: nothing the robot can do
-    propose(db, "Fix the blog", "blog")  # an app the robot cannot reach (no GitHub App)
-    propose(db, "Mystery", "nowhere")
     assert a.tick(1) == ["started:1"]
-    assert [r[2:] for r in robot.started] == [("shop", "auto")]  # the robot works in auto mode
-    assert "Add a cookie banner" in robot.started[0][1]
+    assert [r[2:] for r in robot.started] == [("shop", "auto")]  # a site: a run on it, in auto mode
+    assert "Add a cookie banner" in robot.started[0][1] and "Server proposal" not in robot.started[0][1]
     robot.busy = True
     assert a.tick(1) == [] and len(robot.started) == 1  # one at a time
+    robot.busy = False
+    finish(db, robot.started[0][0], "done", "ok\nRESULT: done")
+    propose(db, "Free some memory", "")  # about the server itself
+    propose(db, "Fix the blog", "blog")  # a site the robot cannot reach (no GitHub App): the server tools
+    a.tick(1)
+    assert robot.started[1][2] == "" and "Server proposal" in robot.started[1][1] and "Free some memory" in robot.started[1][1]
+    finish(db, robot.started[1][0], "done", "ok")
+    a.tick(1)
+    assert robot.started[2][2] == "" and "(about: blog)" in robot.started[2][1]
 
 
 def test_a_finished_run_closes_the_proposal_with_its_report(ap):
@@ -192,20 +208,19 @@ def test_apply_everything_in_a_row_then_it_stops(ap):
         propose(db, f"Thing {n}", "shop", ["info", "critical", "warning", "info"][n])
     propose(db, "Free some memory", "")  # about the server: left to a person
     assert a.tick(1) == []  # not asked: nothing starts by itself
-    assert a.run_all() == {"queued": 4, "manual": 1}
+    assert a.run_all() == {"queued": 5}
     order = []
-    for _ in range(12):
+    for _ in range(15):
         a.tick(1)
         if len(robot.started) > len(order):
             order.append(robot.started[-1][1].split(".")[0])
             finish(db, robot.started[-1][0], "done", "ok")
-    assert order[0] == "Thing 1" and len(order) == 4  # the critical one first, no daily cap
-    assert len(db.list_suggestions("done")) == 4
+    assert order[0] == "Thing 1" and len(order) == 5  # the critical one first, no daily cap
+    assert len(db.list_suggestions("done")) == 5  # the server one too
     st = a.settings()
-    assert st["batch"] is False and st["left"] == 0 and st["manual"] == 1  # finished: it stops, the server one stays
-    assert db.list_suggestions("new")[0]["title"] == "Free some memory"
+    assert st["batch"] is False and st["left"] == 0  # finished: it stops by itself
     a.tick(1)
-    assert len(robot.started) == 4
+    assert len(robot.started) == 5
 
 
 def test_the_ai_limit_pauses_the_queue_without_counting_as_a_failure(ap):
@@ -255,3 +270,44 @@ def test_apply_all_button_analyses_when_nothing_waits(tmp_path):
     assert ran == [1] and again["queued"] == 1  # something waits: no new analysis
     from mas import auth
     assert not auth.api_token_allowed("/api/advisor/apply-all")
+
+
+def test_the_robot_says_when_it_needs_a_person(ap):
+    a, db, robot, pool = ap
+    a.configure(enabled=True)
+    sid = propose(db, "Move the database to another disk", "")
+    a.tick(1)
+    finish(db, robot.started[0][0], "done", "I have no tool to move data.\nA person must stop the database, copy it and remount.\nRESULT: needs a person")
+    assert a.tick(1) == [f"needs:{sid}"]
+    s = db.list_suggestions()[0]
+    assert s["status"] == "failed" and s["attempts"] == 2 and "A person must stop" in s["result"] and "RESULT" not in s["result"]
+    assert int(db.get_setting("autopilot_failures") or 0) == 0  # not a failure of the robot: it does not count towards the pause
+    a.tick(1)
+    assert len(robot.started) == 1  # and it is not tried again
+    assert Autopilot.verdict("all good\nRESULT: done") == ("done", "all good")
+    assert Autopilot.verdict("no marker at all") == (None, "no marker at all")
+
+
+def test_a_stuck_run_is_closed_and_stop_leaves_the_queue(ap):
+    a, db, robot, pool = ap
+    a.configure(enabled=True)
+    sid = propose(db, "Something", "shop")
+    a.tick(1)
+    run_id = robot.started[0][0]
+    assert a.settings()["current"]["title"] == "Something"
+    robot.live.clear()  # the database says running, nobody is running it
+    assert a.tick(1)[0] == f"failed:{sid}"
+    assert db.get_robot_run(run_id)["status"] == "failed"
+    # Stop: the run is stopped, the queue and the standing option are off, and a stopped run is not a failure
+    db.update_suggestion(sid, finished_at=0)
+    a.run_all()
+    a.tick(1)
+    run2 = robot.started[-1][0]
+    assert a.stop() is True and robot.stopped == [run_id, run2]  # the stuck one was stopped too
+    st = a.settings()
+    assert st["batch"] is False and st["enabled"] is False
+    finish(db, run2, "stopped", "stopped")
+    before = int(db.get_setting("autopilot_failures") or 0)
+    a.tick(1)
+    s = next(x for x in db.list_suggestions() if x["id"] == sid)
+    assert s["status"] == "new" and int(db.get_setting("autopilot_failures") or 0) == before

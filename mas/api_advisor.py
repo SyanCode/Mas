@@ -174,6 +174,12 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
         db.audit(s.username, "autopilot-settings", True, detail=("on" if out["enabled"] else "off") + f", {out['max_per_day']}/day")
         return out
 
+    @app.post("/api/advisor/autopilot/stop")
+    async def autopilot_stop(s=Depends(current_session)) -> dict:
+        stopped = autopilot.stop()
+        db.audit(s.username, "autopilot-stop", True, detail="a run was stopped" if stopped else "queue cleared")
+        return {"stopped": stopped, "autopilot": autopilot.settings()}
+
     @app.post("/api/advisor/apply-all")
     async def apply_all(s=Depends(current_session)) -> dict:
         """One click: analyse when nothing waits, then let the robot apply every waiting proposal in a row."""

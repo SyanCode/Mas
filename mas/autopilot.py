@@ -1,11 +1,13 @@
 """Autopilot of the advisor: the proposals are applied by the robot on their own, one after the other, and closed.
 
 Two ways to start it: one click on *Apply everything* (every waiting proposal is queued and done in a row, then it
-stops), or the standing option *apply the new proposals as they come* (off by default). Each proposal that names one
-of the sites Mas deploys is handed to the robot in ``auto`` mode (it commits, deploys, checks the result; Mas still
-tests nginx, health-checks the new release and rolls back by itself), then marked *done* with the robot's report, or
-*failed* when the robot could not do it twice (a person then decides). Proposals about the server itself (memory,
-certificates…) have no tool for the robot: they stay in the list for a person.
+stops), or the standing option *apply the new proposals as they come* (off by default). Each proposal is handed
+to the robot in ``auto`` mode: one that names a site Mas deploys becomes a run on that site (it commits, deploys, checks
+the result; Mas still tests nginx, health-checks the new release and rolls back by itself), any other one is a *server*
+run with the robot's server tools (health checks and the fixes Mas offers, restarting a service). The robot ends its
+report with ``RESULT: done`` or ``RESULT: needs a person``: the proposal is then closed with its report, or left to a
+person with the reason (no second try, since it would say the same). A run that fails for another reason is tried once
+more later.
 
 The limit is the AI's: when every account is at its usage limit nothing starts, and a run cut short by the limit goes
 back to the queue without counting as a failure; the work resumes when the first account is back. Other brakes: one run
@@ -21,7 +23,7 @@ import time
 
 from mas.ai import AiError, AiPool
 from mas.db import Database
-from mas.robot import Robot
+from mas.robot import RUN_SECONDS, Robot
 
 log = logging.getLogger(__name__)
 
@@ -51,8 +53,15 @@ class Autopilot:
         out["applied"] = sum(1 for s in rows if s["status"] == "done" and s.get("run_id"))
         out["batch"] = self.db.get_setting(BATCH) == "1"
         waiting = [s for s in rows if s["status"] == "new" and s["attempts"] < MAX_ATTEMPTS]
-        out["left"] = sum(1 for s in waiting if self.app_for(s["target"]))
-        out["manual"] = len(waiting) - out["left"]  # about the server itself: nothing the robot can do
+        out["left"] = len(waiting)
+        retry = [s["finished_at"] + RETRY_AFTER for s in waiting if s["attempts"] and s.get("finished_at")
+                 and s["finished_at"] + RETRY_AFTER > now]
+        out["next_try"] = min(retry) if retry and not out["working"] else None  # a failed one waits before its second try
+        current = next((s for s in rows if s["status"] == "working"), None)
+        run = self.db.get_robot_run(current["run_id"]) if current and current.get("run_id") else None
+        steps = (run or {}).get("steps") or []
+        out["current"] = {"id": current["id"], "title": current["title"], "since": current.get("started_at"),
+                          "last_step": (steps[-1]["text"][:140] if steps else "")} if current else None
         limited = [a["cooldown_until"] for a in self.db.list_ai_accounts()
                    if a["enabled"] and a["cooldown_until"] and a["cooldown_until"] > now]
         out["limited_until"] = min(limited) if limited and not self.pool.usable() else None
@@ -77,8 +86,19 @@ class Autopilot:
         self.db.set_setting(PAUSED, None)
         self.db.set_setting(FAILURES, None)
         self.db.set_setting(BATCH, "1")
-        out = self.settings()
-        return {"queued": out["left"], "manual": out["manual"]}
+        return {"queued": self.settings()["left"]}
+
+    def stop(self) -> bool:
+        """Stop what is running and leave the queue: nothing else starts until someone asks again."""
+        self.db.set_setting(BATCH, None)
+        cfg = self.settings()
+        if cfg["enabled"]:
+            self.configure(enabled=False)
+        stopped = False
+        for s in self.db.list_suggestions("working"):
+            if s.get("run_id") and hasattr(self.robot, "stop"):
+                stopped = self.robot.stop(s["run_id"]) or stopped
+        return stopped
 
     # -- which proposal, which goal --------------------------------------------------------------------
 
@@ -94,26 +114,66 @@ class Autopilot:
         return None
 
     @staticmethod
-    def goal_for(s: dict) -> str:
-        return (f"{s['title']}. {s['detail']}\n\nThis is a proposal of the advisor. Make the change it asks for in the "
-                "repository of the site, deploy it, check the result, and report briefly. If it needs a fact only a "
-                "human has, leave a clear placeholder and say so.")
+    def goal_for(s: dict, site: bool = True) -> str:
+        if site:
+            return (f"{s['title']}. {s['detail']}\n\nThis is a proposal of the advisor. Make the change it asks for in the "
+                    "repository of the site, deploy it, check the result, and report briefly. If it needs a fact only a "
+                    "human has, leave a clear placeholder and say so.")
+        about = f" (about: {s['target']})" if s["target"] else ""
+        return (f"Server proposal of the advisor{about}: {s['title']}. {s['detail']}\n\nDo it with your server tools "
+                "(health_checks, server_status, apply_health_fix, restart_service) when the data shows the problem is "
+                "real. If it needs anything else, do not change anything and say what a person must do.")
+
+    @staticmethod
+    def verdict(summary: str) -> tuple[str | None, str]:
+        """(``done`` | ``needs a person`` | None, the report without its last RESULT line)."""
+        lines = (summary or "").rstrip().splitlines()
+        if lines and lines[-1].strip().upper().startswith("RESULT:"):
+            word = lines[-1].split(":", 1)[1].strip().lower()
+            return ("needs a person" if "person" in word or "human" in word else "done"), "\n".join(lines[:-1]).strip()
+        return None, (summary or "").strip()
 
     # -- the background loop ---------------------------------------------------------------------------------
 
+    def stale(self, s: dict, run: dict | None) -> bool:
+        """A run the database calls running but nobody is running (or one far past its time limit)."""
+        if not run or run["status"] not in ("running", "waiting"):
+            return False
+        live = getattr(self.robot, "live", None)
+        entry = live.get(s["run_id"]) if isinstance(live, dict) else None
+        if live is not None and (entry is None or entry["task"].done()):
+            return True
+        return time.time() - (s.get("started_at") or time.time()) > RUN_SECONDS + 300
+
     def settle(self) -> list[str]:
-        """Close the proposals whose run ended."""
+        """Close the proposals whose run ended (or got stuck)."""
         events = []
         for s in self.db.list_suggestions("working"):
             run = self.db.get_robot_run(s["run_id"]) if s.get("run_id") else None
-            if run and run["status"] in ("running", "waiting"):
+            if self.stale(s, run):
+                if hasattr(self.robot, "stop"):
+                    self.robot.stop(s["run_id"])
+                self.db.update_robot_run(s["run_id"], status="failed", pending=None, summary="the run stopped answering",
+                                         finished_at=time.time())
+                run = self.db.get_robot_run(s["run_id"])
+            elif run and run["status"] in ("running", "waiting"):
                 continue
             now = time.time()
             if run and run["status"] == "done":
-                self.db.update_suggestion(s["id"], status="done", result=(run.get("summary") or "")[:1500], finished_at=now)
+                said, report = self.verdict(run.get("summary") or "")
+                if said == "needs a person":  # it looked and cannot do it: no second try, a person decides
+                    self.db.update_suggestion(s["id"], status="failed", attempts=MAX_ATTEMPTS, result=report[:1500], finished_at=now)
+                    self.db.audit("autopilot", "autopilot-needs-you", False, service_id=s["target"] or None, detail=s["title"][:200])
+                    events.append(f"needs:{s['id']}")
+                    continue
+                self.db.update_suggestion(s["id"], status="done", result=report[:1500], finished_at=now)
                 self.db.set_setting(FAILURES, None)
                 self.db.audit("autopilot", "autopilot-done", True, service_id=s["target"] or None, detail=s["title"][:200])
                 events.append(f"done:{s['id']}")
+                continue
+            if run and run["status"] == "stopped":  # someone pressed Stop: back to the list, not a failure
+                self.db.update_suggestion(s["id"], status="new", result="stopped", finished_at=None)
+                events.append(f"stopped:{s['id']}")
                 continue
             if not self.pool.usable():  # cut short by the AI's usage limit: not a failure, back to the queue
                 self.db.update_suggestion(s["id"], status="new", result="waiting for the AI limit to reset", finished_at=None)
@@ -144,18 +204,18 @@ class Autopilot:
             return events
         now = time.time()
         waiting = [s for s in self.db.list_suggestions("new")
-                   if s["attempts"] < MAX_ATTEMPTS and now - (s.get("finished_at") or 0) >= RETRY_AFTER * (1 if s["attempts"] else 0)
-                   and self.app_for(s["target"])]
+                   if s["attempts"] < MAX_ATTEMPTS and now - (s.get("finished_at") or 0) >= RETRY_AFTER * (1 if s["attempts"] else 0)]
         if not waiting:
             return events
         s = min(waiting, key=lambda x: (SEVERITY.get(x["severity"], 3), x["id"]))
-        app = self.app_for(s["target"])
+        app = self.app_for(s["target"])  # a site of Mas: a run on it; anything else: a server run
         try:
-            run_id = self.robot.start(self.goal_for(s), app["id"], "auto", user_id)
+            run_id = self.robot.start(self.goal_for(s, site=app is not None), app["id"] if app else "", "auto", user_id)
         except AiError as exc:  # busy or no account: next time
             log.info("autopilot waits: %s", exc)
             return events
         self.db.update_suggestion(s["id"], status="working", run_id=run_id, started_at=now)
-        self.db.audit("autopilot", "autopilot-start", True, service_id=app["id"], detail=s["title"][:200])
+        self.db.audit("autopilot", "autopilot-start", True, service_id=app["id"] if app else None,
+                      detail=("" if app else "[server] ") + s["title"][:200])
         events.append(f"started:{s['id']}")
         return events

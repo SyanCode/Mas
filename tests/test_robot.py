@@ -60,6 +60,12 @@ class FakeMas:
             return [{"id": "shop", "domain": "shop.example.com", "repo": "acme/shop", "branch": "main", "type": "static"}]
         if path == "/api/apps/shop":
             return {"releases": [{"id": 7, "status": self.releases.pop(0) if len(self.releases) > 1 else self.releases[0]}]}
+        if path == "/api/health/checks":
+            return {"checks": [{"level": "error", "category": "certificates", "title": "Certificate expires in 3 days",
+                                "detail": "shop.example.com", "fix": "certbot renew", "action": "certbot-renew", "target": "shop.example.com"}]}
+        if path == "/api/services":
+            return {"services": [{"id": "api.example.com", "name": "api", "type": "node", "manager": "systemd", "status": "stopped",
+                                  "domains": ["api.example.com"]}]}
         if path.endswith("/compliance"):
             return {"latest": {"score": 40, "verdict": "blocking", "counts": {}, "findings": [
                 {"level": "critical", "title": "No cookie banner", "detail": "d", "fix": "add one"}]}}
@@ -67,6 +73,10 @@ class FakeMas:
 
     async def post(self, path, **kw):
         self.calls.append(("POST", path))
+        if path == "/api/health/fix":
+            return {"ok": True, "output": "renewed"}
+        if path.startswith("/api/services/") and path.endswith(("/restart", "/reload")):
+            return {"ok": True, "output": ""}
         if path.endswith("/deploy"):
             return {"release_id": 7}
         if path.endswith("/seo/optimize"):
@@ -317,3 +327,44 @@ def test_tools_failing_again_and_again_end_the_run(env):
         return await finish(robot, robot.start("fix it", "shop", "auto", uid), db)
     run = asyncio.run(go())
     assert run["status"] == "failed" and "kept failing" in run["summary"]
+
+
+def test_a_server_run_reads_the_checks_fixes_and_restarts(env):
+    robot, db, pool, gh, mas, uid = env
+    pool.opener = script(
+        [tool("health_checks"), tool("server_status")],
+        [tool("apply_health_fix", action="certbot-renew", target="shop.example.com")],
+        [tool("restart_service", service_id="api.example.com", action="restart")],
+        [{"type": "text", "text": "Renewed the certificate and restarted the API.\nRESULT: done"}])
+
+    async def go():
+        return await finish(robot, robot.start("Certificate expires soon. Renew it.", "", "auto", uid), db)
+    run = asyncio.run(go())
+    assert run["status"] == "done" and run["summary"].endswith("RESULT: done")
+    assert ("POST", "/api/health/fix") in mas.calls and ("POST", "/api/services/api.example.com/actions/restart") in mas.calls
+    first = pool.opener.seen[0]
+    assert {"health_checks", "server_status", "apply_health_fix", "restart_service"} <= {t["name"] for t in first["tools"]}
+    assert any(e["action"] == "robot-health-fix" for e in db.history(None, 20))
+
+
+def test_a_run_on_one_site_neither_sees_nor_runs_the_server_tools(env):
+    robot, db, pool, gh, mas, uid = env
+    pool.opener = script([tool("restart_service", service_id="api.example.com")], [{"type": "text", "text": "ok"}])
+
+    async def go():
+        return await finish(robot, robot.start("Improve the style of the site please", "shop", "auto", uid), db)
+    run = asyncio.run(go())
+    assert not any(t["name"] in ("health_checks", "restart_service", "apply_health_fix", "server_status")
+                   for t in pool.opener.seen[0]["tools"])
+    assert ("POST", "/api/services/api.example.com/actions/restart") not in mas.calls
+    assert "not available in a run limited" in json.dumps(pool.opener.seen[1]["messages"])
+
+
+def test_only_restart_and_reload_exist(env):
+    robot, db, pool, gh, mas, uid = env
+    pool.opener = script([tool("restart_service", service_id="api.example.com", action="stop")], [{"type": "text", "text": "ok"}])
+
+    async def go():
+        return await finish(robot, robot.start("The API is down, bring it back", "", "auto", uid), db)
+    asyncio.run(go())
+    assert not any(c[1].endswith("/stop") for c in mas.calls)

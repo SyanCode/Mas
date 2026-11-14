@@ -244,9 +244,14 @@ def test_advisor_apply_everything_button(live):
     app.state.advisor.run = lambda force=True: {"added": 0}  # no real AI here
     started = []
 
+    class Alive:
+        def done(self):
+            return False
+
     def fake_start(goal, app_id, autonomy, user_id):  # a robot that does nothing by itself
         run_id = db.create_robot_run(goal, app_id, autonomy)
         started.append((run_id, app_id, autonomy))
+        app.state.robot.live[run_id] = {"task": Alive()}
         return run_id
 
     app.state.robot.start = fake_start
@@ -260,10 +265,11 @@ def test_advisor_apply_everything_button(live):
     assert app.state.autopilot.settings()["batch"] is True
     app.state.autopilot.tick(1)  # what the background loop does
     assert started and started[0][1:] == ("site", "auto")
-    page.get_by_text("The robot is working on it…").wait_for(timeout=15000)  # the page follows the queue by itself
+    page.get_by_text("Working on: Add alt texts").wait_for(timeout=15000)  # the page follows the queue by itself
+    assert page.get_by_role("button", name="Stop").is_visible()
     db.update_robot_run(started[0][0], status="done", summary="Alt texts added.", finished_at=1.0)
     app.state.autopilot.tick(1)
-    page.get_by_text("The robot is working on it…").wait_for(state="detached", timeout=15000)
+    page.get_by_text("Working on: Add alt texts").wait_for(state="detached", timeout=15000)
     assert db.list_suggestions("done")[0]["result"] == "Alt texts added."
     assert app.state.autopilot.settings()["batch"] is False
     page.get_by_role("button", name="Done").click()

@@ -20,13 +20,22 @@ function AutopilotCard({ state, onChange }: { state: AdvisorState; onChange: (s:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+  const clock = (ts: number) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   async function applyAll() {
     setBusy(true); setError(""); setNote("");
     try {
-      const r = await api<AdvisorState & { added: number; queued: number; manual: number; note: string }>("/advisor/apply-all", { method: "POST" });
+      const r = await api<AdvisorState & { added: number; queued: number; note: string }>("/advisor/apply-all", { method: "POST" });
       onChange(r);
-      setNote(r.queued ? t("{n} proposal(s) queued: the robot applies them one after the other.", { n: r.queued }) : t("Nothing the robot can do for now."));
+      setNote(r.queued ? t("{n} proposal(s) queued: the robot applies them one after the other.", { n: r.queued }) : t("Nothing waits for the robot."));
+    } catch (e) { setError((e as ApiError).detail); } finally { setBusy(false); }
+  }
+  async function stop() {
+    setBusy(true); setError(""); setNote("");
+    try {
+      const r = await api<{ autopilot: Autopilot }>("/advisor/autopilot/stop", { method: "POST" });
+      onChange({ ...state, autopilot: r.autopilot });
+      setNote(t("Stopped. Nothing else starts until you click again."));
     } catch (e) { setError((e as ApiError).detail); } finally { setBusy(false); }
   }
   async function standing(enabled: boolean) {
@@ -34,22 +43,37 @@ function AutopilotCard({ state, onChange }: { state: AdvisorState; onChange: (s:
     try { onChange({ ...state, autopilot: await api<Autopilot>("/advisor/autopilot", { method: "PUT", body: { enabled } }) }); } catch (e) { setError((e as ApiError).detail); }
   }
 
-  const running = ap.batch || ap.working !== null;
+  const working = ap.current;
+  const queued = ap.batch || ap.enabled;
+  const waiting = !working && ap.left > 0 && queued;  // idle, but something is queued: say why
   return (
-    <Card title={t("Apply the proposals")} actions={running ? <Badge tone="violet">{t("working")}</Badge> : ap.enabled ? <Badge tone="emerald">{t("automatic")}</Badge> : undefined}>
+    <Card title={t("Apply the proposals")} actions={working ? <Badge tone="violet">{t("working")}</Badge> : ap.enabled ? <Badge tone="emerald">{t("automatic")}</Badge> : undefined}>
       <div className="space-y-3 text-sm">
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="glow" onClick={applyAll} disabled={busy || (ap.batch && ap.left > 0 && !ap.paused)}>
+          <Button variant="glow" onClick={applyAll} disabled={busy || !!working || (ap.batch && ap.left > 0 && !ap.paused && !ap.limited_until && !ap.next_try)}>
             {busy ? <Spinner /> : <Bot className="size-3.5" />}{t("Apply everything")}{ap.left > 0 ? ` (${ap.left})` : ""}
           </Button>
-          {running && <span className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300"><Spinner />{t("The robot is applying the proposals, one after the other…")}</span>}
+          {(working || ap.batch) && <Button variant="secondary" onClick={stop} disabled={busy}><X className="size-3.5" />{t("Stop")}</Button>}
         </div>
-        <p className="text-zinc-600 dark:text-zinc-400">
-          {t("One click: if nothing waits Claude analyses first, then the robot makes every change, deploys it and closes the proposal with its report. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.")}
-        </p>
-        {ap.limited_until && <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300">{t("Every AI account is at its limit: waiting for the reset ({time}).", { time: new Date(ap.limited_until * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}</p>}
+        {working && (
+          <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-violet-800 dark:text-violet-200">
+            <div className="flex items-center gap-2 font-medium"><Spinner />{t("Working on: {title}", { title: working.title })}</div>
+            <div className="mt-1 text-xs opacity-80">
+              {working.since ? t("started at {time}", { time: clock(working.since) }) : ""}{working.last_step ? ` · ${working.last_step}` : ""}
+            </div>
+          </div>
+        )}
+        {waiting && !ap.paused && (
+          <p className="text-zinc-600 dark:text-zinc-400">
+            {ap.limited_until ? t("Every AI account is at its limit: waiting for the reset ({time}).", { time: clock(ap.limited_until) })
+              : ap.next_try ? t("A proposal failed: next try at {time}.", { time: clock(ap.next_try) })
+              : t("Starting the next proposal…")}
+          </p>
+        )}
         {ap.paused && <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300">{ap.paused}</p>}
-        {ap.manual > 0 && <p className="text-xs text-zinc-500">{t("{n} proposal(s) are about the server itself: the robot has no tool for them, they stay for you.", { n: ap.manual })}</p>}
+        <p className="text-zinc-600 dark:text-zinc-400">
+          {t("One click: if nothing waits Claude analyses first, then the robot makes every change (on your sites, or on the server with Mas's own fixes), deploys it and closes the proposal with its report. What the robot cannot do, it says so and leaves it to you. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.")}
+        </p>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={ap.enabled} onChange={(e) => standing(e.target.checked)} />
           {t("Also apply every new proposal as soon as it comes, without a click")}
@@ -125,7 +149,7 @@ function Proposals({ state, setState, onRobot }: { state: AdvisorState; setState
               <h3 className="mt-2 text-[15px] font-semibold tracking-tight">{s.title}</h3>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{s.detail}</p>
               {s.status === "working" && <p className="mt-2 flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-300"><Spinner />{t("The robot is working on it…")}</p>}
-              {s.status === "failed" && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{t("The robot could not do it twice: it needs you.")}</p>}
+              {s.status === "failed" && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{t("The robot could not do it: it needs you.")}</p>}
               {s.result && s.status !== "working" && <p className="mt-2 whitespace-pre-line rounded-lg bg-zinc-900/[0.04] px-3 py-2 text-xs text-zinc-600 dark:bg-white/[0.05] dark:text-zinc-400">{s.result}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
                 {s.status === "new" || s.status === "failed" ? (
@@ -157,7 +181,7 @@ function Advisor() {
     api<App[]>("/apps").then(setApps).catch(() => {});
   }, []);
   useEffect(load, [load]);
-  const busyQueue = !!state && (state.autopilot.batch || state.autopilot.working !== null);
+  const busyQueue = !!state && (state.autopilot.batch || state.autopilot.enabled || state.autopilot.working !== null);
   useEffect(() => {  // the statuses follow the robot while it works through the queue
     if (!busyQueue) return;
     const id = setInterval(() => { api<AdvisorState>("/advisor").then(setState).catch(() => {}); }, 5000);
