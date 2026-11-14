@@ -91,6 +91,30 @@ def test_totp_enrollment_from_dashboard(env):
     assert client.get("/api/session").json()["totp_enabled"] is True
 
 
+def test_recovery_codes(env):
+    client, db, uid, _ = env
+    csrf = login(client)
+    h = {"X-CSRF-Token": csrf}
+    setup = client.post("/api/account/totp/setup", json={"password": PASSWORD}, headers=h).json()
+    code = pyotp.TOTP(setup["secret"]).now()
+    codes = client.post("/api/account/totp/enable", json={"code": code}, headers=h).json()["recovery_codes"]
+    assert len(codes) == 10 and len(set(codes)) == 10
+    assert db.count_recovery_codes(uid) == 10
+    fresh = TestClient(client.app, base_url=str(client.base_url))
+    # a recovery code replaces the app's code at sign-in, once
+    r = fresh.post("/api/login", json={"username": "admin", "password": PASSWORD, "otp": codes[0]})
+    assert r.status_code == 200 and db.count_recovery_codes(uid) == 9
+    r = TestClient(client.app).post("/api/login", json={"username": "admin", "password": PASSWORD, "otp": codes[0]})
+    assert r.json()["detail"] == "otp_invalid"
+    # regenerating invalidates the old set; disabling 2FA removes them
+    new = client.post("/api/account/recovery", json={"password": PASSWORD, "code": codes[1]}, headers=h).json()["recovery_codes"]
+    assert db.count_recovery_codes(uid) == 10 and not set(new) & set(codes)
+    r = TestClient(client.app).post("/api/login", json={"username": "admin", "password": PASSWORD, "otp": codes[2]})
+    assert r.json()["detail"] == "otp_invalid"
+    db.update_user(uid, totp_secret=None)
+    assert db.count_recovery_codes(uid) == 0
+
+
 def test_csrf_and_origin_checks(env):
     client, *_ = env
     csrf = login(client)

@@ -856,7 +856,8 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Cluster**: agents, copies of apps on several servers, live map, auto-fill, promotion.
 - [x] **Resources and operations**: Resources page, memory limits, sleep when idle, autoscaling,
       advice, restart everything identical, maintenance mode.
-- [ ] Next: preview deployments per pull request, recovery codes for 2FA, notifications.
+- [x] **2FA recovery codes**: ten single-use codes at enrolment, regenerated from Settings.
+- [ ] Next: preview deployments per pull request, notifications.
 
 ## License
 

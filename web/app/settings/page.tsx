@@ -50,7 +50,9 @@ interface Setup { secret: string; uri: string; qr_svg: string }
 
 function TwoFactor({ enabled }: { enabled: boolean }) {
   const t = useT();
-  const [step, setStep] = useState<"idle" | "password" | "scan" | "disable">("idle");
+  const [step, setStep] = useState<"idle" | "password" | "scan" | "disable" | "regen" | "codes">("idle");
+  const [codes, setCodes] = useState<string[]>([]);
+  const [remaining, setRemaining] = useState<number | null>(null);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [setup, setSetup] = useState<Setup | null>(null);
@@ -59,6 +61,23 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
 
   function reset() {
     setStep("idle"); setPassword(""); setCode(""); setSetup(null); setError("");
+  }
+
+  useEffect(() => {
+    if (enabled) api<{ remaining: number }>("/account/recovery").then((r) => setRemaining(r.remaining)).catch(() => {});
+  }, [enabled]);
+
+  async function regenerate(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    try {
+      const r = await api<{ recovery_codes: string[] }>("/account/recovery", { method: "POST", body: { password, code } });
+      reset();
+      setCodes(r.recovery_codes);
+      setStep("codes");
+    } catch (err) {
+      setError((err as ApiError).detail);
+    }
   }
 
   async function start(e: FormEvent) {
@@ -77,10 +96,11 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
     e.preventDefault();
     setError("");
     try {
-      await api("/account/totp/enable", { method: "POST", body: { code } });
+      const r = await api<{ recovery_codes: string[] }>("/account/totp/enable", { method: "POST", body: { code } });
       reset();
       setDone(t("Two-factor authentication is on. You will be asked for a code at each sign-in."));
-      setTimeout(() => window.location.reload(), 1500);
+      setCodes(r.recovery_codes);
+      setStep("codes");
     } catch (err) {
       setError((err as ApiError).detail);
     }
@@ -122,9 +142,11 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
                 ? t("Sign-in requires a code from your authenticator app. Lost your phone? Run `sudo mas user 2fa-reset` on the server.")
                 : t("Protect the dashboard with a 6-digit code from Google Authenticator, Aegis, 1Password, Bitwarden…")}
             </p>
+            {enabled && remaining !== null && <p className="text-xs text-zinc-500">{t("{n} recovery codes left", { n: remaining })}</p>}
             {enabled ? (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button onClick={() => setStep("password")}>{t("Replace authenticator")}</Button>
+                <Button onClick={() => setStep("regen")}>{t("New recovery codes")}</Button>
                 <Button variant="danger" onClick={() => setStep("disable")}>{t("Disable")}</Button>
               </div>
             ) : (
@@ -154,6 +176,24 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
             {codeInput}
             <ErrorText>{error}</ErrorText>
             <div className="flex gap-2"><Button variant="primary" type="submit">{t("Enable")}</Button><Button type="button" onClick={reset}>{t("Cancel")}</Button></div>
+          </form>
+        )}
+
+        {step === "codes" && (
+          <div className="space-y-3">
+            <p>{t("Save these recovery codes. Each works once if you lose your phone; they are not shown again.")}</p>
+            <pre className="select-all rounded-md bg-zinc-100 p-3 font-mono dark:bg-zinc-800">{codes.join("\n")}</pre>
+            <Button variant="primary" onClick={() => window.location.reload()}>{t("I saved them")}</Button>
+          </div>
+        )}
+
+        {step === "regen" && (
+          <form onSubmit={regenerate} className="space-y-3">
+            <p>{t("Confirm with your password and a current code.")}</p>
+            <Input type="password" placeholder={t("Password")} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+            {codeInput}
+            <ErrorText>{error}</ErrorText>
+            <div className="flex gap-2"><Button variant="primary" type="submit">{t("New recovery codes")}</Button><Button type="button" onClick={reset}>{t("Cancel")}</Button></div>
           </form>
         )}
 

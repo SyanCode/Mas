@@ -88,10 +88,36 @@ def match_totp(secret: str, code: str, now: float | None = None) -> int | None:
     return None
 
 
+RECOVERY_CODE_COUNT = 10
+_RECOVERY_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # no look-alikes (i l o 0 1)
+
+
+def new_recovery_codes() -> list[str]:
+    """Ten single-use codes like ``k3x9m-p7qfa``, shown once."""
+    pick = lambda: "".join(secrets.choice(_RECOVERY_ALPHABET) for _ in range(5))  # noqa: E731
+    return [f"{pick()}-{pick()}" for _ in range(RECOVERY_CODE_COUNT)]
+
+
+def _recovery_hash(code: str) -> str:
+    return hashlib.sha256(re.sub(r"[\s-]", "", code).lower().encode()).hexdigest()
+
+
+def store_recovery_codes(db: Database, user_id: int) -> list[str]:
+    """Replace the user's recovery codes with a fresh set; returns them in clear, once."""
+    codes = new_recovery_codes()
+    db.replace_recovery_codes(user_id, [_recovery_hash(c) for c in codes])
+    return codes
+
+
 def verify_totp(db: Database, user, code: str) -> bool:
-    """Check a code for an enrolled user. Each code works once (replay protection)."""
+    """Check a code for an enrolled user: the app's 6 digits or a recovery code.
+    Each code works once (replay protection)."""
     step = match_totp(user["totp_secret"], code)
-    return step is not None and db.bump_totp_step(user["id"], step)
+    if step is not None:
+        return db.bump_totp_step(user["id"], step)
+    if re.fullmatch(r"[a-z0-9]{5}-?[a-z0-9]{5}", (code or "").strip().lower()):
+        return db.consume_recovery_code(user["id"], _recovery_hash(code.strip()))
+    return False
 
 
 # -- login ---------------------------------------------------------------------

@@ -1931,5 +1931,9 @@
   "Paste a token by hand instead": "Pegar un token a mano en su lugar",
   "The robot needs you": "El robot te necesita",
   "Robot working…": "Robot trabajando…",
-  "{n} steps": "{n} pasos"
+  "{n} steps": "{n} pasos",
+  "New recovery codes": "Nuevos códigos de recuperación",
+  "{n} recovery codes left": "{n} códigos de recuperación restantes",
+  "Save these recovery codes. Each works once if you lose your phone; they are not shown again.": "Guarda estos códigos de recuperación. Cada uno sirve una sola vez si pierdes el teléfono; no se volverán a mostrar.",
+  "I saved them": "Ya los guardé"
 }

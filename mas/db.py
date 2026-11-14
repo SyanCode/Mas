@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS users (
     totp_last_step INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS recovery_codes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    PRIMARY KEY (user_id, code_hash)
+);
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -414,6 +419,24 @@ class Database:
         cols = ", ".join(f"{k} = ?" for k in fields)
         with self.tx() as c:
             c.execute(f"UPDATE users SET {cols} WHERE id = ?", (*fields.values(), user_id))
+            if "totp_secret" in fields and fields["totp_secret"] is None:
+                c.execute("DELETE FROM recovery_codes WHERE user_id = ?", (user_id,))  # 2FA off: no codes left
+
+    def replace_recovery_codes(self, user_id: int, hashes: list[str]) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM recovery_codes WHERE user_id = ?", (user_id,))
+            c.executemany("INSERT INTO recovery_codes (user_id, code_hash) VALUES (?, ?)",
+                          [(user_id, h) for h in hashes])
+
+    def consume_recovery_code(self, user_id: int, code_hash: str) -> bool:
+        """Spend a recovery code; False if it is unknown or already spent."""
+        with self.tx() as c:
+            return c.execute("DELETE FROM recovery_codes WHERE user_id = ? AND code_hash = ?",
+                             (user_id, code_hash)).rowcount == 1
+
+    def count_recovery_codes(self, user_id: int) -> int:
+        with self.tx() as c:
+            return c.execute("SELECT COUNT(*) FROM recovery_codes WHERE user_id = ?", (user_id,)).fetchone()[0]
 
     def bump_totp_step(self, user_id: int, step: int) -> bool:
         """Record the last accepted TOTP step; False if it was already used (replay)."""

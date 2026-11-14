@@ -338,6 +338,10 @@ def _enroll_totp(db: Database, user_id: int, username: str) -> bool:
         if step is not None:
             db.update_user(user_id, totp_secret=secret, totp_pending=None, totp_last_step=step)
             console.print("[green]✓[/] two-factor authentication enabled")
+            console.print("\n[bold]Recovery codes[/] (each works once if you lose your phone; they are shown only now):\n")
+            for code in auth.store_recovery_codes(db, user_id):
+                console.print(f"  {code}")
+            console.print()
             return True
         err_console.print("[yellow]wrong code (check the phone's clock), try again[/]")
     err_console.print("[red]2FA not enabled.[/] Retry with `mas user 2fa " + username + "`.")

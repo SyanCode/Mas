@@ -791,7 +791,20 @@ def create_app(
         db.update_user(user["id"], totp_secret=pending, totp_pending=None, totp_last_step=step)
         db.delete_user_sessions(user["id"], keep=s.token_hash)
         db.audit(s.username, "2fa-enable", True)
-        return {"ok": True}
+        return {"ok": True, "recovery_codes": auth.store_recovery_codes(db, user["id"])}
+
+    @app.get("/api/account/recovery")
+    def recovery_count(s: SessionInfo = Depends(any_session)) -> dict:
+        return {"remaining": db.count_recovery_codes(s.user_id)}
+
+    @app.post("/api/account/recovery")
+    def recovery_regenerate(body: DisableTotpBody, s: SessionInfo = Depends(any_session)) -> dict:
+        """New set of recovery codes (the old ones stop working). Needs the password and a current code."""
+        user = require_password(s, body.password)
+        if not user["totp_secret"] or not auth.verify_totp(db, user, body.code):
+            raise HTTPException(403, "wrong code")
+        db.audit(s.username, "recovery-codes", True)
+        return {"recovery_codes": auth.store_recovery_codes(db, user["id"])}
 
     @app.post("/api/account/totp/disable")
     def totp_disable(body: DisableTotpBody, s: SessionInfo = Depends(any_session)) -> dict:
