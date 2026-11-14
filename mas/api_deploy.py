@@ -215,7 +215,7 @@ def register(
     async def health_checks(refresh: bool = False, _=Depends(current_session)) -> dict:
         cached_at = health_cache.get("at", 0.0)
         if refresh or time.time() - float(cached_at) > HEALTH_TTL:
-            checks = await asyncio.to_thread(run_checks, host, config, True, server_ips(db, config)[0])
+            checks = await asyncio.to_thread(run_checks, host, config, True, server_ips(db, config)[0], db)
             health_cache.update(at=time.time(), checks=[
                 {**c.as_dict(), "action": {"id": c.action, **ACTIONS[c.action]} if c.action else None}
                 for c in checks])

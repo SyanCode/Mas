@@ -526,7 +526,7 @@ def doctor(
     from mas.health import run_checks
 
     env: Env = ctx.obj
-    checks = run_checks(env.host, env.config, dns=not no_dns)
+    checks = run_checks(env.host, env.config, dns=not no_dns, db=env.db)
     if not checks:
         console.print("[green]✓[/] no problem found")
         return

@@ -759,3 +759,19 @@ def test_memory_limit_sleep_and_scaling_without_a_rebuild(env):
     deployer.apply_resources("web", log)
     assert "MemoryMax=1024M" in host.read_text("/etc/systemd/system/mas-app-web.service")
     assert "@mas_wake" not in host.read_text("/etc/nginx/sites-available/mas-app-web.conf")
+
+
+def test_backup_check(tmp_path):
+    import os
+    from mas.health import check_backups
+    db = Database(tmp_path / "mas.db")
+    folder = tmp_path / "bk"
+    assert [c.title for c in check_backups(db, directory=str(folder))] == ["Mas has no backup yet"]
+    folder.mkdir()
+    fresh = folder / "mas-20261114-030000.tar.gz"
+    fresh.write_bytes(b"x")
+    assert check_backups(db, directory=str(folder)) == []
+    old = 1_700_000_000
+    os.utime(fresh, (old, old))
+    (c,) = check_backups(db, now=old + 5 * 86400, directory=str(folder))
+    assert c.level == "warning" and c.category == "backup" and "5 days old" in c.title

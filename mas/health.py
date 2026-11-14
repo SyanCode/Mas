@@ -8,6 +8,7 @@ dashboard names its fix (``action``, ``target``), which mas.healthfix applies.
 from __future__ import annotations
 
 import socket
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
@@ -270,12 +271,39 @@ def check_dns(names: set[str], public_ip: str | None, resolver=_resolve) -> list
     return checks
 
 
-def run_checks(host: Host, config: Config | None = None, dns: bool = True, public_ip: str | None = None) -> list[Check]:
+STALE_BACKUP_DAYS = 3
+
+
+def check_backups(db, now: float | None = None, directory: str | None = None) -> list[Check]:
+    """Mas's own backup: there should be a recent one (the nightly backup, or one made by hand)."""
+    from mas import selfbackup
+
+    now = now or time.time()
+    found = selfbackup.list_backups(directory or selfbackup.BACKUP_DIR)
+    auto = selfbackup.auto_enabled(db)
+    if not found:
+        return [Check("warning", "backup", "Mas has no backup yet",
+                      "Its database and secret key are the only copy of your apps, domains and secrets: a lost disk "
+                      "means starting again." + ("" if auto else " The nightly backup is off."),
+                      "sudo mas backup create   # or Settings → Backup of Mas")]
+    age = (now - found[0]["modified"]) / 86400
+    if age > STALE_BACKUP_DAYS:
+        return [Check("warning", "backup", f"The last backup of Mas is {int(age)} days old",
+                      "The nightly backup is off or failing (see the history)." if not auto else
+                      "The nightly backup should have run: look at the history for a failure.",
+                      "sudo mas backup create")]
+    return []
+
+
+def run_checks(host: Host, config: Config | None = None, dns: bool = True, public_ip: str | None = None,
+               db=None) -> list[Check]:
     ctx = ScanContext(host, config or Config())
     sites = nginx_collector.collect(ctx)
     sockets = ports_collector.collect(ctx)
     lineages = load_lineages(host)
     checks = check_nginx(host, sites, sockets) + check_certificates(host, sites, lineages) + check_memory(host)
+    if db is not None:
+        checks += check_backups(db)
     if dns:
         names = {n for s in sites for n in s.names} | {d for lin in lineages for d in lin.domains}
         checks += check_dns(names, public_ip or ctx.config.public_ip)
