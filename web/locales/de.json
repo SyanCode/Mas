@@ -1959,5 +1959,16 @@
   "Read-only accounts": "Nur-Lese-Konten",
   "Backup of Mas": "Backup von Mas",
   "The database, the secret key and the configuration of Mas, in one private archive on this server ({dir}). It holds the keys that decrypt your secrets: copy it somewhere else too (sudo mas backup create -o FOLDER).": "Datenbank, geheimer Schlüssel und Konfiguration von Mas in einem privaten Archiv auf diesem Server ({dir}). Es enthält die Schlüssel, die deine Geheimnisse entschlüsseln: kopiere es auch an einen anderen Ort (sudo mas backup create -o ORDNER).",
-  "Back up every night (the last 7 are kept)": "Jede Nacht sichern (die letzten 7 bleiben erhalten)"
+  "Back up every night (the last 7 are kept)": "Jede Nacht sichern (die letzten 7 bleiben erhalten)",
+  "Copy outside the server (S3)": "Kopie außerhalb des Servers (S3)",
+  "Each backup is also sent to a storage compatible with S3 (AWS, Scaleway, OVH, Backblaze, MinIO…). The secret key is kept encrypted and never shown again.": "Jedes Backup wird zusätzlich an einen S3-kompatiblen Speicher gesendet (AWS, Scaleway, OVH, Backblaze, MinIO…). Der geheime Schlüssel wird verschlüsselt gespeichert und nie wieder angezeigt.",
+  "Send the backups": "Backups senden",
+  "Region (fr-par)": "Region (fr-par)",
+  "Bucket": "Bucket",
+  "Folder (mas/)": "Ordner (mas/)",
+  "Access key": "Zugriffsschlüssel",
+  "Secret key set (type a new one to replace it)": "Geheimer Schlüssel gesetzt (neuen eingeben, um ihn zu ersetzen)",
+  "Secret key": "Geheimer Schlüssel",
+  "Test the storage": "Speicher testen",
+  "Test file written to the storage.": "Testdatei auf den Speicher geschrieben."
 }

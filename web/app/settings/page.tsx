@@ -895,6 +895,66 @@ function ClaudeCard({ totp }: { totp: boolean }) {
   );
 }
 
+interface Remote { enabled: boolean; endpoint: string; region: string; bucket: string; prefix: string; access_key: string; has_secret: boolean }
+
+function RemoteCopy() {
+  const t = useT();
+  const [r, setR] = useState<Remote | null>(null);
+  const [secret, setSecret] = useState("");
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => { api<Remote>("/self-backup/remote").then(setR).catch(() => {}); }, []);
+  if (!r) return null;
+  const set = (patch: Partial<Remote>) => setR({ ...r, ...patch });
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(""); setMsg("");
+    try {
+      setR(await api<Remote>("/self-backup/remote", { method: "PUT", body: { ...r, secret_key: secret || undefined } }));
+      setSecret("");
+      setMsg(t("Saved."));
+    } catch (err) {
+      setError((err as ApiError).detail);
+    }
+  }
+  async function test() {
+    setError(""); setMsg("");
+    try {
+      await api("/self-backup/remote/test", { method: "POST" });
+      setMsg(t("Test file written to the storage."));
+    } catch (err) {
+      setError((err as ApiError).detail);
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t border-zinc-200/80 pt-3 dark:border-white/[0.06]">
+      <button className="flex items-center gap-2 font-medium" onClick={() => setOpen(!open)}>
+        {t("Copy outside the server (S3)")} {r.enabled ? <Badge tone="emerald">{t("on")}</Badge> : <Badge tone="zinc">{t("off")}</Badge>}
+      </button>
+      {open && (
+        <form onSubmit={save} className="space-y-2">
+          <p className="text-zinc-600 dark:text-zinc-400">{t("Each backup is also sent to a storage compatible with S3 (AWS, Scaleway, OVH, Backblaze, MinIO…). The secret key is kept encrypted and never shown again.")}</p>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={r.enabled} onChange={(e) => set({ enabled: e.target.checked })} />{t("Send the backups")}</label>
+          <Input placeholder="https://s3.fr-par.scw.cloud" value={r.endpoint} onChange={(e) => set({ endpoint: e.target.value })} />
+          <div className="flex gap-2">
+            <Input placeholder={t("Region (fr-par)")} value={r.region} onChange={(e) => set({ region: e.target.value })} />
+            <Input placeholder={t("Bucket")} value={r.bucket} onChange={(e) => set({ bucket: e.target.value })} />
+          </div>
+          <Input placeholder={t("Folder (mas/)")} value={r.prefix} onChange={(e) => set({ prefix: e.target.value })} />
+          <Input placeholder={t("Access key")} value={r.access_key} onChange={(e) => set({ access_key: e.target.value })} autoComplete="off" />
+          <Input type="password" placeholder={r.has_secret ? t("Secret key set (type a new one to replace it)") : t("Secret key")} value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="new-password" />
+          <ErrorText>{error}</ErrorText>
+          {msg && <p className="text-emerald-700 dark:text-emerald-400">{msg}</p>}
+          <div className="flex gap-2"><Button variant="primary" type="submit">{t("Save")}</Button><Button type="button" onClick={test}>{t("Test the storage")}</Button></div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 function SelfBackupCard() {
   const t = useT();
   const [auto, setAuto] = useState(true);
@@ -933,6 +993,7 @@ function SelfBackupCard() {
             {backups.slice(0, 7).map((b) => <li key={b.name}>{b.name} · {Math.max(1, Math.round(b.size / 1024))} KiB</li>)}
           </ul>
         )}
+        <RemoteCopy />
       </div>
     </Card>
   );

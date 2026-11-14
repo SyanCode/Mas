@@ -32,6 +32,8 @@ from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
 from mas.compliance import Compliance
 from mas import selfbackup
+from mas.envcrypt import EnvError
+from mas.offsite import Offsite, OffsiteError
 from mas.hostalerts import HostAlerts
 from mas.notify import NotifyError, Notifier
 from mas.uptime import Uptime
@@ -248,7 +250,9 @@ def create_app(
             except Exception:
                 log.exception("host alerts failed")
             try:  # Mas's own backup, once a night
-                await asyncio.to_thread(selfbackup.nightly, db, config)
+                made = await asyncio.to_thread(selfbackup.nightly, db, config)
+                if made:
+                    await asyncio.to_thread(offsite.upload, made)
             except Exception:
                 log.exception("Mas backup failed")
             try:  # GDPR audit of the sites changed since the last one
@@ -314,6 +318,7 @@ def create_app(
     notifier = Notifier(db, host, config, stats=site_stats, compliance=compliance)
     compliance.notifier = notifier
     host_alerts = HostAlerts(db, host, config, notifier, scanner)
+    offsite = Offsite(db, notifier)
 
     def post_check(target: dict, release_id: int, result: dict) -> None:
         """The audit as a check on the commit that was published (shown on GitHub next to the build)."""
@@ -416,6 +421,7 @@ def create_app(
     app.state.compliance = app_state_compliance
     app.state.notifier = notifier
     app.state.host_alerts = host_alerts
+    app.state.offsite = offsite
     app.state.uptime = uptime
     app.state.advisor = advisor
     app.state.pool = pool
@@ -803,7 +809,28 @@ def create_app(
         except (selfbackup.SelfBackupError, OSError) as exc:
             raise HTTPException(400, str(exc)) from None
         db.audit(s.username, "mas-backup", True, detail=path.name)
-        return {"name": path.name, **self_backup_get(s)}
+        copied = await asyncio.to_thread(offsite.upload, path)
+        return {"name": path.name, "offsite": bool(copied), **self_backup_get(s)}
+
+    @app.get("/api/self-backup/remote")
+    def offsite_get(_: SessionInfo = Depends(current_session)) -> dict:
+        return offsite.settings()
+
+    @app.put("/api/self-backup/remote")
+    def offsite_put(body: dict, s: SessionInfo = Depends(current_session)) -> dict:
+        try:
+            result = offsite.configure(body)
+        except OffsiteError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "mas-backup-config", True, detail="remote copy " + ("on" if result["enabled"] else "off"))
+        return result
+
+    @app.post("/api/self-backup/remote/test")
+    async def offsite_test(_: SessionInfo = Depends(current_session)) -> dict:
+        try:
+            return {"ok": True, "key": await asyncio.to_thread(offsite.test)}
+        except (OffsiteError, EnvError) as exc:
+            raise HTTPException(400, str(exc)) from None
 
     @app.get("/api/host-alerts")
     def host_alerts_get(_: SessionInfo = Depends(current_session)) -> dict:
