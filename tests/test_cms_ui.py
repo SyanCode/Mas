@@ -192,3 +192,45 @@ def test_seo_panel_previews_and_writes_the_description_from_the_text(live):
     assert 50 <= len(excerpt) <= 160
     page.get_by_text("Description of 50 to 160 characters").wait_for()
     assert not errors, errors
+
+
+def real_png(size: int = 64) -> bytes:
+    """A picture a browser can decode (the PNG of the CMS tests is only a stub)."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    line = b"\x00" + b"".join(bytes((x * 4 % 256, 80, 200)) for x in range(size))  # filter byte + RGB pixels
+    rows = line * size
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def test_profile_name_nickname_and_picture(live):
+    picture = real_png()
+    ctx, base, db, gh = live
+    for old in ctx.pages:  # the pages of the earlier tests keep slow requests open and fill the browser's connections
+        old.close()
+    page, errors = open_page(live, "/settings/")
+    page.get_by_placeholder("Jane Doe").wait_for()
+    page.get_by_placeholder("Jane Doe").fill("Syan Code")
+    page.get_by_placeholder("admin").fill("syan")
+    page.get_by_role("button", name="Save").first.click()
+    page.locator("[aria-label=syan]").wait_for()  # the page reloaded: the menu knows the nickname
+    page.get_by_label("syan").click()
+    page.get_by_text("Syan Code").first.wait_for()
+    assert page.get_by_text("syan · @admin").is_visible()
+    assert db.get_user("admin")["display_name"] == "Syan Code"
+    # a real picture goes through the browser's canvas, then the server
+    avatar = page.locator('img[src^="/api/account/avatar"]')
+    page.set_input_files("input[type=file]", {"name": "me.png", "mimeType": "image/png", "buffer": picture})
+    avatar.first.wait_for(timeout=15000)
+    stored = db.get_avatar(db.get_user("admin")["id"])
+    assert stored and stored[1] == "image/jpeg" and stored[0][:3] == b"\xff\xd8\xff"  # re-encoded and shrunk by the browser
+    assert ctx.request.get(base + avatar.first.get_attribute("src")).status == 200
+    page.get_by_role("button", name="Remove").click()
+    avatar.first.wait_for(state="detached", timeout=15000)
+    assert db.get_avatar(db.get_user("admin")["id"]) is None
+    assert not errors, errors

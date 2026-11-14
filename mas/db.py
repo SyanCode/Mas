@@ -312,6 +312,9 @@ CREATE TABLE IF NOT EXISTS projects (        -- several apps (repositories) depl
 );
 """
 
+USER_COLS = ("id, username, password_hash, totp_secret, totp_pending, totp_last_step, created_at, role, "
+             "display_name, nickname, bio, avatar_v, avatar_type IS NOT NULL AS has_avatar")  # not the picture itself
+
 MIGRATIONS = [
     ("site_stats", "countries TEXT"),
     ("site_stats", "sources TEXT"),
@@ -331,6 +334,12 @@ MIGRATIONS = [
     ("apps", "resources TEXT"),    # JSON {memory_mb, sleep_after_min, autoscale: {min, max}} (mas.resources)
     ("apps", "project TEXT"),      # id of the project (mas.projects) the app belongs to
     ("invites", "role TEXT NOT NULL DEFAULT 'editor'"),
+    ("users", "display_name TEXT"),   # profile: full name
+    ("users", "nickname TEXT"),
+    ("users", "bio TEXT"),
+    ("users", "avatar BLOB"),         # profile picture (mas.profile), never in a list query
+    ("users", "avatar_type TEXT"),
+    ("users", "avatar_v INTEGER NOT NULL DEFAULT 0"),
     ("apps", "pending TEXT"),
     ("apps", "pending_env TEXT"),  # JSON names of the variables a human must fill before the first build      # frozen app: JSON {sha, message, author, commits, at} of the pushes not built
 ]
@@ -386,15 +395,33 @@ class Database:
 
     def get_user(self, username: str) -> sqlite3.Row | None:
         with self.tx() as c:
-            return c.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+            return c.execute(f"SELECT {USER_COLS} FROM users WHERE username = ?", (username,)).fetchone()
 
     def get_user_by_id(self, user_id: int) -> sqlite3.Row | None:
         with self.tx() as c:
-            return c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            return c.execute(f"SELECT {USER_COLS} FROM users WHERE id = ?", (user_id,)).fetchone()
 
     def list_users(self) -> list[sqlite3.Row]:
         with self.tx() as c:
-            return c.execute("SELECT * FROM users ORDER BY id").fetchall()
+            return c.execute(f"SELECT {USER_COLS} FROM users ORDER BY id").fetchall()
+
+    def update_profile(self, user_id: int, **fields: Any) -> None:
+        if not fields or not set(fields) <= {"display_name", "nickname", "bio"}:
+            raise ValueError(f"invalid profile fields: {set(fields)}")
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        with self.tx() as c:
+            c.execute(f"UPDATE users SET {cols} WHERE id = ?", (*fields.values(), user_id))
+
+    def set_avatar(self, user_id: int, data: bytes | None, kind: str | None) -> None:
+        """Replace (or with ``None`` remove) the picture; the version changes so browsers fetch it again."""
+        with self.tx() as c:
+            c.execute("UPDATE users SET avatar = ?, avatar_type = ?, avatar_v = avatar_v + 1 WHERE id = ?",
+                      (data, kind, user_id))
+
+    def get_avatar(self, user_id: int) -> tuple[bytes, str] | None:
+        with self.tx() as c:
+            row = c.execute("SELECT avatar, avatar_type FROM users WHERE id = ?", (user_id,)).fetchone()
+        return (bytes(row["avatar"]), row["avatar_type"]) if row and row["avatar"] else None
 
     def create_user(self, username: str, password_hash: str, role: str = "admin") -> int:
         if role not in ROLES:

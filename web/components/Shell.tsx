@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Activity, Database, Gauge, HeartPulse, LayoutDashboard, Menu, Newspaper, Rocket, Search, Server, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
+import { Avatar, myAvatarUrl, shownName } from "@/components/Avatar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
@@ -74,16 +75,23 @@ function UserMenu({ session }: { session: Session }) {
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="mas-cta flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white ring-2 ring-white/10"
-        title={session.username}
+        className="flex h-8 w-8 items-center justify-center rounded-full"
+        title={shownName(session)}
+        aria-label={shownName(session)}
       >
-        {session.username.slice(0, 1).toUpperCase()}
+        <Avatar name={shownName(session)} src={myAvatarUrl(session)} size={32} />
       </button>
       {open && (
         <div className="panel absolute right-0 top-10 z-40 w-[min(18rem,calc(100vw-2rem))] animate-pop rounded-xl p-1.5 origin-top-right" onMouseLeave={() => setOpen(false)}>
           <div className="px-3 py-2">
-            <div className="text-sm font-medium">{session.username}</div>
-            <div className="text-xs text-zinc-500">{session.totp_enabled ? t("2FA enabled") : t("2FA off")} · v{session.version}</div>
+            <div className="flex items-center gap-2.5">
+              <Avatar name={shownName(session)} src={myAvatarUrl(session)} size={36} />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{session.display_name || session.nickname || session.username}</div>
+                <div className="truncate text-xs text-zinc-500">{session.nickname && session.display_name ? `${session.nickname} · ` : ""}@{session.username}</div>
+              </div>
+            </div>
+            <div className="mt-1.5 text-xs text-zinc-500">{session.totp_enabled ? t("2FA enabled") : t("2FA off")} · v{session.version}</div>
           </div>
           <div className="my-1 h-px bg-zinc-200 dark:bg-white/[0.06]" />
           <div className="space-y-2 p-1.5">

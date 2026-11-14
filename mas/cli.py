@@ -380,6 +380,34 @@ def user_create(
         _enroll_totp(env.db, user_id, username)
 
 
+@user_app.command("profile")
+def user_profile(
+    ctx: typer.Context,
+    username: Annotated[str, typer.Argument()] = "admin",
+    name: Annotated[Optional[str], typer.Option("--name", help="Full name (empty text removes it).")] = None,
+    nickname: Annotated[Optional[str], typer.Option("--nickname", help="Nickname shown first (empty text removes it).")] = None,
+    bio: Annotated[Optional[str], typer.Option("--about", help="A few words about the person.")] = None,
+) -> None:
+    """Show or set the full name, nickname and presentation of an account (the picture is set in the dashboard)."""
+    from mas import profile
+
+    env: Env = ctx.obj
+    user = _get_user(env, username)
+    given = {k: v for k, v in (("display_name", name), ("nickname", nickname), ("bio", bio)) if v is not None}
+    if given:
+        try:
+            fields = profile.clean_profile(given)
+        except profile.ProfileError as exc:
+            fail(str(exc))
+        env.db.update_profile(user["id"], **fields)
+        env.db.audit(actor(), "profile-update", True, detail=f"{username}: {', '.join(fields)}")
+        user = _get_user(env, username)
+    console.print(f"{user['username']}  [bold]{user['display_name'] or '-'}[/]  nickname: {user['nickname'] or '-'}  "
+                  f"picture: {'yes' if user['has_avatar'] else 'no'}")
+    if user["bio"]:
+        console.print(user["bio"], markup=False, highlight=False)
+
+
 @user_app.command("rename")
 def user_rename(
     ctx: typer.Context,

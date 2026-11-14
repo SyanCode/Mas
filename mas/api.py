@@ -31,6 +31,7 @@ from mas.cms import CmsError, CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
 from mas.compliance import Compliance
+from mas import profile as profile_mod
 from mas import selfbackup
 from mas.envcrypt import EnvError
 from mas.offsite import Offsite, OffsiteError
@@ -524,9 +525,23 @@ def create_app(
             raise HTTPException(404, f"unknown service {service_id}")
         return svc
 
+    def profile_payload(u) -> dict:
+        return {"display_name": u["display_name"], "nickname": u["nickname"], "bio": u["bio"],
+                "has_avatar": bool(u["has_avatar"]), "avatar_v": u["avatar_v"] or 0}
+
     def session_payload(s: SessionInfo) -> dict:
+        user = db.get_user_by_id(s.user_id)
         return {"username": s.username, "csrf": s.csrf, "totp_enabled": s.totp_enabled, "role": s.role,
-                "version": __version__}
+                "version": __version__, **(profile_payload(user) if user else {})}
+
+    def avatar_response(user_id: int) -> Response:
+        found = db.get_avatar(user_id)
+        if found is None:
+            raise HTTPException(404, "no picture")
+        data, kind = found
+        return Response(data, media_type=kind, headers={
+            "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Cache-Control": "private, max-age=86400"})
 
     # -- auth --------------------------------------------------------------
 
@@ -793,6 +808,62 @@ def create_app(
         db.delete_user_sessions(user["id"], keep=s.token_hash)
         db.audit(s.username, "password-change", True)
         return {"ok": True}
+
+    # -- profile: full name, nickname, about, picture -------------------------------------------------
+
+    @app.get("/api/account/profile")
+    def profile_get(s: SessionInfo = Depends(any_session)) -> dict:
+        return {"username": s.username, **profile_payload(db.get_user_by_id(s.user_id))}
+
+    @app.put("/api/account/profile")
+    def profile_put(body: dict, s: SessionInfo = Depends(any_session)) -> dict:
+        try:
+            fields = profile_mod.clean_profile(body)
+        except profile_mod.ProfileError as exc:
+            raise HTTPException(400, str(exc)) from None
+        if fields:
+            db.update_profile(s.user_id, **fields)
+            db.audit(s.username, "profile-update", True, detail=", ".join(fields))
+        return {"username": s.username, **profile_payload(db.get_user_by_id(s.user_id))}
+
+    @app.put("/api/account/avatar")
+    def avatar_put(body: dict, s: SessionInfo = Depends(any_session)) -> dict:
+        try:
+            data, kind = profile_mod.parse_avatar(body.get("data_url"))
+        except profile_mod.ProfileError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.set_avatar(s.user_id, data, kind)
+        db.audit(s.username, "profile-picture", True, detail=f"{kind}, {len(data) // 1024} KB")
+        return {"username": s.username, **profile_payload(db.get_user_by_id(s.user_id))}
+
+    @app.delete("/api/account/avatar")
+    def avatar_delete(s: SessionInfo = Depends(any_session)) -> dict:
+        db.set_avatar(s.user_id, None, None)
+        db.audit(s.username, "profile-picture", True, detail="removed")
+        return {"username": s.username, **profile_payload(db.get_user_by_id(s.user_id))}
+
+    @app.get("/api/account/avatar")
+    def avatar_get(s: SessionInfo = Depends(any_session)) -> Response:
+        return avatar_response(s.user_id)
+
+    @app.get("/api/users/{user_id}/avatar")
+    def user_avatar(user_id: int, _: SessionInfo = Depends(current_session)) -> Response:
+        return avatar_response(user_id)
+
+    @app.put("/api/users/{user_id}/profile")
+    def user_profile_put(user_id: int, body: dict, s: SessionInfo = Depends(current_session)) -> dict:
+        """An administrator names the accounts they created (the picture stays the owner's)."""
+        target = db.get_user_by_id(user_id)
+        if target is None:
+            raise HTTPException(404, "unknown account")
+        try:
+            fields = profile_mod.clean_profile({k: v for k, v in body.items() if k in ("display_name", "nickname")})
+        except profile_mod.ProfileError as exc:
+            raise HTTPException(400, str(exc)) from None
+        if fields:
+            db.update_profile(user_id, **fields)
+            db.audit(s.username, "profile-update", True, detail=f"{target['username']}: {', '.join(fields)}")
+        return {"username": target["username"], **profile_payload(db.get_user_by_id(user_id))}
 
     @app.get("/api/self-backup")
     def self_backup_get(_: SessionInfo = Depends(current_session)) -> dict:

@@ -131,7 +131,9 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     def user_payload(u) -> dict:
         return {"id": u["id"], "username": u["username"], "role": u["role"], "totp_enabled": bool(u["totp_secret"]),
-                "created_at": u["created_at"], "apps": db.user_apps(u["id"]) if u["role"] in EDITOR_ROLES else []}
+                "created_at": u["created_at"], "apps": db.user_apps(u["id"]) if u["role"] in EDITOR_ROLES else [],
+                "display_name": u["display_name"], "nickname": u["nickname"], "has_avatar": bool(u["has_avatar"]),
+                "avatar_v": u["avatar_v"] or 0}
 
     def new_password() -> str:
         return secrets.token_urlsafe(12)

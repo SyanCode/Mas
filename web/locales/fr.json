@@ -1976,5 +1976,16 @@
   "Test the storage": "Tester le stockage",
   "Test file written to the storage.": "Fichier de test écrit sur le stockage.",
   "Read-only account: you can look at everything, but nothing can be changed from here.": "Compte en lecture seule : vous pouvez tout consulter, mais rien ne peut être modifié d'ici.",
-  "Hidden for this account": "Masqué pour ce compte"
+  "Hidden for this account": "Masqué pour ce compte",
+  "Profile": "Profil",
+  "Choose a picture": "Choisir une photo",
+  "PNG, JPEG or WebP. It is cropped to a square and shrunk here, in your browser.": "PNG, JPEG ou WebP. Elle est recadrée en carré et réduite ici, dans votre navigateur.",
+  "Full name": "Nom complet",
+  "Jane Doe": "Jeanne Dupont",
+  "Nickname": "Pseudo",
+  "Shown first, in the menu and in lists. Letters, digits, spaces and . _ ' -": "Affiché en premier, dans le menu et les listes. Lettres, chiffres, espaces et . _ ' -",
+  "About": "À propos",
+  "A few words about you (300 characters).": "Quelques mots sur vous (300 caractères).",
+  "Your login stays {name}.": "Votre identifiant de connexion reste {name}.",
+  "This file is not a picture the browser can read.": "Ce fichier n'est pas une image que le navigateur peut lire."
 }

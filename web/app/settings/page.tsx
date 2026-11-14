@@ -2,6 +2,7 @@
 
 import { UpdateCard } from "@/components/Update";
 import { useEffect, useState, type FormEvent } from "react";
+import { Avatar, myAvatarUrl, shrinkPicture, userAvatarUrl, shownName } from "@/components/Avatar";
 import { Shell, useSession } from "@/components/Shell";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
@@ -653,7 +654,9 @@ function PeopleCard() {
           {editors.map((u) => (
             <li key={u.id} className="space-y-3 py-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{u.username}</span>
+                <Avatar name={shownName(u)} src={userAvatarUrl(u)} size={28} />
+                <span className="font-medium">{shownName(u)}</span>
+                {shownName(u) !== u.username && <span className="text-xs text-zinc-500">@{u.username}</span>}
                 <Badge tone={u.totp_enabled ? "emerald" : "zinc"}>{u.totp_enabled ? "2FA" : t("no 2FA")}</Badge>
                 <span className="text-xs text-zinc-500">{t("since {when}", { when: timeAgo(u.created_at) })}</span>
                 <div className="ml-auto flex flex-wrap gap-1">
@@ -693,7 +696,9 @@ function PeopleCard() {
             <ul className="divide-y divide-zinc-200/80 dark:divide-white/[0.06]">
               {viewers.map((u) => (
                 <li key={u.id} className="flex flex-wrap items-center gap-2 py-2">
-                  <span className="font-medium">{u.username}</span>
+                  <Avatar name={shownName(u)} src={userAvatarUrl(u)} size={28} />
+                  <span className="font-medium">{shownName(u)}</span>
+                  {shownName(u) !== u.username && <span className="text-xs text-zinc-500">@{u.username}</span>}
                   <Badge tone={u.totp_enabled ? "emerald" : "zinc"}>{u.totp_enabled ? "2FA" : t("no 2FA")}</Badge>
                   <div className="ml-auto flex flex-wrap gap-1">
                     <Button variant="ghost" disabled={!!busy} onClick={() => reset(u)}>{t("Reset password")}</Button>
@@ -1066,6 +1071,103 @@ function HostAlertsCard() {
   );
 }
 
+function ProfileCard() {
+  const t = useT();
+  const session = useSession();
+  const [displayName, setDisplayName] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [bio, setBio] = useState("");
+  const [picture, setPicture] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!session) return;
+    setDisplayName(session.display_name ?? ""); setNickname(session.nickname ?? ""); setBio(session.bio ?? "");
+    setPicture(myAvatarUrl(session));
+  }, [session]);
+
+  type Profile = { has_avatar: boolean; avatar_v: number };
+  const avatarOf = (r: Profile) => (r.has_avatar ? `/api/account/avatar?v=${r.avatar_v}` : null);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(""); setMsg(""); setBusy(true);
+    try {
+      await api("/account/profile", { method: "PUT", body: { display_name: displayName, nickname, bio } });
+      setMsg(t("Saved."));
+      setTimeout(() => window.location.reload(), 600);
+    } catch (err) {
+      setError((err as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function choose(file: File | undefined) {
+    if (!file) return;
+    setError(""); setMsg(""); setBusy(true);
+    try {
+      const data_url = await shrinkPicture(file);
+      const r = await api<Profile>("/account/avatar", { method: "PUT", body: { data_url } });
+      setPicture(avatarOf(r));
+      setTimeout(() => window.location.reload(), 600);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : t("This file is not a picture the browser can read."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePicture() {
+    setError(""); setBusy(true);
+    try {
+      await api("/account/avatar", { method: "DELETE" });
+      setPicture(null);
+      setTimeout(() => window.location.reload(), 300);
+    } catch (err) {
+      setError((err as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const shown = nickname || displayName || session?.username || "";
+  return (
+    <Card title={t("Profile")}>
+      <form onSubmit={save} className="max-w-md space-y-4 text-sm">
+        <div className="flex items-center gap-4">
+          <Avatar name={shown || "?"} src={picture} size={72} />
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex cursor-pointer items-center rounded-lg border border-zinc-300 px-3 py-1.5 hover:bg-zinc-100 dark:border-white/10 dark:hover:bg-white/[0.06]">
+                {t("Choose a picture")}
+                <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={(e) => { choose(e.target.files?.[0]); e.target.value = ""; }} />
+              </label>
+              {picture && <Button type="button" variant="ghost" disabled={busy} onClick={removePicture}>{t("Remove")}</Button>}
+            </div>
+            <p className="text-xs text-zinc-500">{t("PNG, JPEG or WebP. It is cropped to a square and shrunk here, in your browser.")}</p>
+          </div>
+        </div>
+        <Label title={t("Full name")}>
+          <Input value={displayName} maxLength={80} onChange={(e) => setDisplayName(e.target.value)} placeholder={t("Jane Doe")} autoComplete="name" />
+        </Label>
+        <Label title={t("Nickname")} hint={t("Shown first, in the menu and in lists. Letters, digits, spaces and . _ ' -")}>
+          <Input value={nickname} maxLength={32} onChange={(e) => setNickname(e.target.value)} placeholder={session?.username} autoComplete="nickname" />
+        </Label>
+        <Label title={t("About")} hint={t("A few words about you (300 characters).")}>
+          <Textarea rows={3} value={bio} maxLength={300} onChange={(e) => setBio(e.target.value)} />
+        </Label>
+        <p className="text-xs text-zinc-500">{t("Your login stays {name}.", { name: session?.username ?? "" })}</p>
+        <ErrorText>{error}</ErrorText>
+        {msg && <p className="text-emerald-700 dark:text-emerald-400">{msg}</p>}
+        <Button variant="primary" type="submit" disabled={busy}>{busy ? <Spinner /> : null}{t("Save")}</Button>
+      </form>
+    </Card>
+  );
+}
+
 function AppearanceCard() {
   const t = useT();
   return (
@@ -1083,6 +1185,7 @@ function Settings() {
     return (
       <div className="space-y-4">
         <PageHeader eyebrow={t("Account")} title={t("Your account")} subtitle={t("Password and two-factor authentication.")} />
+        <ProfileCard />
         <AppearanceCard />
         <TwoFactor enabled={!!session?.totp_enabled} />
         <PasswordForm />
@@ -1093,6 +1196,7 @@ function Settings() {
   return (
     <div className="space-y-4">
       <PageHeader eyebrow={t("Configuration")} title={t("Settings")} subtitle={t("Domains, GitHub, people and account security.")} />
+      <ProfileCard />
       <AppearanceCard />
       <UpdateCard />
       <DomainsCard />

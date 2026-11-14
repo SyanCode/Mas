@@ -9,7 +9,7 @@ import { Archive, ScanSearch,
   Server, Settings as SettingsIcon, Sun, Users, X,
 } from "lucide-react";
 import { Logo } from "@/components/Shell";
-import { Avatar } from "@/components/cms/ui/avatar";
+import { Avatar, myAvatarUrl, shownName } from "@/components/Avatar";
 import { Button } from "@/components/cms/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/cms/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/cms/ui/select";
@@ -179,12 +179,12 @@ function Topbar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Avatar name={session.username} /></button>
+            <button className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Avatar name={shownName(session)} src={myAvatarUrl(session)} size={32} /></button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>
-              <div>{session.username}</div>
-              <div className="text-xs font-normal text-muted-foreground">{session.role === "admin" ? t("Administrator") : t("Editor")}</div>
+              <div>{session.display_name || session.nickname || session.username}</div>
+              <div className="text-xs font-normal text-muted-foreground">{session.nickname && session.display_name ? `${session.nickname} · ` : ""}@{session.username} · {session.role === "admin" ? t("Administrator") : t("Editor")}</div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild><Link href="/settings/"><SettingsIcon />{t("Account")}</Link></DropdownMenuItem>

@@ -1972,5 +1972,16 @@
   "Test the storage": "Probar el almacenamiento",
   "Test file written to the storage.": "Archivo de prueba escrito en el almacenamiento.",
   "Read-only account: you can look at everything, but nothing can be changed from here.": "Cuenta de solo lectura: puedes verlo todo, pero no se puede cambiar nada desde aquí.",
-  "Hidden for this account": "Oculto para esta cuenta"
+  "Hidden for this account": "Oculto para esta cuenta",
+  "Profile": "Perfil",
+  "Choose a picture": "Elegir una foto",
+  "PNG, JPEG or WebP. It is cropped to a square and shrunk here, in your browser.": "PNG, JPEG o WebP. Se recorta en cuadrado y se reduce aquí, en tu navegador.",
+  "Full name": "Nombre completo",
+  "Jane Doe": "Juana Pérez",
+  "Nickname": "Apodo",
+  "Shown first, in the menu and in lists. Letters, digits, spaces and . _ ' -": "Se muestra primero, en el menú y en las listas. Letras, dígitos, espacios y . _ ' -",
+  "About": "Acerca de",
+  "A few words about you (300 characters).": "Unas palabras sobre ti (300 caracteres).",
+  "Your login stays {name}.": "Tu usuario de acceso sigue siendo {name}.",
+  "This file is not a picture the browser can read.": "Este archivo no es una imagen que el navegador pueda leer."
 }

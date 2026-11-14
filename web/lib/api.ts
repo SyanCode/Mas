@@ -77,6 +77,11 @@ export interface Session {
   totp_enabled: boolean;
   role: "admin" | "editor" | "author" | "viewer";
   version: string;
+  display_name?: string | null;
+  nickname?: string | null;
+  bio?: string | null;
+  has_avatar?: boolean;
+  avatar_v?: number;
 }
 
 // -- CMS ------------------------------------------------------------------------
@@ -249,6 +254,10 @@ export interface CmsUser {
   totp_enabled: boolean;
   created_at: string;
   apps: string[];
+  display_name?: string | null;
+  nickname?: string | null;
+  has_avatar?: boolean;
+  avatar_v?: number;
 }
 
 export interface LogSource {

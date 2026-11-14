@@ -138,6 +138,7 @@ $ sudo mas user create [name]   # password + 2FA QR code (--role viewer: read-on
 $ sudo mas user 2fa [name]      # set up / replace the authenticator app
 $ sudo mas user 2fa-reset [name]  # lost phone: disable 2FA (root only)
 $ sudo mas user passwd [name]
+$ sudo mas user profile [name] --name "Jane Doe" --nickname jane   # full name, nickname, about
 
 $ sudo mas token create claude [--write|--create] [--days 90]  # API token for scripts / AI agents (shown once)
 $ sudo mas token list
@@ -781,6 +782,8 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
 - **Recovery codes**: ten single-use codes are given when 2FA is enabled; only their SHA-256 is stored, a
   code is spent when used, and replacing the set (or turning 2FA off) invalidates the old ones. They go through
   the same rate limits as the app's code. `sudo mas user 2fa-reset` stays the last resort for root.
+- **Profiles**: the picture is a PNG, JPEG or WebP found from its first bytes (never an SVG), at most 300 KB,
+  served with `nosniff` and a sandboxing CSP, only to its owner and to administrators; tokens never reach it.
 - **Read-only accounts** (`mas user create --role viewer`): the whole dashboard to look at, every change refused,
   and the same forbidden routes as API tokens (accounts, tokens, environment variables, credentials, server alerts,
   backups). The passwords and tokens a service shows (mail box, Vaultwarden admin) are hidden from them and from
@@ -876,6 +879,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Backup of Mas itself**: `mas backup create|list|restore`, one automatic backup every night (the Health page and `mas doctor` warn when none is recent), optionally copied to any S3-compatible storage (Settings → Backup of Mas).
 - [x] **Server alerts**: disk nearly full, certificate expired, nginx broken, a running service that stopped: one e-mail / webhook when it appears, one when it is fixed (Settings → Server alerts).
 - [x] **Preview deployments**: opt-in per app, one copy per pull request at `pr<N>.<domain>` (same-repo PRs only, no secrets copied unless asked, only the allowed IP addresses can open them, removed when the PR closes, or within 30 minutes if the webhook was missed).
+- [x] **Profiles**: full name, nickname, short presentation and picture for every account (Settings → Profile; the picture is cropped and shrunk in the browser, checked on the server, never an SVG).
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 ## License

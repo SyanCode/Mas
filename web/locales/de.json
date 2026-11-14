@@ -1972,5 +1972,16 @@
   "Test the storage": "Speicher testen",
   "Test file written to the storage.": "Testdatei auf den Speicher geschrieben.",
   "Read-only account: you can look at everything, but nothing can be changed from here.": "Nur-Lese-Konto: Du kannst alles ansehen, aber von hier aus nichts ändern.",
-  "Hidden for this account": "Für dieses Konto verborgen"
+  "Hidden for this account": "Für dieses Konto verborgen",
+  "Profile": "Profil",
+  "Choose a picture": "Bild auswählen",
+  "PNG, JPEG or WebP. It is cropped to a square and shrunk here, in your browser.": "PNG, JPEG oder WebP. Es wird hier in deinem Browser quadratisch zugeschnitten und verkleinert.",
+  "Full name": "Vollständiger Name",
+  "Jane Doe": "Erika Mustermann",
+  "Nickname": "Spitzname",
+  "Shown first, in the menu and in lists. Letters, digits, spaces and . _ ' -": "Wird zuerst im Menü und in Listen angezeigt. Buchstaben, Ziffern, Leerzeichen und . _ ' -",
+  "About": "Über mich",
+  "A few words about you (300 characters).": "Ein paar Worte über dich (300 Zeichen).",
+  "Your login stays {name}.": "Dein Login bleibt {name}.",
+  "This file is not a picture the browser can read.": "Diese Datei ist kein Bild, das der Browser lesen kann."
 }
