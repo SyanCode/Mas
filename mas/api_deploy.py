@@ -183,6 +183,7 @@ def register(
     reset_github: Callable[[], None],
     appdb=None,
     projects=None,
+    client_ip: Callable | None = None,
 ) -> None:
     manifest_states: dict[str, tuple[int, float]] = {}
     health_cache: dict[str, object] = {}
@@ -686,21 +687,23 @@ def register(
         return {"release_id": rid}
 
     @app.get("/api/apps/{app_id}/previews")
-    def get_previews(app_id: str, _=Depends(current_session)) -> dict:
+    def get_previews(app_id: str, request: Request, _=Depends(current_session)) -> dict:
         find_app(app_id)
-        return {**previews.settings(app_id), "previews": previews.of_parent(app_id)}
+        return {**previews.settings(app_id), "previews": previews.of_parent(app_id),
+                "your_ip": client_ip(request) if client_ip else None}
 
     @app.put("/api/apps/{app_id}/previews")
-    def put_previews(app_id: str, body: dict, s=Depends(current_session)) -> dict:
+    async def put_previews(app_id: str, body: dict, s=Depends(current_session)) -> dict:
         current = find_app(app_id)
         if current["mode"] != "managed" or current.get("environment") == "preview" or not current.get("domain"):
             raise HTTPException(400, "previews need an app deployed by Mas, with a domain")
         try:
-            result = previews.configure(app_id, body)
+            result = await asyncio.to_thread(previews.configure, app_id, body)
         except DeployError as exc:
             raise HTTPException(400, str(exc)) from None
         db.audit(s.username, "previews-config", True, service_id=app_id,
-                 detail=("on" if result["enabled"] else "off") + (", with variables" if result["env"] else ""))
+                 detail=("on" if result["enabled"] else "off") + (", with variables" if result["env"] else "")
+                 + f", {len(result['allow'])} allowed address(es)")
         return {**result, "previews": previews.of_parent(app_id)}
 
     @app.delete("/api/apps/{app_id}")

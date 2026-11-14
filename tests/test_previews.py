@@ -85,3 +85,32 @@ def test_never_touches_an_app_that_has_the_preview_id(api):  # noqa: F811
     db.create_app("web-pr7", name="mine", repo="acme/other", branch="main", type="static")
     assert send(client, pr_event())["previews"] == []
     assert queued == [] and db.get_app("web-pr7")["repo"] == "acme/other"
+
+
+def test_allowed_addresses_are_validated_and_listed(api):  # noqa: F811
+    client, db, queued, h, _ = setup(api)
+    put = lambda allow: client.put("/api/apps/web/previews", json={"enabled": True, "allow": allow}, headers=h)  # noqa: E731
+    assert put(["0.0.0.0/0"]).status_code == 400  # not the whole internet
+    assert put(["::/0"]).status_code == 400
+    assert put(["nope"]).status_code == 400
+    r = put(["203.0.113.7", " 198.51.100.0/24 ", "203.0.113.7", "2001:db8::/32"])
+    assert r.status_code == 200 and r.json()["allow"] == ["203.0.113.7", "198.51.100.0/24", "2001:db8::/32"]
+    got = client.get("/api/apps/web/previews").json()
+    assert got["allow"] == r.json()["allow"] and got["your_ip"]  # the address of the caller, to add in one click
+
+
+def test_preview_vhost_only_serves_the_allowed_addresses(api):  # noqa: F811
+    from mas.deploy import app_paths
+    from mas.models import ServiceType
+    client, db, queued, h, _ = setup(api)
+    client.put("/api/apps/web/previews", json={"enabled": True, "allow": ["203.0.113.7"]}, headers=h)
+    send(client, pr_event())
+    deployer = client.app.state.deployer
+    body = deployer._vhost_body(db.get_app("web-pr7"), ServiceType.STATIC, app_paths(deployer.config, "web-pr7"))
+    assert "allow 203.0.113.7;" in body and "allow 127.0.0.1;" in body and "deny all;" in body
+    assert 'add_header X-Robots-Tag "noindex, nofollow" always;' in body
+    # the dot-files location already refuses: an "allow" before it would open it
+    dots = body.split("location ~ /\\.(?!well-known) {")[1].split("}")[0]
+    assert "allow" not in dots
+    # the production app stays open
+    assert "allow" not in deployer._vhost_body(db.get_app("web"), ServiceType.STATIC, app_paths(deployer.config, "web"))

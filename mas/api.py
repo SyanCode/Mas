@@ -891,7 +891,7 @@ def create_app(
     app.state.deployer = deployer
     api_deploy.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
                         deployer=deployer, github_client=github_client, reset_github=github_cache.clear,
-                        appdb=appdb, projects=projects)
+                        appdb=appdb, projects=projects, client_ip=client_ip)
     api_projects.register(app, host=host, config=config, db=db, scanner=scanner, current_session=current_session,
                           deployer=deployer, projects=projects)
     app.state.projects = projects

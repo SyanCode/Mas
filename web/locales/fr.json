@@ -1952,5 +1952,9 @@
   "Each pull request of this repository gets its own copy at pr<number>.{domain}, removed when it is closed. Needs a wildcard DNS record (*.{domain}) pointing at this server.": "Chaque pull request de ce dépôt reçoit sa propre copie à pr<numéro>.{domain}, supprimée à sa fermeture. Demande un enregistrement DNS générique (*.{domain}) pointant vers ce serveur.",
   "Deploy a preview for each pull request": "Déployer une prévisualisation pour chaque pull request",
   "Give previews the variables of this app": "Donner aux prévisualisations les variables de cette app",
-  "the code of a pull request runs with your secrets": "le code d'une pull request tourne avec vos secrets"
+  "the code of a pull request runs with your secrets": "le code d'une pull request tourne avec vos secrets",
+  "Who can open the previews": "Qui peut ouvrir les prévisualisations",
+  "Only these addresses can open a preview; everybody else gets a 403 (bots that find the new sub-domain are kept out, and search engines are told not to index it). One address or network per line.": "Seules ces adresses peuvent ouvrir une prévisualisation ; les autres reçoivent une erreur 403 (les robots qui trouvent le nouveau sous-domaine sont tenus à l'écart, et les moteurs de recherche ont l'ordre de ne pas l'indexer). Une adresse ou un réseau par ligne.",
+  "Save the addresses": "Enregistrer les adresses",
+  "No address yet: nobody can open the previews.": "Aucune adresse pour l'instant : personne ne peut ouvrir les prévisualisations."
 }

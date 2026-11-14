@@ -101,6 +101,15 @@ class AppPaths:
     home: str
 
 
+def preview_access(db: Database, app: dict) -> list[str] | None:
+    """Addresses allowed on a preview (None: not a preview, nginx is open as usual)."""
+    if app.get("environment") != "preview":
+        return None
+    meta = json.loads(db.get_setting(f"preview:{app['id']}") or "null") or {}
+    raw = json.loads(db.get_setting(f"previews:{meta.get('parent')}") or "null") or {}
+    return [str(n) for n in raw.get("allow", [])]
+
+
 def app_paths(config: Config, app_id: str) -> AppPaths:
     base = f"{config.apps_dir.rstrip('/')}/{app_id}"
     return AppPaths(base, f"{base}/releases", f"{base}/current", f"{base}/.home")
@@ -715,6 +724,25 @@ class Deployer:
                 self.host.write_text(path, content, mode=0o644)
 
     def _vhost_body(self, app: dict, app_type: ServiceType, paths: AppPaths, page: str | None = None) -> str:
+        body = self._vhost_content(app, app_type, paths, page)
+        access = preview_access(self.db, app)
+        if access is not None:  # a preview: only the addresses its owner allowed (this server included)
+            body = templates.restrict(body, ["127.0.0.1", "::1", *access])
+        return body
+
+    def refresh_vhost(self, app_id: str) -> bool:
+        """Write the nginx site of an app again (after a change of its access rules). False if not live yet."""
+        app = self.db.get_app(app_id)
+        if not app or app["mode"] != "managed" or not app.get("current_release") or not app.get("domain"):
+            return False
+        rlog = ReleaseLog(Path(self.db.path).parent / "logs" / "nginx.log")
+        try:
+            self._install_vhost(app, ServiceType(app["type"]), app_paths(self.config, app_id), rlog)
+        finally:
+            rlog.close()
+        return True
+
+    def _vhost_content(self, app: dict, app_type: ServiceType, paths: AppPaths, page: str | None = None) -> str:
         if page:
             return templates.placeholder_body(self.config.pages_dir, page)
         root = paths.current + (f"/{app['root_dir'].strip('/')}" if app.get("root_dir") else "")

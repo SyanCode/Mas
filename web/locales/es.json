@@ -1948,5 +1948,9 @@
   "Each pull request of this repository gets its own copy at pr<number>.{domain}, removed when it is closed. Needs a wildcard DNS record (*.{domain}) pointing at this server.": "Cada pull request de este repositorio recibe su propia copia en pr<número>.{domain}, que se elimina al cerrarla. Requiere un registro DNS comodín (*.{domain}) que apunte a este servidor.",
   "Deploy a preview for each pull request": "Desplegar una vista previa por cada pull request",
   "Give previews the variables of this app": "Dar a las vistas previas las variables de esta app",
-  "the code of a pull request runs with your secrets": "el código de una pull request se ejecuta con tus secretos"
+  "the code of a pull request runs with your secrets": "el código de una pull request se ejecuta con tus secretos",
+  "Who can open the previews": "Quién puede abrir las vistas previas",
+  "Only these addresses can open a preview; everybody else gets a 403 (bots that find the new sub-domain are kept out, and search engines are told not to index it). One address or network per line.": "Solo estas direcciones pueden abrir una vista previa; el resto recibe un 403 (los bots que encuentran el nuevo subdominio quedan fuera, y se indica a los buscadores que no lo indexen). Una dirección o red por línea.",
+  "Save the addresses": "Guardar las direcciones",
+  "No address yet: nobody can open the previews.": "Aún no hay direcciones: nadie puede abrir las vistas previas."
 }

@@ -705,20 +705,23 @@ function CmsCard({ appId }: { appId: string }) {
   );
 }
 
-interface PreviewInfo { enabled: boolean; env: boolean; max: number; previews: { id: string; pr: number; domain: string; status: string | null }[] }
+interface PreviewInfo { enabled: boolean; env: boolean; max: number; allow: string[]; your_ip: string | null; previews: { id: string; pr: number; domain: string; status: string | null }[] }
 
 function PreviewsCard({ app }: { app: App }) {
   const t = useT();
   const [info, setInfo] = useState<PreviewInfo | null>(null);
   const [error, setError] = useState("");
+  const [allow, setAllow] = useState("");
   const url = `/apps/${encodeURIComponent(app.id)}/previews`;
-  useEffect(() => { api<PreviewInfo>(url).then(setInfo).catch(() => {}); }, [url]);
+  useEffect(() => { api<PreviewInfo>(url).then((r) => { setInfo(r); setAllow(r.allow.join("\n")); }).catch(() => {}); }, [url]);
 
   async function save(patch: Partial<PreviewInfo>) {
     if (!info) return;
     setError("");
     try {
-      setInfo(await api<PreviewInfo>(url, { method: "PUT", body: { enabled: info.enabled, env: info.env, max: info.max, ...patch } }));
+      const r = await api<PreviewInfo>(url, { method: "PUT", body: { enabled: info.enabled, env: info.env, max: info.max, allow: info.allow, ...patch } });
+      setInfo((old) => (old ? { ...old, ...r } : r));
+      setAllow(r.allow.join("\n"));
     } catch (err) {
       setError((err as ApiError).detail);
     }
@@ -740,6 +743,20 @@ function PreviewsCard({ app }: { app: App }) {
             <input type="checkbox" className="mt-1" checked={info.env} onChange={(e) => save({ env: e.target.checked })} />
             <span>{t("Give previews the variables of this app")} <span className="text-amber-700 dark:text-amber-400">({t("the code of a pull request runs with your secrets")})</span></span>
           </label>
+        )}
+        {info.enabled && (
+          <div className="space-y-2">
+            <p className="font-medium">{t("Who can open the previews")}</p>
+            <p className="text-zinc-600 dark:text-zinc-400">{t("Only these addresses can open a preview; everybody else gets a 403 (bots that find the new sub-domain are kept out, and search engines are told not to index it). One address or network per line.")}</p>
+            <Textarea rows={3} placeholder="203.0.113.7&#10;198.51.100.0/24" value={allow} onChange={(e) => setAllow(e.target.value)} />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" onClick={() => save({ allow: allow.split(/[\s,]+/).filter(Boolean) })}>{t("Save the addresses")}</Button>
+              {info.your_ip && !allow.split(/[\s,]+/).includes(info.your_ip) && (
+                <Button onClick={() => setAllow((a) => `${a.trim()}${a.trim() ? "\n" : ""}${info.your_ip}`)}>{t("Add my address ({ip})", { ip: info.your_ip })}</Button>
+              )}
+            </div>
+            {info.allow.length === 0 && <p className="text-amber-700 dark:text-amber-400">{t("No address yet: nobody can open the previews.")}</p>}
+          </div>
         )}
         <ErrorText>{error}</ErrorText>
         {info.previews.length > 0 && (

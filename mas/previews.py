@@ -10,6 +10,7 @@ DNS record (``*.<domain>``) pointing at the server.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 from typing import Callable
@@ -22,7 +23,29 @@ from mas.models import ServiceType
 log = logging.getLogger(__name__)
 
 OPENING = {"opened", "reopened", "ready_for_review"}
-DEFAULTS = {"enabled": False, "env": False, "max": 5}
+DEFAULTS = {"enabled": False, "env": False, "max": 5, "allow": []}
+MAX_ALLOW = 30
+
+
+def normalize_networks(entries: list[str]) -> list[str]:
+    """``1.2.3.4`` / ``1.2.3.0/24`` / ``2a01::/64`` → canonical networks, deduplicated; never the whole internet."""
+    out: list[str] = []
+    for entry in entries:
+        text = str(entry).strip()
+        if not text:
+            continue
+        try:
+            net = ipaddress.ip_network(text, strict=False)
+        except ValueError:
+            raise DeployError(f"not an IP address or network: {text}") from None
+        if net.prefixlen == 0:
+            raise DeployError(f"{text} would open the previews to the whole internet")
+        value = str(net.network_address) if net.num_addresses == 1 else str(net)
+        if value not in out:
+            out.append(value)
+    if len(out) > MAX_ALLOW:
+        raise DeployError(f"at most {MAX_ALLOW} addresses")
+    return out
 
 
 def preview_id(parent: str, number: int) -> str:
@@ -49,8 +72,19 @@ class Previews:
         count = body.get("max", 5)
         if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 20:
             raise DeployError("max: 1 to 20 previews")
+        allow = body.get("allow", self.settings(app_id)["allow"])
+        if not isinstance(allow, list):
+            raise DeployError("allow: a list of addresses")
+        networks = normalize_networks(allow)
+        changed = networks != self.settings(app_id)["allow"]
         self.db.set_setting(f"previews:{app_id}", json.dumps(
-            {"enabled": bool(body.get("enabled")), "env": bool(body.get("env")), "max": count}))
+            {"enabled": bool(body.get("enabled")), "env": bool(body.get("env")), "max": count, "allow": networks}))
+        if changed:  # the previews already live follow the new list right away
+            for p in self.of_parent(app_id):
+                try:
+                    self.deployer.refresh_vhost(p["id"])
+                except DeployError as exc:
+                    log.warning("preview %s: %s", p["id"], exc)
         return self.settings(app_id)
 
     # -- what exists ---------------------------------------------------------------------------------------
