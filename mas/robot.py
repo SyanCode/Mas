@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 MAX_STEPS = 30
 RUN_SECONDS = 20 * 60
 APPROVAL_SECONDS = 15 * 60
+STOP_GRACE = 20  # seconds a run gets to notice a Stop before it is cancelled
 MAX_STEP_TEXT = 1500
 MAX_RESULT = 12000
 MAX_READ = 60000
@@ -199,7 +200,30 @@ class Robot:
             return False
         state["stop"] = True
         state["event"].set()
+        try:  # a run that does not notice the stop (a hung request) is cancelled after a short grace
+            asyncio.get_running_loop().call_later(STOP_GRACE, lambda: None if state["task"].done() else state["task"].cancel())
+        except RuntimeError:
+            pass
         return True
+
+    def reap(self, now: float | None = None) -> list[int]:
+        """Forget the runs that are over and cancel the ones the database calls over or that ran far too long, so that
+        a stuck task never keeps the robot "busy" for ever. Returns the runs it cancelled."""
+        now, cancelled = now or time.time(), []
+        for run_id, state in list(self.live.items()):
+            task = state["task"]
+            if task.done():
+                del self.live[run_id]
+                continue
+            run = self.db.get_robot_run(run_id)
+            over = run is None or run["status"] not in ("running", "waiting")
+            if over or now - run["created_at"] > RUN_SECONDS + 300:
+                task.cancel()
+                if run and not over:
+                    self.db.update_robot_run(run_id, status="failed", pending=None, finished_at=now,
+                                             summary="stopped: the run did not finish in time")
+                cancelled.append(run_id)
+        return cancelled
 
     def recover(self) -> None:
         """A restart interrupts the runs that were going on."""
@@ -252,6 +276,8 @@ class Robot:
                     status, summary = "failed", "too many steps: the goal was too big, try a narrower one"
         except AiError as exc:
             status, summary = "failed", str(exc)
+        except asyncio.CancelledError:  # reaped or stopped while a request hung: end cleanly
+            status, summary = "stopped", "stopped: it did not answer"
         except Stuck as exc:
             status, summary = "failed", f"stopped: the robot kept repeating the same action ({exc}). Nothing more was done; try a narrower goal."
         except Exception as exc:  # noqa: BLE001 - the run must end cleanly

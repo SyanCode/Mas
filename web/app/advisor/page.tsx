@@ -53,7 +53,7 @@ function AutopilotCard({ state, onChange }: { state: AdvisorState; onChange: (s:
           <Button variant="glow" onClick={applyAll} disabled={busy || !!working || (ap.batch && ap.left > 0 && !ap.paused && !ap.limited_until && !ap.next_try)}>
             {busy ? <Spinner /> : <Bot className="size-3.5" />}{t("Apply everything")}{ap.left > 0 ? ` (${ap.left})` : ""}
           </Button>
-          {(working || ap.batch) && <Button variant="secondary" onClick={stop} disabled={busy}><X className="size-3.5" />{t("Stop")}</Button>}
+          {(working || ap.batch || ap.enabled || ap.blocked) && <Button variant="secondary" onClick={stop} disabled={busy}><X className="size-3.5" />{t("Stop")}</Button>}
         </div>
         {working && (
           <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-violet-800 dark:text-violet-200">
@@ -66,10 +66,15 @@ function AutopilotCard({ state, onChange }: { state: AdvisorState; onChange: (s:
         {waiting && !ap.paused && (
           <p className="text-zinc-600 dark:text-zinc-400">
             {ap.limited_until ? t("Every AI account is at its limit: waiting for the reset ({time}).", { time: clock(ap.limited_until) })
+              : ap.blocked?.reason === "robot_busy" ? t("The robot is still busy with an earlier run (#{id}): press Stop to free it.", { id: ap.blocked.detail })
+              : ap.blocked?.reason === "ai_disabled" ? t("Every AI account is switched off ({detail}): fix it in the AI accounts tab.", { detail: ap.blocked.detail })
+              : ap.blocked?.reason === "no_account" ? t("Connect an AI account first (AI accounts tab).")
+              : ap.blocked?.reason === "cap" ? t("The daily cap ({n}) is reached: it carries on tomorrow.", { n: ap.blocked.detail })
               : ap.next_try ? t("A proposal failed: next try at {time}.", { time: clock(ap.next_try) })
               : t("Starting the next proposal…")}
           </p>
         )}
+        {ap.error && <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-rose-700 dark:text-rose-300">{t("Something went wrong in the autopilot: {error}", { error: ap.error })}</p>}
         {ap.paused && <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300">{ap.paused}</p>}
         <p className="text-zinc-600 dark:text-zinc-400">
           {t("One click: if nothing waits Claude analyses first, then the robot makes every change (on your sites, or on the server with Mas's own fixes), deploys it and closes the proposal with its report. What the robot cannot do, it says so and leaves it to you. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.")}

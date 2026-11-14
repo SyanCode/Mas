@@ -2010,5 +2010,10 @@
   "A proposal failed: next try at {time}.": "Una propuesta falló: próximo intento a las {time}.",
   "Starting the next proposal…": "Iniciando la siguiente propuesta…",
   "One click: if nothing waits Claude analyses first, then the robot makes every change (on your sites, or on the server with Mas's own fixes), deploys it and closes the proposal with its report. What the robot cannot do, it says so and leaves it to you. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.": "Un clic: si no hay nada pendiente, Claude analiza primero; luego el robot hace cada cambio (en tus sitios, o en el servidor con las correcciones propias de Mas), lo despliega y cierra la propuesta con su informe. Lo que el robot no puede hacer, lo dice y te lo deja. Mas sigue comprobando nginx y la salud de cada versión y vuelve atrás solo si falla. Llega hasta donde permite el límite de uso de tus cuentas de IA y sigue por sí mismo cuando el límite se restablece.",
-  "The robot could not do it: it needs you.": "El robot no pudo hacerlo: te necesita."
+  "The robot could not do it: it needs you.": "El robot no pudo hacerlo: te necesita.",
+  "The robot is still busy with an earlier run (#{id}): press Stop to free it.": "El robot sigue ocupado con una ejecución anterior (n.º {id}): pulsa Detener para liberarlo.",
+  "Every AI account is switched off ({detail}): fix it in the AI accounts tab.": "Todas las cuentas de IA están desactivadas ({detail}): corrígelo en la pestaña Cuentas de IA.",
+  "Connect an AI account first (AI accounts tab).": "Conecta primero una cuenta de IA (pestaña Cuentas de IA).",
+  "The daily cap ({n}) is reached: it carries on tomorrow.": "Se alcanzó el límite diario ({n}): continúa mañana.",
+  "Something went wrong in the autopilot: {error}": "Algo falló en el piloto automático: {error}"
 }

@@ -244,14 +244,17 @@ def test_advisor_apply_everything_button(live):
     app.state.advisor.run = lambda force=True: {"added": 0}  # no real AI here
     started = []
 
-    class Alive:
+    class Alive:  # what the robot keeps for a run in progress
         def done(self):
             return False
+
+        def cancel(self):
+            pass
 
     def fake_start(goal, app_id, autonomy, user_id):  # a robot that does nothing by itself
         run_id = db.create_robot_run(goal, app_id, autonomy)
         started.append((run_id, app_id, autonomy))
-        app.state.robot.live[run_id] = {"task": Alive()}
+        app.state.robot.live[run_id] = {"task": Alive(), "event": None, "approve": False, "stop": False, "seen": {}}
         return run_id
 
     app.state.robot.start = fake_start

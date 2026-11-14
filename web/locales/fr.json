@@ -2014,5 +2014,10 @@
   "A proposal failed: next try at {time}.": "Une proposition a échoué : prochaine tentative à {time}.",
   "Starting the next proposal…": "Démarrage de la proposition suivante…",
   "One click: if nothing waits Claude analyses first, then the robot makes every change (on your sites, or on the server with Mas's own fixes), deploys it and closes the proposal with its report. What the robot cannot do, it says so and leaves it to you. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.": "Un clic : si rien n'attend, Claude analyse d'abord, puis le robot fait chaque modification (sur vos sites, ou sur le serveur avec les correctifs propres à Mas), la déploie et clôture la proposition avec son rapport. Ce que le robot ne peut pas faire, il le dit et vous le laisse. Mas vérifie toujours nginx et la santé de chaque version et revient en arrière tout seul en cas d'échec. Il va aussi loin que la limite d'utilisation de vos comptes IA le permet, et reprend tout seul quand la limite est remise à zéro.",
-  "The robot could not do it: it needs you.": "Le robot n'a pas pu le faire : il a besoin de vous."
+  "The robot could not do it: it needs you.": "Le robot n'a pas pu le faire : il a besoin de vous.",
+  "The robot is still busy with an earlier run (#{id}): press Stop to free it.": "Le robot est encore occupé par une exécution précédente (n°{id}) : appuyez sur Arrêter pour le libérer.",
+  "Every AI account is switched off ({detail}): fix it in the AI accounts tab.": "Tous les comptes IA sont désactivés ({detail}) : corrigez-le dans l'onglet Comptes IA.",
+  "Connect an AI account first (AI accounts tab).": "Connectez d'abord un compte IA (onglet Comptes IA).",
+  "The daily cap ({n}) is reached: it carries on tomorrow.": "Le plafond par jour ({n}) est atteint : la suite reprend demain.",
+  "Something went wrong in the autopilot: {error}": "Un problème est survenu dans le pilote automatique : {error}"
 }

@@ -2010,5 +2010,10 @@
   "A proposal failed: next try at {time}.": "Ein Vorschlag ist fehlgeschlagen: nächster Versuch um {time}.",
   "Starting the next proposal…": "Nächster Vorschlag wird gestartet…",
   "One click: if nothing waits Claude analyses first, then the robot makes every change (on your sites, or on the server with Mas's own fixes), deploys it and closes the proposal with its report. What the robot cannot do, it says so and leaves it to you. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.": "Ein Klick: Wenn nichts wartet, analysiert Claude zuerst, dann nimmt der Roboter jede Änderung vor (auf deinen Seiten oder auf dem Server mit den eigenen Korrekturen von Mas), stellt sie bereit und schließt den Vorschlag mit seinem Bericht ab. Was der Roboter nicht kann, sagt er und überlässt es dir. Mas prüft weiterhin nginx und die Gesundheit jeder Version und geht bei einem Fehler selbst zurück. Er geht so weit, wie das Nutzungslimit deiner KI-Konten erlaubt, und macht nach dem Zurücksetzen des Limits von selbst weiter.",
-  "The robot could not do it: it needs you.": "Der Roboter konnte es nicht: er braucht dich."
+  "The robot could not do it: it needs you.": "Der Roboter konnte es nicht: er braucht dich.",
+  "The robot is still busy with an earlier run (#{id}): press Stop to free it.": "Der Roboter ist noch mit einem früheren Durchlauf beschäftigt (Nr. {id}): Drücke Stopp, um ihn freizugeben.",
+  "Every AI account is switched off ({detail}): fix it in the AI accounts tab.": "Alle KI-Konten sind deaktiviert ({detail}): Behebe das im Tab KI-Konten.",
+  "Connect an AI account first (AI accounts tab).": "Verbinde zuerst ein KI-Konto (Tab KI-Konten).",
+  "The daily cap ({n}) is reached: it carries on tomorrow.": "Das Tageslimit ({n}) ist erreicht: es geht morgen weiter.",
+  "Something went wrong in the autopilot: {error}": "Im Autopilot ist etwas schiefgelaufen: {error}"
 }

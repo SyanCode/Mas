@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import time
 
 import pytest
 import server
@@ -368,3 +369,27 @@ def test_only_restart_and_reload_exist(env):
         return await finish(robot, robot.start("The API is down, bring it back", "", "auto", uid), db)
     asyncio.run(go())
     assert not any(c[1].endswith("/stop") for c in mas.calls)
+
+
+def test_reap_frees_a_robot_stuck_on_a_hung_run(env):
+    robot, db, pool, gh, mas, uid = env
+
+    async def hang():
+        await asyncio.sleep(3600)
+
+    async def go():
+        run_id = db.create_robot_run("a goal that hangs for ever", "", "auto")
+        robot.live[run_id] = {"task": asyncio.create_task(hang()), "event": asyncio.Event(), "approve": False, "stop": False, "seen": {}}
+        assert robot.active() == run_id
+        assert robot.reap() == []  # still within its time
+        assert robot.reap(now=time.time() + 3 * 3600) == [run_id]  # far too long
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert db.get_robot_run(run_id)["status"] == "failed" and "did not finish in time" in db.get_robot_run(run_id)["summary"]
+        assert robot.active() is None
+        # a run the database already calls over, but whose task lingers, is cancelled too
+        run2 = db.create_robot_run("x" * 10, "", "auto")
+        db.update_robot_run(run2, status="done", finished_at=1.0)
+        robot.live[run2] = {"task": asyncio.create_task(hang()), "event": asyncio.Event(), "approve": False, "stop": False, "seen": {}}
+        assert robot.reap() == [run2]
+    asyncio.run(go())

@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 SETTING = "autopilot"
 FAILURES, PAUSED, BATCH = "autopilot_failures", "autopilot_paused", "autopilot_batch"
+LAST_ERROR = "autopilot_error"
 MAX_ATTEMPTS = 2  # tries per proposal
 RETRY_AFTER = 3600
 PAUSE_AFTER = 3  # failures in a row
@@ -57,6 +58,8 @@ class Autopilot:
         retry = [s["finished_at"] + RETRY_AFTER for s in waiting if s["attempts"] and s.get("finished_at")
                  and s["finished_at"] + RETRY_AFTER > now]
         out["next_try"] = min(retry) if retry and not out["working"] else None  # a failed one waits before its second try
+        out["blocked"] = self.blocked(out)
+        out["error"] = self.db.get_setting(LAST_ERROR) or ""
         current = next((s for s in rows if s["status"] == "working"), None)
         run = self.db.get_robot_run(current["run_id"]) if current and current.get("run_id") else None
         steps = (run or {}).get("steps") or []
@@ -66,6 +69,26 @@ class Autopilot:
                    if a["enabled"] and a["cooldown_until"] and a["cooldown_until"] > now]
         out["limited_until"] = min(limited) if limited and not self.pool.usable() else None
         return out
+
+    def blocked(self, cfg: dict) -> dict | None:
+        """Why nothing starts although proposals wait: the reason and a sentence for the dashboard."""
+        if not (cfg["enabled"] or cfg["batch"]) or not cfg["left"] or cfg["working"] is not None:
+            return None
+        if cfg["paused"]:
+            return {"reason": "paused", "detail": cfg["paused"]}
+        accounts = self.pool.accounts()
+        if not accounts:
+            return {"reason": "no_account", "detail": ""}
+        if not any(a["enabled"] for a in accounts):  # every account was switched off: a refused key, usually
+            return {"reason": "ai_disabled", "detail": f"{accounts[0]['name']}: {accounts[0].get('error') or 'disabled'}"}
+        if not self.pool.usable():
+            return None  # the usage limit: limited_until says when
+        busy = self.robot.active()
+        if busy is not None:
+            return {"reason": "robot_busy", "detail": str(busy)}
+        if cfg["max_per_day"] and cfg["started_today"] >= cfg["max_per_day"]:
+            return {"reason": "cap", "detail": str(cfg["max_per_day"])}
+        return None
 
     def configure(self, enabled: bool | None = None, max_per_day: int | None = None) -> dict:
         raw = {k: self.settings()[k] for k in DEFAULTS}
@@ -95,9 +118,11 @@ class Autopilot:
         if cfg["enabled"]:
             self.configure(enabled=False)
         stopped = False
-        for s in self.db.list_suggestions("working"):
-            if s.get("run_id") and hasattr(self.robot, "stop"):
-                stopped = self.robot.stop(s["run_id"]) or stopped
+        runs = {s["run_id"] for s in self.db.list_suggestions("working") if s.get("run_id")}
+        runs |= set(getattr(self.robot, "live", {}))  # and whatever else keeps the robot busy
+        for run_id in runs:
+            if hasattr(self.robot, "stop"):
+                stopped = self.robot.stop(run_id) or stopped
         return stopped
 
     # -- which proposal, which goal --------------------------------------------------------------------
@@ -193,6 +218,18 @@ class Autopilot:
         return events
 
     def tick(self, user_id: int | None) -> list[str]:
+        try:
+            events = self._tick(user_id)
+        except Exception as exc:  # noqa: BLE001 - shown in the dashboard instead of a silent "starting"
+            log.exception("autopilot failed")
+            self.db.set_setting(LAST_ERROR, f"{type(exc).__name__}: {exc}"[:300])
+            return []
+        self.db.set_setting(LAST_ERROR, None)
+        return events
+
+    def _tick(self, user_id: int | None) -> list[str]:
+        if hasattr(self.robot, "reap"):
+            self.robot.reap()  # a stuck run must not keep the robot busy for ever
         events = self.settle()
         cfg = self.settings()
         if cfg["batch"] and not cfg["left"] and cfg["working"] is None:  # everything it could do is done

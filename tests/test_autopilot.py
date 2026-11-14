@@ -46,6 +46,11 @@ class FakePool:
     def usable(self):
         return [] if self.limited or not self.ok else [object()]
 
+    accounts_list = [{"name": "Pro", "enabled": True, "error": ""}]
+
+    def accounts(self):
+        return self.accounts_list if self.ok else []
+
 
 @pytest.fixture
 def ap(tmp_path):
@@ -311,3 +316,48 @@ def test_a_stuck_run_is_closed_and_stop_leaves_the_queue(ap):
     a.tick(1)
     s = next(x for x in db.list_suggestions() if x["id"] == sid)
     assert s["status"] == "new" and int(db.get_setting("autopilot_failures") or 0) == before
+
+
+def test_it_says_why_nothing_starts(ap):
+    a, db, robot, pool = ap
+    a.configure(enabled=True)
+    propose(db, "Something", "shop")
+    robot.busy = True  # an old run still holds the robot
+    st = a.settings()
+    assert st["blocked"]["reason"] == "robot_busy"
+    robot.busy = False
+    pool.limited = True
+    assert a.settings()["blocked"] is None  # the usage limit has its own message (limited_until)
+    pool.limited = False
+    assert a.settings()["blocked"] is None
+    a.tick(1)
+    assert a.settings()["blocked"] is None  # it started
+    a.configure(max_per_day=1)
+    finish(db, robot.started[0][0], "done", "ok")
+    a.tick(1)
+    propose(db, "Another", "shop")
+    assert a.settings()["blocked"]["reason"] == "cap"
+
+
+def test_an_error_in_the_loop_is_shown_not_swallowed(ap):
+    a, db, robot, pool = ap
+    a.configure(enabled=True)
+    propose(db, "Something", "shop")
+    robot.start = lambda *args: (_ for _ in ()).throw(RuntimeError("boom"))
+    assert a.tick(1) == []
+    assert "RuntimeError: boom" in a.settings()["error"]
+    robot.start = lambda goal, app_id, autonomy, user_id: 1
+    a.tick(1)
+    assert a.settings()["error"] == ""
+
+
+def test_every_account_switched_off_is_explained(ap):
+    a, db, robot, pool = ap
+    a.configure(enabled=True)
+    propose(db, "Something", "shop")
+    pool.accounts_list = [{"name": "Pro", "enabled": False, "error": "refused (401): the key was revoked"}]
+    pool.limited = True  # nothing usable
+    blocked = a.settings()["blocked"]
+    assert blocked["reason"] == "ai_disabled" and "key was revoked" in blocked["detail"]
+    pool.ok = False
+    assert a.settings()["blocked"]["reason"] == "no_account"

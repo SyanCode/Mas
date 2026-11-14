@@ -622,6 +622,8 @@ export interface Autopilot {
   left: number;  // proposals still to apply
   limited_until: number | null;  // every AI account is at its usage limit until then
   next_try: number | null;  // a failed proposal is tried again at that time
+  blocked: { reason: "paused" | "no_account" | "ai_disabled" | "robot_busy" | "cap"; detail: string } | null;  // why nothing starts
+  error: string;  // the last error of the background loop, if any
   current: { id: number; title: string; since: number | null; last_step: string } | null;  // what the robot is doing now
 }
 
