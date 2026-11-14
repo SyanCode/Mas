@@ -1,0 +1,30 @@
+name: Debian
+
+# Mas on the systems it promises to support: the distribution's own Python, a real nginx with hand-written
+# vhosts (detected, never modified) and the unit tests. Debian 11 is not listed: its Python is 3.9 and
+# Mas needs 3.11 (the installer says so). tests/debian/run.sh can be run by hand in a throwaway container.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debian-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debian:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        debian: ["12", "13"]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Mas on Debian ${{ matrix.debian }}
+        run: docker run --rm -v "$PWD":/src:ro "debian:${{ matrix.debian }}" bash /src/tests/debian/run.sh
