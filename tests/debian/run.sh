@@ -77,6 +77,26 @@ assert domains["api.example.com"]["port"] == 3999, domains["api.example.com"].ge
 print(f"{len(services)} services, the three sites are detected")
 PY
 
+log "Preview vhost: the generated nginx file is valid, serves an allowed address and refuses the others"
+mkdir -p /srv/mas/previews/current
+echo "preview ok" > /srv/mas/previews/current/index.html
+"$WORK/venv/bin/python" - <<'PY'
+from pathlib import Path
+from mas import templates
+body = templates.restrict(templates.static_body("/srv/mas/previews/current"), ["127.0.0.1", "203.0.113.7"])
+text = templates.vhost("prev-demo", "pr1.demo.example.com", body, False).replace("    listen [::]:80;\n", "")
+Path("/etc/nginx/sites-enabled/prev-demo.conf").write_text(text)
+PY
+nginx -t
+nginx
+sleep 1
+code() { curl -s -o /dev/null -w "%{http_code}" --interface "$1" -H "Host: pr1.demo.example.com" "http://127.0.0.1$2"; }
+[ "$(code 127.0.0.1 /)" = 200 ] || die "an allowed address was refused"
+[ "$(code 127.0.0.2 /)" = 403 ] || die "an address that is not allowed got through"
+[ "$(code 127.0.0.1 /.git/config)" = 403 ] || die "dot files must stay refused for everyone"
+curl -s -I --interface 127.0.0.2 -H "Host: pr1.demo.example.com" http://127.0.0.1/ | grep -qi "x-robots-tag: noindex" || die "no noindex header"
+nginx -s stop
+
 log "mas doctor: the health checks run on this nginx without failing (no systemd in a container, so no reload test)"
 "$MAS" doctor --no-dns >/dev/null || "$MAS" doctor >/dev/null || die "mas doctor failed"
 
