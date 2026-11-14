@@ -870,6 +870,68 @@ function ClaudeCard({ totp }: { totp: boolean }) {
   );
 }
 
+function HostAlertsCard() {
+  const t = useT();
+  const [enabled, setEnabled] = useState(false);
+  const [emails, setEmails] = useState("");
+  const [webhook, setWebhook] = useState("");
+  const [hasWebhook, setHasWebhook] = useState(false);
+  const [percent, setPercent] = useState(90);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api<{ enabled: boolean; emails: string[]; disk_percent: number; has_webhook: boolean }>("/host-alerts").then((r) => {
+      setEnabled(r.enabled); setEmails(r.emails.join(", ")); setPercent(r.disk_percent); setHasWebhook(r.has_webhook);
+    }).catch(() => {});
+  }, []);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(""); setMsg("");
+    try {
+      const r = await api<{ has_webhook: boolean }>("/host-alerts", {
+        method: "PUT",
+        body: { enabled, emails: emails.split(/[,\s]+/).filter(Boolean), disk_percent: percent, webhook: webhook || undefined },
+      });
+      setHasWebhook(r.has_webhook); setWebhook("");
+      setMsg(t("Saved."));
+    } catch (err) {
+      setError((err as ApiError).detail);
+    }
+  }
+
+  async function test() {
+    setError(""); setMsg("");
+    try {
+      const r = await api<{ sent: boolean }>("/host-alerts/test", { method: "POST" });
+      setMsg(r.sent ? t("Test sent.") : t("Nobody could be reached: check the mail server and the webhook."));
+    } catch (err) {
+      setError((err as ApiError).detail);
+    }
+  }
+
+  return (
+    <Card title={t("Server alerts")} actions={enabled ? <Badge tone="emerald">{t("on")}</Badge> : <Badge tone="zinc">{t("off")}</Badge>}>
+      <form onSubmit={save} className="max-w-md space-y-3 text-sm">
+        <p className="text-zinc-600 dark:text-zinc-400">{t("Get told once when the disk is nearly full, a certificate expires or nginx is broken, and once when it is fixed. Uses the mail server of the notifications.")}</p>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          {t("Send server alerts")}
+        </label>
+        <Input placeholder={t("E-mail addresses, separated by commas")} value={emails} onChange={(e) => setEmails(e.target.value)} />
+        <Input type="url" placeholder={hasWebhook ? t("Webhook set (type a new address to replace it)") : t("Webhook https:// address (Slack, Discord…)")} value={webhook} onChange={(e) => setWebhook(e.target.value)} />
+        <Label title={t("Disk alert from {n}% full", { n: percent })}>
+          <input type="range" min={50} max={99} value={percent} onChange={(e) => setPercent(Number(e.target.value))} className="w-full" />
+        </Label>
+        <ErrorText>{error}</ErrorText>
+        {msg && <p className="text-emerald-700 dark:text-emerald-400">{msg}</p>}
+        <div className="flex gap-2"><Button variant="primary" type="submit">{t("Save")}</Button><Button type="button" onClick={test}>{t("Send a test")}</Button></div>
+      </form>
+    </Card>
+  );
+}
+
 function AppearanceCard() {
   const t = useT();
   return (
@@ -903,6 +965,7 @@ function Settings() {
       <GitHubCard />
       <PeopleCard />
       <AdvisorCard />
+      <HostAlertsCard />
       <ClaudeCard totp={!!session?.totp_enabled} />
       <TwoFactor enabled={!!session?.totp_enabled} />
       <PasswordForm />

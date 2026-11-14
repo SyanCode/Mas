@@ -31,7 +31,8 @@ from mas.cms import CmsError, CmsManager
 from mas.restartall import RestartAll, RestartError
 from mas import cookies as cookies_mod
 from mas.compliance import Compliance
-from mas.notify import Notifier
+from mas.hostalerts import HostAlerts
+from mas.notify import NotifyError, Notifier
 from mas.uptime import Uptime
 from mas import goals as goals_mod
 from mas.geo import Geo
@@ -241,6 +242,10 @@ def create_app(
                 await asyncio.to_thread(notifier.tick)
             except Exception:
                 log.exception("notifications failed")
+            try:  # disk, certificates and nginx: said once when it appears, once when it is gone
+                await asyncio.to_thread(host_alerts.tick)
+            except Exception:
+                log.exception("host alerts failed")
             try:  # GDPR audit of the sites changed since the last one
                 await asyncio.to_thread(compliance.tick)
             except Exception:
@@ -303,6 +308,7 @@ def create_app(
     site_stats = SiteStats(host, config, db, find_service=scanner.get, geo=geo)
     notifier = Notifier(db, host, config, stats=site_stats, compliance=compliance)
     compliance.notifier = notifier
+    host_alerts = HostAlerts(db, host, config, notifier)
 
     def post_check(target: dict, release_id: int, result: dict) -> None:
         """The audit as a check on the commit that was published (shown on GitHub next to the build)."""
@@ -404,6 +410,7 @@ def create_app(
     app.state.site_rules = site_rules
     app.state.compliance = app_state_compliance
     app.state.notifier = notifier
+    app.state.host_alerts = host_alerts
     app.state.uptime = uptime
     app.state.advisor = advisor
     app.state.pool = pool
@@ -767,6 +774,23 @@ def create_app(
         db.delete_user_sessions(user["id"], keep=s.token_hash)
         db.audit(s.username, "password-change", True)
         return {"ok": True}
+
+    @app.get("/api/host-alerts")
+    def host_alerts_get(_: SessionInfo = Depends(current_session)) -> dict:
+        return host_alerts.settings()
+
+    @app.put("/api/host-alerts")
+    def host_alerts_put(body: dict, s: SessionInfo = Depends(current_session)) -> dict:
+        try:
+            result = host_alerts.configure(body)
+        except NotifyError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "host-alerts-config", True, detail="on" if result["enabled"] else "off")
+        return result
+
+    @app.post("/api/host-alerts/test")
+    async def host_alerts_test(_: SessionInfo = Depends(current_session)) -> dict:
+        return {"sent": await asyncio.to_thread(host_alerts.test)}
 
     @app.post("/api/account/totp/setup")
     def totp_setup(body: PasswordOnly, s: SessionInfo = Depends(any_session)) -> dict:

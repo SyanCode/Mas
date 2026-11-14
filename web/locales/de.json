@@ -1935,5 +1935,13 @@
   "New recovery codes": "Neue Wiederherstellungscodes",
   "{n} recovery codes left": "Noch {n} Wiederherstellungscodes",
   "Save these recovery codes. Each works once if you lose your phone; they are not shown again.": "Speichere diese Wiederherstellungscodes. Jeder gilt nur einmal, falls du dein Telefon verlierst; sie werden nicht erneut angezeigt.",
-  "I saved them": "Ich habe sie gespeichert"
+  "I saved them": "Ich habe sie gespeichert",
+  "Server alerts": "Server-Warnungen",
+  "Get told once when the disk is nearly full, a certificate expires or nginx is broken, and once when it is fixed. Uses the mail server of the notifications.": "Du wirst einmal benachrichtigt, wenn die Platte fast voll ist, ein Zertifikat abläuft oder nginx defekt ist, und einmal, wenn es behoben ist. Nutzt den Mailserver der Benachrichtigungen.",
+  "Send server alerts": "Server-Warnungen senden",
+  "E-mail addresses, separated by commas": "E-Mail-Adressen, durch Kommas getrennt",
+  "Webhook set (type a new address to replace it)": "Webhook gesetzt (neue Adresse eingeben, um ihn zu ersetzen)",
+  "Webhook https:// address (Slack, Discord…)": "https://-Adresse des Webhooks (Slack, Discord…)",
+  "Disk alert from {n}% full": "Platten-Warnung ab {n} % Belegung",
+  "Nobody could be reached: check the mail server and the webhook.": "Niemand konnte erreicht werden: prüfe Mailserver und Webhook."
 }

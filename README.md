@@ -862,7 +862,8 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
       advice, restart everything identical, maintenance mode.
 - [x] **2FA recovery codes**: ten single-use codes at enrolment, regenerated from Settings.
 - [x] **Backup of Mas itself**: `mas backup create|list|restore`.
-- [ ] Next: preview deployments per pull request, host notifications.
+- [x] **Server alerts**: disk nearly full, certificate expired, nginx broken: one e-mail / webhook when it appears, one when it is fixed (Settings → Server alerts).
+- [ ] Next: preview deployments per pull request.
 
 ## License
 
