@@ -783,7 +783,8 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   the same rate limits as the app's code. `sudo mas user 2fa-reset` stays the last resort for root.
 - **Read-only accounts** (`mas user create --role viewer`): the whole dashboard to look at, every change refused,
   and the same forbidden routes as API tokens (accounts, tokens, environment variables, credentials, server alerts,
-  backups). No CMS access unless sites are given.
+  backups). The passwords and tokens a service shows (mail box, Vaultwarden admin) are hidden from them and from
+  API tokens. No CMS access unless sites are given.
 - **Preview deployments**: off by default; pull requests from forks never run; production variables are not copied
   unless the owner ticks it; only the listed IP addresses can open a preview (403 for the others, `noindex`); at
   most 5 live per app.

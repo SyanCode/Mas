@@ -57,9 +57,12 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, manager: 
                                        body.ports, body.domain, s.username)
 
     @app.get("/api/apps/{app_id}/stack")
-    async def info(app_id: str, _=Depends(current_session)) -> dict:
+    async def info(app_id: str, s=Depends(current_session)) -> dict:
         stack_app(app_id)
-        return await asyncio.to_thread(call, manager.info, app_id)
+        data = await asyncio.to_thread(call, manager.info, app_id)
+        if s.role != "admin" or s.token_id:  # a read-only account or an API token never reads a password or token
+            data["rows"] = [{**r, "value": "", "hidden": True} if r.get("secret") else r for r in data.get("rows", [])]
+        return data
 
     @app.put("/api/apps/{app_id}/stack")
     async def update(app_id: str, body: UpdateStack, s=Depends(current_session)) -> dict:

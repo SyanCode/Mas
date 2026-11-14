@@ -7,7 +7,7 @@ import { Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Spinner } from
 import { api, ApiError, type StackTemplate } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
-interface Row { label: string; value: string; copy?: boolean; secret?: boolean; link?: boolean }
+interface Row { label: string; value: string; copy?: boolean; secret?: boolean; hidden?: boolean; link?: boolean }
 interface StackInfo {
   template: StackTemplate;
   options: StackValues;
@@ -188,7 +188,7 @@ export function StackCard({ appId, onDeployed }: { appId: string; onDeployed: (r
                 <div key={r.label} className="space-y-0.5">
                   <dt className="text-xs text-zinc-500">{t(r.label)}</dt>
                   <dd className="min-w-0">
-                    {r.secret ? <Secret value={r.value} />
+                    {r.secret && r.hidden ? <span className="text-zinc-500">{t("Hidden for this account")}</span> : r.secret ? <Secret value={r.value} />
                       : r.link ? <a href={r.value} target="_blank" rel="noreferrer" className="break-all text-indigo-500 hover:underline">{r.value} ↗</a>
                       : r.copy ? <CopyCode text={r.value} /> : <span className="break-all">{r.value}</span>}
                   </dd>

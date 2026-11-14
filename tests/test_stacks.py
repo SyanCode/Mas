@@ -283,3 +283,26 @@ def test_addon_search_and_selection(env, monkeypatch):
     r = client.put("/api/apps/mc/stack", json={"options": {"modrinth": "luckperms, lithium", "spiget": ""}}, headers=h)
     assert r.status_code == 200
     assert json.loads(db.get_app("mc")["stack"])["options"]["modrinth"] == "luckperms, lithium"
+
+
+def test_a_read_only_account_or_token_never_reads_a_stack_secret(env):
+    client, host, db, deployer, h = env
+    r = client.post("/api/stacks", json={"template": "vaultwarden", "id": "vw", "domain": "vault.example.com"}, headers=h)
+    assert r.status_code == 200, r.text
+    rows = client.get("/api/apps/vw/stack").json()["rows"]
+    token = next(x for x in rows if x["label"] == "Admin token")
+    assert token["value"] and token["secret"]  # the administrator sees it, to log in to /admin
+
+    db.create_user("eve", auth.hash_password(PASSWORD), role="viewer")
+    eve = TestClient(client.app)
+    assert eve.post("/api/login", json={"username": "eve", "password": PASSWORD}).status_code == 200
+    seen = {x["label"]: x for x in eve.get("/api/apps/vw/stack").json()["rows"]}
+    assert seen["Admin token"]["value"] == "" and seen["Admin token"]["hidden"]
+    assert seen["Admin page"]["value"].startswith("https://vault.example.com")  # the rest stays visible
+
+    uid = db.get_user("admin")["id"]
+    plain = "mas_pat_" + "a" * 40
+    db.create_api_token("ro", auth.hash_token(plain), uid, "read", None)
+    via_token = TestClient(client.app).get("/api/apps/vw/stack", headers={"Authorization": f"Bearer {plain}"})
+    assert via_token.status_code == 200
+    assert next(x for x in via_token.json()["rows"] if x["label"] == "Admin token")["value"] == ""

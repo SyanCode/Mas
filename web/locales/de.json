@@ -1971,5 +1971,6 @@
   "Secret key": "Geheimer Schlüssel",
   "Test the storage": "Speicher testen",
   "Test file written to the storage.": "Testdatei auf den Speicher geschrieben.",
-  "Read-only account: you can look at everything, but nothing can be changed from here.": "Nur-Lese-Konto: Du kannst alles ansehen, aber von hier aus nichts ändern."
+  "Read-only account: you can look at everything, but nothing can be changed from here.": "Nur-Lese-Konto: Du kannst alles ansehen, aber von hier aus nichts ändern.",
+  "Hidden for this account": "Für dieses Konto verborgen"
 }
