@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from tests.test_deploy import SHA1, SHA2, api, signed  # noqa: F401 - the api fixture
 
 HEADERS = {"X-GitHub-Event": "pull_request"}
@@ -114,3 +116,33 @@ def test_preview_vhost_only_serves_the_allowed_addresses(api):  # noqa: F811
     assert "allow" not in dots
     # the production app stays open
     assert "allow" not in deployer._vhost_body(db.get_app("web"), ServiceType.STATIC, app_paths(deployer.config, "web"))
+
+
+def test_sweep_removes_previews_of_closed_pull_requests(api):  # noqa: F811
+    client, db, queued, h, removed = setup(api)
+    client.put("/api/apps/web/previews", json={"enabled": True, "max": 5}, headers=h)
+    for n, branch in ((1, "a"), (2, "b"), (3, "c")):
+        send(client, pr_event(number=n, branch=branch))
+    db.update_app("web", installation_id=9)
+    states = {1: "open", 2: "closed", 3: "gone"}
+
+    class FakeGitHub:
+        def pull_state(self, installation_id, repo, number):
+            assert (installation_id, repo) == (9, "acme/web")
+            return states[number]
+
+    previews = client.app.state.previews
+    previews.github_client = lambda: FakeGitHub()
+    assert sorted(previews.sweep(force=True)) == ["web-pr2", "web-pr3"]
+    assert db.get_app("web-pr1") and removed == ["web-pr2", "web-pr3"]
+    assert previews.sweep(now=time.time() + 60) == []  # looked at a minute ago: not again before 30 minutes
+    # GitHub unreachable: nothing is removed
+    class Down:
+        def pull_state(self, *a):
+            from mas.github import GitHubError
+            raise GitHubError("HTTP 502")
+    previews.github_client = lambda: Down()
+    assert previews.sweep(force=True) == [] and db.get_app("web-pr1")
+    # the app they belong to is gone: they go too
+    db.delete_app("web")
+    assert previews.sweep(force=True) == ["web-pr1"]

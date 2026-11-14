@@ -875,7 +875,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **2FA recovery codes**: ten single-use codes at enrolment, regenerated from Settings.
 - [x] **Backup of Mas itself**: `mas backup create|list|restore`, one automatic backup every night (the Health page and `mas doctor` warn when none is recent), optionally copied to any S3-compatible storage (Settings → Backup of Mas).
 - [x] **Server alerts**: disk nearly full, certificate expired, nginx broken, a running service that stopped: one e-mail / webhook when it appears, one when it is fixed (Settings → Server alerts).
-- [x] **Preview deployments**: opt-in per app, one copy per pull request at `pr<N>.<domain>` (same-repo PRs only, no secrets copied unless asked, only the allowed IP addresses can open them, removed when the PR closes).
+- [x] **Preview deployments**: opt-in per app, one copy per pull request at `pr<N>.<domain>` (same-repo PRs only, no secrets copied unless asked, only the allowed IP addresses can open them, removed when the PR closes, or within 30 minutes if the webhook was missed).
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 ## License

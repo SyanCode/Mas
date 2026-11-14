@@ -191,6 +191,16 @@ class GitHubApp:
                            "previous_filename": f.get("previous_filename")} for f in c.get("files", [])],
                 "truncated": len(c.get("files", [])) >= 300}
 
+    def pull_state(self, installation_id: int, repo: str, number: int) -> str:
+        """``open``, ``closed`` (merged ones too) or ``gone`` (deleted repository or pull request)."""
+        try:
+            pr = self._as_installation(installation_id, f"/repos/{repo}/pulls/{number}")
+        except GitHubError as exc:
+            if "HTTP 404" in str(exc):
+                return "gone"
+            raise
+        return "closed" if pr.get("state") == "closed" else "open"
+
     def comment(self, installation_id: int, repo: str, number: int, text: str) -> None:
         """A comment on a pull request (needs "Pull requests: write"; GitHubError 403 otherwise)."""
         self._as_installation(installation_id, f"/repos/{repo}/issues/{number}/comments", "POST", {"body": text[:60000]})

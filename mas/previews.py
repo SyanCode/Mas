@@ -13,6 +13,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+import time
 from typing import Callable
 
 from mas.db import Database
@@ -25,6 +26,7 @@ log = logging.getLogger(__name__)
 OPENING = {"opened", "reopened", "ready_for_review"}
 DEFAULTS = {"enabled": False, "env": False, "max": 5, "allow": []}
 MAX_ALLOW = 30
+SWEEP_EVERY = 30 * 60  # seconds between two looks at the pull requests
 
 
 def normalize_networks(entries: list[str]) -> list[str]:
@@ -173,6 +175,36 @@ class Previews:
         self._comment(parent, number, f"Preview of this pull request: https://{domain} (deploying, it updates at every push; "
                       "removed when the pull request is closed).")
         return pid
+
+    def sweep(self, now: float | None = None, force: bool = False) -> list[str]:
+        """Remove the previews whose pull request is closed (or gone) but whose webhook was missed, for example
+        while Mas was stopped. Looked at most every 30 minutes; GitHub being unreachable removes nothing."""
+        now = now or time.time()
+        if not force and now - float(self.db.get_setting("previews:swept") or 0) < SWEEP_EVERY:
+            return []
+        self.db.set_setting("previews:swept", str(now))
+        gh = self.github_client()
+        removed = []
+        for a in self.db.list_apps():
+            meta = self.meta(a["id"]) if a.get("environment") == "preview" else None
+            if not meta:
+                continue
+            parent = self.db.get_app(meta["parent"])
+            if parent is None:  # its app is gone: nothing keeps this copy alive
+                self.remove(a["id"])
+                removed.append(a["id"])
+                continue
+            if gh is None or not parent.get("installation_id"):
+                continue
+            try:
+                state = gh.pull_state(parent["installation_id"], meta["repo"], meta["pr"])
+            except (GitHubError, OSError) as exc:
+                log.info("preview %s: cannot ask GitHub (%s)", a["id"], exc)
+                continue
+            if state in ("closed", "gone"):
+                self.remove(a["id"])
+                removed.append(a["id"])
+        return removed
 
     def close(self, repo: str, number: int) -> list[str]:
         removed = []

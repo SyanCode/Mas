@@ -249,6 +249,10 @@ def create_app(
                 await asyncio.to_thread(host_alerts.tick)
             except Exception:
                 log.exception("host alerts failed")
+            try:  # previews whose pull request closed while Mas did not hear about it
+                await asyncio.to_thread(app.state.previews.sweep)
+            except Exception:
+                log.exception("preview sweep failed")
             try:  # Mas's own backup, once a night
                 made = await asyncio.to_thread(selfbackup.nightly, db, config)
                 if made:
