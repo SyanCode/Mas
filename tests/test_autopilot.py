@@ -28,9 +28,13 @@ class FakeRobot:
 
 class FakePool:
     ok = True
+    limited = False  # every account at its usage limit
 
     def configured(self):
         return self.ok
+
+    def usable(self):
+        return [] if self.limited or not self.ok else [object()]
 
 
 @pytest.fixture
@@ -151,7 +155,7 @@ def test_no_ai_account_no_run_and_settings_are_validated(ap):
     pool.ok = False
     assert a.tick(1) == [] and robot.started == []
     assert a.tick(None) == []
-    for bad in (0, 11, True, "3"):
+    for bad in (-1, 51, True, "3"):
         with pytest.raises(AiError):
             a.configure(max_per_day=bad)
 
@@ -160,10 +164,10 @@ def test_api_settings_and_nobody_but_administrators(tmp_path):
     from tests.test_notify import make
     client, db, n, hooks, h = make(tmp_path)
     got = client.get("/api/advisor").json()["autopilot"]
-    assert got["enabled"] is False and got["max_per_day"] == 3 and got["paused"] == ""
+    assert got["enabled"] is False and got["max_per_day"] == 0 and got["paused"] == ""  # no cap: the AI's limit is the limit
     r = client.put("/api/advisor/autopilot", headers=h, json={"enabled": True, "max_per_day": 5})
     assert r.status_code == 200 and r.json()["enabled"] and r.json()["max_per_day"] == 5
-    assert client.put("/api/advisor/autopilot", headers=h, json={"max_per_day": 11}).status_code == 422
+    assert client.put("/api/advisor/autopilot", headers=h, json={"max_per_day": 51}).status_code == 422
     assert client.get("/api/advisor").json()["autopilot"]["enabled"] is True
     assert any(e["action"] == "autopilot-settings" for e in db.history(None, 10))
     # API tokens and read-only accounts never switch it on
@@ -180,3 +184,74 @@ def test_back_to_review_gives_a_failed_proposal_a_fresh_start(tmp_path):
     assert client.put(f"/api/advisor/suggestions/{sid}", headers=h, json={"status": "new"}).status_code == 200
     s = db.list_suggestions("new")[0]
     assert s["attempts"] == 0 and s["result"] is None and s["finished_at"] is None
+
+
+def test_apply_everything_in_a_row_then_it_stops(ap):
+    a, db, robot, pool = ap
+    for n in range(4):
+        propose(db, f"Thing {n}", "shop", ["info", "critical", "warning", "info"][n])
+    propose(db, "Free some memory", "")  # about the server: left to a person
+    assert a.tick(1) == []  # not asked: nothing starts by itself
+    assert a.run_all() == {"queued": 4, "manual": 1}
+    order = []
+    for _ in range(12):
+        a.tick(1)
+        if len(robot.started) > len(order):
+            order.append(robot.started[-1][1].split(".")[0])
+            finish(db, robot.started[-1][0], "done", "ok")
+    assert order[0] == "Thing 1" and len(order) == 4  # the critical one first, no daily cap
+    assert len(db.list_suggestions("done")) == 4
+    st = a.settings()
+    assert st["batch"] is False and st["left"] == 0 and st["manual"] == 1  # finished: it stops, the server one stays
+    assert db.list_suggestions("new")[0]["title"] == "Free some memory"
+    a.tick(1)
+    assert len(robot.started) == 4
+
+
+def test_the_ai_limit_pauses_the_queue_without_counting_as_a_failure(ap):
+    a, db, robot, pool = ap
+    propose(db, "One", "shop")
+    propose(db, "Two", "shop")
+    a.run_all()
+    pool.limited = True
+    assert a.tick(1) == [] and robot.started == []  # at its limit: nothing starts
+    pool.limited = False
+    a.tick(1)
+    assert len(robot.started) == 1
+    pool.limited = True  # the run is cut short by the usage limit
+    finish(db, robot.started[0][0], "failed", "no AI account could answer (Pro: limit reached)")
+    assert a.tick(1)[0].startswith("limit:")
+    back = next(s for s in db.list_suggestions() if s["title"] == "One")
+    assert back["status"] == "new" and back["attempts"] == 0  # not a failed attempt
+    assert int(db.get_setting("autopilot_failures") or 0) == 0 and a.settings()["paused"] == ""
+    assert a.tick(1) == [] and len(robot.started) == 1
+    pool.limited = False  # the limit resets: it carries on by itself
+    a.tick(1)
+    assert len(robot.started) == 2
+
+
+def test_the_standing_option_applies_new_proposals_as_they_come(ap):
+    a, db, robot, pool = ap
+    a.configure(enabled=True)
+    propose(db, "First", "shop")
+    a.tick(1)
+    finish(db, robot.started[0][0], "done", "ok")
+    a.tick(1)
+    propose(db, "Second", "shop")  # the advisor found something new later
+    a.tick(1)
+    assert len(robot.started) == 2 and "Second" in robot.started[1][1]
+
+
+def test_apply_all_button_analyses_when_nothing_waits(tmp_path):
+    from tests.test_notify import make
+    client, db, n, hooks, h = make(tmp_path)
+    ran = []
+    advisor = client.app.state.advisor
+    advisor.run = lambda force=True: (ran.append(1), db.add_suggestion("fp", "info", "Add alt texts", "d", "shop"), {"added": 1})[2]
+    r = client.post("/api/advisor/apply-all", headers=h)
+    assert r.status_code == 200 and r.json()["added"] == 1 and r.json()["queued"] == 1 and ran == [1]
+    assert r.json()["autopilot"]["batch"] is True
+    again = client.post("/api/advisor/apply-all", headers=h).json()
+    assert ran == [1] and again["queued"] == 1  # something waits: no new analysis
+    from mas import auth
+    assert not auth.api_token_allowed("/api/advisor/apply-all")

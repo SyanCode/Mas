@@ -1992,5 +1992,15 @@
   "{n} applied so far": "{n} aplicadas hasta ahora",
   "Runs per day": "Ejecuciones al día",
   "The robot is working on it…": "El robot está trabajando en ello…",
-  "The robot could not do it twice: it needs you.": "El robot no lo consiguió en dos intentos: te necesita."
+  "The robot could not do it twice: it needs you.": "El robot no lo consiguió en dos intentos: te necesita.",
+  "Apply the proposals": "Aplicar las propuestas",
+  "automatic": "automático",
+  "Apply everything": "Aplicar todo",
+  "The robot is applying the proposals, one after the other…": "El robot está aplicando las propuestas, una tras otra…",
+  "{n} proposal(s) queued: the robot applies them one after the other.": "{n} propuesta(s) en cola: el robot las aplica una tras otra.",
+  "Nothing the robot can do for now.": "Nada que el robot pueda hacer por ahora.",
+  "One click: if nothing waits Claude analyses first, then the robot makes every change, deploys it and closes the proposal with its report. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.": "Un clic: si no hay nada pendiente, Claude analiza primero; luego el robot hace cada cambio, lo despliega y cierra la propuesta con su informe. Mas sigue comprobando nginx y la salud de cada versión y vuelve atrás solo si falla. Llega hasta donde permite el límite de uso de tus cuentas de IA y sigue por sí mismo cuando el límite se restablece.",
+  "Every AI account is at its limit: waiting for the reset ({time}).": "Todas las cuentas de IA han alcanzado su límite: esperando el restablecimiento ({time}).",
+  "{n} proposal(s) are about the server itself: the robot has no tool for them, they stay for you.": "{n} propuesta(s) tratan del propio servidor: el robot no tiene herramientas para ellas, quedan para ti.",
+  "Also apply every new proposal as soon as it comes, without a click": "Aplicar también cada propuesta nueva en cuanto llegue, sin hacer clic"
 }

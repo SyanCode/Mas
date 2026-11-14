@@ -1,13 +1,16 @@
 """Autopilot of the advisor: the proposals are applied by the robot on their own, one after the other, and closed.
 
-Off by default. When it is on, every proposal of the advisor that names one of the sites Mas deploys is handed to
-the robot in ``auto`` mode (it commits, deploys, checks the result; Mas still tests nginx, health-checks the new
-release and rolls back by itself), then marked *done* with the robot's report, or *failed* when the robot could not
-do it twice (a human then decides). Proposals about the server itself (memory, certificates…) have no tool for the
-robot: they stay in the list for a person.
+Two ways to start it: one click on *Apply everything* (every waiting proposal is queued and done in a row, then it
+stops), or the standing option *apply the new proposals as they come* (off by default). Each proposal that names one
+of the sites Mas deploys is handed to the robot in ``auto`` mode (it commits, deploys, checks the result; Mas still
+tests nginx, health-checks the new release and rolls back by itself), then marked *done* with the robot's report, or
+*failed* when the robot could not do it twice (a person then decides). Proposals about the server itself (memory,
+certificates…) have no tool for the robot: they stay in the list for a person.
 
-Brakes: one run at a time, at most ``max_per_day`` runs in 24 hours, a failed proposal waits an hour before its
-second try, and three failures in a row pause the autopilot until it is turned on again.
+The limit is the AI's: when every account is at its usage limit nothing starts, and a run cut short by the limit goes
+back to the queue without counting as a failure; the work resumes when the first account is back. Other brakes: one run
+at a time, an optional cap per day (none by default), a failed proposal waits an hour before its second try, and three
+failures in a row pause everything until it is started again.
 """
 
 from __future__ import annotations
@@ -23,12 +26,12 @@ from mas.robot import Robot
 log = logging.getLogger(__name__)
 
 SETTING = "autopilot"
-FAILURES, PAUSED = "autopilot_failures", "autopilot_paused"
+FAILURES, PAUSED, BATCH = "autopilot_failures", "autopilot_paused", "autopilot_batch"
 MAX_ATTEMPTS = 2  # tries per proposal
 RETRY_AFTER = 3600
 PAUSE_AFTER = 3  # failures in a row
 SEVERITY = {"critical": 0, "warning": 1, "info": 2}
-DEFAULTS = {"enabled": False, "max_per_day": 3}
+DEFAULTS = {"enabled": False, "max_per_day": 0}  # 0: no cap, the AI's own limit is the limit
 
 
 class Autopilot:
@@ -46,13 +49,20 @@ class Autopilot:
         out["started_today"] = sum(1 for s in rows if (s.get("started_at") or 0) > now - 86400)
         out["working"] = next((s["id"] for s in rows if s["status"] == "working"), None)
         out["applied"] = sum(1 for s in rows if s["status"] == "done" and s.get("run_id"))
+        out["batch"] = self.db.get_setting(BATCH) == "1"
+        waiting = [s for s in rows if s["status"] == "new" and s["attempts"] < MAX_ATTEMPTS]
+        out["left"] = sum(1 for s in waiting if self.app_for(s["target"]))
+        out["manual"] = len(waiting) - out["left"]  # about the server itself: nothing the robot can do
+        limited = [a["cooldown_until"] for a in self.db.list_ai_accounts()
+                   if a["enabled"] and a["cooldown_until"] and a["cooldown_until"] > now]
+        out["limited_until"] = min(limited) if limited and not self.pool.usable() else None
         return out
 
     def configure(self, enabled: bool | None = None, max_per_day: int | None = None) -> dict:
         raw = {k: self.settings()[k] for k in DEFAULTS}
         if max_per_day is not None:
-            if isinstance(max_per_day, bool) or not isinstance(max_per_day, int) or not 1 <= max_per_day <= 10:
-                raise AiError("max_per_day: 1 to 10")
+            if isinstance(max_per_day, bool) or not isinstance(max_per_day, int) or not 0 <= max_per_day <= 50:
+                raise AiError("max_per_day: 0 (no cap) to 50")
             raw["max_per_day"] = max_per_day
         if enabled is not None:
             raw["enabled"] = bool(enabled)
@@ -61,6 +71,14 @@ class Autopilot:
                 self.db.set_setting(FAILURES, None)
         self.db.set_setting(SETTING, json.dumps(raw))
         return self.settings()
+
+    def run_all(self) -> dict:
+        """One click: queue every waiting proposal the robot can do; they are applied in a row, then it stops."""
+        self.db.set_setting(PAUSED, None)
+        self.db.set_setting(FAILURES, None)
+        self.db.set_setting(BATCH, "1")
+        out = self.settings()
+        return {"queued": out["left"], "manual": out["manual"]}
 
     # -- which proposal, which goal --------------------------------------------------------------------
 
@@ -97,6 +115,10 @@ class Autopilot:
                 self.db.audit("autopilot", "autopilot-done", True, service_id=s["target"] or None, detail=s["title"][:200])
                 events.append(f"done:{s['id']}")
                 continue
+            if not self.pool.usable():  # cut short by the AI's usage limit: not a failure, back to the queue
+                self.db.update_suggestion(s["id"], status="new", result="waiting for the AI limit to reset", finished_at=None)
+                events.append(f"limit:{s['id']}")
+                continue
             attempts = s["attempts"] + 1
             reason = (run.get("summary") if run else "") or "the run did not finish"
             self.db.update_suggestion(s["id"], status="new" if attempts < MAX_ATTEMPTS else "failed", attempts=attempts,
@@ -113,8 +135,12 @@ class Autopilot:
     def tick(self, user_id: int | None) -> list[str]:
         events = self.settle()
         cfg = self.settings()
-        if (not cfg["enabled"] or cfg["paused"] or user_id is None or self.robot.active() is not None
-                or not self.pool.configured() or cfg["started_today"] >= cfg["max_per_day"]):
+        if cfg["batch"] and not cfg["left"] and cfg["working"] is None:  # everything it could do is done
+            self.db.set_setting(BATCH, None)
+            return events
+        if (not (cfg["enabled"] or cfg["batch"]) or cfg["paused"] or user_id is None or self.robot.active() is not None
+                or not self.pool.configured() or not self.pool.usable()
+                or (cfg["max_per_day"] and cfg["started_today"] >= cfg["max_per_day"])):
             return events
         now = time.time()
         waiting = [s for s in self.db.list_suggestions("new")

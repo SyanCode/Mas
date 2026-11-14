@@ -784,7 +784,7 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
   the same rate limits as the app's code. `sudo mas user 2fa-reset` stays the last resort for root.
 - **Autopilot** (off by default): proposals are written by an AI from a summary of your server and applied by the robot, so
   a hostile text in a site could in theory steer them. The robot keeps its limits (no shell, no secret, the repositories of
-  the apps only, a token that dies with the run), at most 3 runs a day by default, one at a time, and Mas still tests
+  the apps only, a token that dies with the run), one at a time, an optional daily cap, and Mas still tests
   nginx, health-checks every release and rolls back; three failures in a row pause it. Every run is in the history.
 - **Profiles**: the picture is a PNG, JPEG or WebP found from its first bytes (never an SVG), at most 300 KB,
   served with `nosniff` and a sandboxing CSP, only to its owner and to administrators; tokens never reach it.
@@ -883,7 +883,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Backup of Mas itself**: `mas backup create|list|restore`, one automatic backup every night (the Health page and `mas doctor` warn when none is recent), optionally copied to any S3-compatible storage (Settings → Backup of Mas).
 - [x] **Server alerts**: disk nearly full, certificate expired, nginx broken, a running service that stopped: one e-mail / webhook when it appears, one when it is fixed (Settings → Server alerts).
 - [x] **Preview deployments**: opt-in per app, one copy per pull request at `pr<N>.<domain>` (same-repo PRs only, no secrets copied unless asked, only the allowed IP addresses can open them, removed when the PR closes, or within 30 minutes if the webhook was missed).
-- [x] **Autopilot of the advisor**: turn it on (Advisor → Proposals) and the robot applies every proposal about one of your sites by itself, deploys it and closes it with its report; failures are retried once, then left to you, and three in a row pause it.
+- [x] **Apply the advisor's proposals in one click**: *Apply everything* (Advisor → Proposals) analyses when nothing waits, then the robot applies every proposal about one of your sites in a row, deploys it and closes it with its report, as far as the AI accounts' usage limit allows and resuming by itself when it resets; an option applies new proposals as they come; failures are retried once, three in a row pause it.
 - [x] **Profiles**: full name, nickname, short presentation and picture for every account (Settings → Profile; the picture is cropped and shrunk in the browser, checked on the server, never an SVG).
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 

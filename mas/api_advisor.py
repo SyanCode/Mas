@@ -51,7 +51,7 @@ class AdvisorBody(BaseModel):
 
 class AutopilotBody(BaseModel):
     enabled: bool | None = None
-    max_per_day: int | None = Field(default=None, ge=1, le=10)
+    max_per_day: int | None = Field(default=None, ge=0, le=50)
 
 
 class StatusBody(BaseModel):
@@ -173,6 +173,20 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
             raise bad(exc) from None
         db.audit(s.username, "autopilot-settings", True, detail=("on" if out["enabled"] else "off") + f", {out['max_per_day']}/day")
         return out
+
+    @app.post("/api/advisor/apply-all")
+    async def apply_all(s=Depends(current_session)) -> dict:
+        """One click: analyse when nothing waits, then let the robot apply every waiting proposal in a row."""
+        added, note = 0, ""
+        if not [x for x in db.list_suggestions("new") if x["attempts"] < 2]:
+            try:
+                added = (await asyncio.to_thread(advisor.run))["added"]
+            except AdvisorError as exc:  # too soon, or no account: the proposals that exist are still applied
+                note = str(exc)
+        queued = autopilot.run_all()
+        db.audit(s.username, "advisor-apply-all", True, detail=f"{queued['queued']} queued, {added} new")
+        return {"added": added, "note": note, **queued, **advisor.settings(), "suggestions": db.list_suggestions(),
+                "autopilot": autopilot.settings()}
 
     @app.put("/api/advisor")
     def configure(body: AdvisorBody, _=Depends(current_session)) -> dict:

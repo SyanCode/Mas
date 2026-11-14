@@ -1992,5 +1992,15 @@
   "{n} applied so far": "bisher {n} umgesetzt",
   "Runs per day": "Durchläufe pro Tag",
   "The robot is working on it…": "Der Roboter arbeitet daran…",
-  "The robot could not do it twice: it needs you.": "Der Roboter hat es in zwei Versuchen nicht geschafft: er braucht dich."
+  "The robot could not do it twice: it needs you.": "Der Roboter hat es in zwei Versuchen nicht geschafft: er braucht dich.",
+  "Apply the proposals": "Vorschläge umsetzen",
+  "automatic": "automatisch",
+  "Apply everything": "Alles umsetzen",
+  "The robot is applying the proposals, one after the other…": "Der Roboter setzt die Vorschläge nacheinander um…",
+  "{n} proposal(s) queued: the robot applies them one after the other.": "{n} Vorschlag/Vorschläge in der Warteschlange: der Roboter setzt sie nacheinander um.",
+  "Nothing the robot can do for now.": "Im Moment gibt es nichts, was der Roboter tun kann.",
+  "One click: if nothing waits Claude analyses first, then the robot makes every change, deploys it and closes the proposal with its report. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.": "Ein Klick: Wenn nichts wartet, analysiert Claude zuerst, dann nimmt der Roboter jede Änderung vor, stellt sie bereit und schließt den Vorschlag mit seinem Bericht ab. Mas prüft weiterhin nginx und die Gesundheit jeder Version und geht bei einem Fehler selbst zurück. Er geht so weit, wie das Nutzungslimit deiner KI-Konten erlaubt, und macht nach dem Zurücksetzen des Limits von selbst weiter.",
+  "Every AI account is at its limit: waiting for the reset ({time}).": "Alle KI-Konten haben ihr Limit erreicht: warte auf das Zurücksetzen ({time}).",
+  "{n} proposal(s) are about the server itself: the robot has no tool for them, they stay for you.": "{n} Vorschlag/Vorschläge betreffen den Server selbst: der Roboter hat keine Werkzeuge dafür, sie bleiben bei dir.",
+  "Also apply every new proposal as soon as it comes, without a click": "Jeden neuen Vorschlag auch sofort umsetzen, ohne Klick"
 }

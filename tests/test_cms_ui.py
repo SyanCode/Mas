@@ -46,6 +46,7 @@ def live(tmp_path_factory):
                      "public/uploads/old.png": PNG})
     app.state.cms.github = lambda: gh
     app.state.cms.deployer.enqueue = lambda app_id, trigger, actor, sha=None: 42
+    db.test_app = app  # the tests that need the running application (advisor, robot…)
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -233,4 +234,38 @@ def test_profile_name_nickname_and_picture(live):
     page.get_by_role("button", name="Remove").click()
     avatar.first.wait_for(state="detached", timeout=15000)
     assert db.get_avatar(db.get_user("admin")["id"]) is None
+    assert not errors, errors
+
+
+def test_advisor_apply_everything_button(live):
+    ctx, base, db, gh = live
+    app = db.test_app
+    app.state.pool.add("Pro", "anthropic", "sk-ant-oat01-" + "a" * 40)
+    app.state.advisor.run = lambda force=True: {"added": 0}  # no real AI here
+    started = []
+
+    def fake_start(goal, app_id, autonomy, user_id):  # a robot that does nothing by itself
+        run_id = db.create_robot_run(goal, app_id, autonomy)
+        started.append((run_id, app_id, autonomy))
+        return run_id
+
+    app.state.robot.start = fake_start
+    db.add_suggestion("fp-ui", "warning", "Add alt texts", "The images have no alternative text.", "site")
+    for old in ctx.pages:
+        old.close()
+    page, errors = open_page(live, "/advisor/")
+    page.get_by_role("button", name="Proposals").click()
+    page.get_by_role("button", name="Apply everything (1)").click()
+    page.get_by_text("1 proposal(s) queued").wait_for()
+    assert app.state.autopilot.settings()["batch"] is True
+    app.state.autopilot.tick(1)  # what the background loop does
+    assert started and started[0][1:] == ("site", "auto")
+    page.get_by_text("The robot is working on it…").wait_for(timeout=15000)  # the page follows the queue by itself
+    db.update_robot_run(started[0][0], status="done", summary="Alt texts added.", finished_at=1.0)
+    app.state.autopilot.tick(1)
+    page.get_by_text("The robot is working on it…").wait_for(state="detached", timeout=15000)
+    assert db.list_suggestions("done")[0]["result"] == "Alt texts added."
+    assert app.state.autopilot.settings()["batch"] is False
+    page.get_by_role("button", name="Done").click()
+    page.get_by_text("Alt texts added.").wait_for()
     assert not errors, errors

@@ -14,33 +14,47 @@ const FILTERS = ["new", "done", "dismissed"] as const;
 const OPEN = ["new", "working", "failed"];  // what still waits for somebody
 type Tab = "robot" | "proposals" | "accounts";
 
-function AutopilotCard({ autopilot, onChange }: { autopilot: Autopilot; onChange: (a: Autopilot) => void }) {
+function AutopilotCard({ state, onChange }: { state: AdvisorState; onChange: (s: AdvisorState) => void }) {
   const t = useT();
+  const ap = state.autopilot;
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function save(patch: Partial<Pick<Autopilot, "enabled" | "max_per_day">>) {
-    setError("");
-    try { onChange(await api<Autopilot>("/advisor/autopilot", { method: "PUT", body: patch })); } catch (e) { setError((e as ApiError).detail); }
+  const [note, setNote] = useState("");
+
+  async function applyAll() {
+    setBusy(true); setError(""); setNote("");
+    try {
+      const r = await api<AdvisorState & { added: number; queued: number; manual: number; note: string }>("/advisor/apply-all", { method: "POST" });
+      onChange(r);
+      setNote(r.queued ? t("{n} proposal(s) queued: the robot applies them one after the other.", { n: r.queued }) : t("Nothing the robot can do for now."));
+    } catch (e) { setError((e as ApiError).detail); } finally { setBusy(false); }
   }
+  async function standing(enabled: boolean) {
+    setError("");
+    try { onChange({ ...state, autopilot: await api<Autopilot>("/advisor/autopilot", { method: "PUT", body: { enabled } }) }); } catch (e) { setError((e as ApiError).detail); }
+  }
+
+  const running = ap.batch || ap.working !== null;
   return (
-    <Card title={t("Autopilot")} actions={autopilot.enabled ? <Badge tone="emerald">{t("on")}</Badge> : <Badge tone="zinc">{t("off")}</Badge>}>
+    <Card title={t("Apply the proposals")} actions={running ? <Badge tone="violet">{t("working")}</Badge> : ap.enabled ? <Badge tone="emerald">{t("automatic")}</Badge> : undefined}>
       <div className="space-y-3 text-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="glow" onClick={applyAll} disabled={busy || (ap.batch && ap.left > 0 && !ap.paused)}>
+            {busy ? <Spinner /> : <Bot className="size-3.5" />}{t("Apply everything")}{ap.left > 0 ? ` (${ap.left})` : ""}
+          </Button>
+          {running && <span className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300"><Spinner />{t("The robot is applying the proposals, one after the other…")}</span>}
+        </div>
         <p className="text-zinc-600 dark:text-zinc-400">
-          {t("The robot applies every proposal about one of your sites by itself, one after the other, deploys it and closes it. Mas still checks nginx and the health of each release and goes back on its own if it fails. Proposals about the server itself stay for you.")}
+          {t("One click: if nothing waits Claude analyses first, then the robot makes every change, deploys it and closes the proposal with its report. Mas still checks nginx and the health of each release and goes back on its own if it fails. It goes as far as your AI accounts' usage limit allows, and carries on by itself when the limit resets.")}
         </p>
+        {ap.limited_until && <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300">{t("Every AI account is at its limit: waiting for the reset ({time}).", { time: new Date(ap.limited_until * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}</p>}
+        {ap.paused && <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300">{ap.paused}</p>}
+        {ap.manual > 0 && <p className="text-xs text-zinc-500">{t("{n} proposal(s) are about the server itself: the robot has no tool for them, they stay for you.", { n: ap.manual })}</p>}
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={autopilot.enabled} onChange={(e) => save({ enabled: e.target.checked })} />
-          {t("Apply the proposals automatically")}
+          <input type="checkbox" checked={ap.enabled} onChange={(e) => standing(e.target.checked)} />
+          {t("Also apply every new proposal as soon as it comes, without a click")}
         </label>
-        {autopilot.enabled && (
-          <div className="flex items-center gap-2">
-            <span>{t("At most")}</span>
-            <div className="w-20"><Select value={String(autopilot.max_per_day)} onChange={(e) => save({ max_per_day: Number(e.target.value) })} aria-label={t("Runs per day")}>
-              {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
-            </Select></div>
-            <span>{t("per day")} · {t("{n} applied so far", { n: autopilot.applied })}</span>
-          </div>
-        )}
-        {autopilot.paused && <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-300">{autopilot.paused}</p>}
+        {note && <p className="text-emerald-700 dark:text-emerald-400">{note}</p>}
         <ErrorText>{error}</ErrorText>
       </div>
     </Card>
@@ -76,7 +90,7 @@ function Proposals({ state, setState, onRobot }: { state: AdvisorState; setState
   const count = (f: string) => state.suggestions.filter((s) => matches(s, f)).length;
   return (
     <div className="space-y-4">
-      <AutopilotCard autopilot={state.autopilot} onChange={(autopilot) => setState({ ...state, autopilot })} />
+      <AutopilotCard state={state} onChange={setState} />
       <ErrorText>{error}</ErrorText>
       {busy && <div className="progress-sweep" />}
       {note && <p className="animate-pop rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">{note}</p>}
@@ -143,6 +157,12 @@ function Advisor() {
     api<App[]>("/apps").then(setApps).catch(() => {});
   }, []);
   useEffect(load, [load]);
+  const busyQueue = !!state && (state.autopilot.batch || state.autopilot.working !== null);
+  useEffect(() => {  // the statuses follow the robot while it works through the queue
+    if (!busyQueue) return;
+    const id = setInterval(() => { api<AdvisorState>("/advisor").then(setState).catch(() => {}); }, 5000);
+    return () => clearInterval(id);
+  }, [busyQueue]);
 
   if (!state) return <div className="flex justify-center py-24"><Spinner /></div>;
   const tabs: { id: Tab; label: string; icon: typeof Bot; count?: number }[] = [
