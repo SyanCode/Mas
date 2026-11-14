@@ -134,7 +134,7 @@ $ sudo mas start|stop|reload <service>
 $ sudo mas nginx reload         # nginx -t first, reload only if valid
 $ sudo mas history              # who did what, when, with what result
 
-$ sudo mas user create [name]   # password + 2FA QR code
+$ sudo mas user create [name]   # password + 2FA QR code (--role viewer: read-only account)
 $ sudo mas user 2fa [name]      # set up / replace the authenticator app
 $ sudo mas user 2fa-reset [name]  # lost phone: disable 2FA (root only)
 $ sudo mas user passwd [name]
@@ -864,6 +864,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Backup of Mas itself**: `mas backup create|list|restore`.
 - [x] **Server alerts**: disk nearly full, certificate expired, nginx broken, a running service that stopped: one e-mail / webhook when it appears, one when it is fixed (Settings → Server alerts).
 - [x] **Preview deployments**: opt-in per app, one copy per pull request at `pr<N>.<domain>` (same-repo PRs only, no secrets copied unless asked, only the allowed IP addresses can open them, removed when the PR closes).
+- [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 ## License
 

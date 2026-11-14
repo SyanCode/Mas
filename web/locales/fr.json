@@ -1957,5 +1957,8 @@
   "Only these addresses can open a preview; everybody else gets a 403 (bots that find the new sub-domain are kept out, and search engines are told not to index it). One address or network per line.": "Seules ces adresses peuvent ouvrir une prévisualisation ; les autres reçoivent une erreur 403 (les robots qui trouvent le nouveau sous-domaine sont tenus à l'écart, et les moteurs de recherche ont l'ordre de ne pas l'indexer). Une adresse ou un réseau par ligne.",
   "Save the addresses": "Enregistrer les adresses",
   "No address yet: nobody can open the previews.": "Aucune adresse pour l'instant : personne ne peut ouvrir les prévisualisations.",
-  "Also tell me when a service that was running stops": "Me prévenir aussi quand un service qui tournait s'arrête"
+  "Also tell me when a service that was running stops": "Me prévenir aussi quand un service qui tournait s'arrête",
+  "Editor (CMS of their sites)": "Éditeur (CMS de ses sites)",
+  "Read-only (the whole dashboard, no change, no secret)": "Lecture seule (tout le tableau de bord, aucune modification, aucun secret)",
+  "Read-only accounts": "Comptes en lecture seule"
 }

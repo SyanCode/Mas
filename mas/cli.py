@@ -362,16 +362,19 @@ def user_create(
     ctx: typer.Context,
     username: Annotated[str, typer.Argument(help="Login name.")] = "admin",
     no_2fa: Annotated[bool, typer.Option("--no-2fa", help="Skip two-factor setup (not recommended).")] = False,
+    role: Annotated[str, typer.Option(help="admin (default) or viewer: the whole dashboard, read only.")] = "admin",
 ) -> None:
-    """Create the admin account, then set up 2FA with a QR code."""
+    """Create the admin account (or a read-only one), then set up 2FA with a QR code."""
     env: Env = ctx.obj
     username = username.strip().lower()
     if not auth.USERNAME_RE.fullmatch(username):
         fail("username: 2-32 chars, lowercase letters, digits, . _ -")
     if env.db.get_user(username):
         fail(f"user {username!r} already exists")
-    user_id = env.db.create_user(username, auth.hash_password(_prompt_password()))
-    env.db.audit(actor(), "user-create", True, detail=username)
+    if role not in ("admin", "viewer"):
+        fail("role: admin or viewer")
+    user_id = env.db.create_user(username, auth.hash_password(_prompt_password()), role=role)
+    env.db.audit(actor(), "user-create", True, detail=f"{username} ({role})")
     console.print(f"[green]✓[/] user {username} created")
     if not no_2fa:
         _enroll_totp(env.db, user_id, username)

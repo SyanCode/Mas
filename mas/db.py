@@ -334,8 +334,10 @@ MIGRATIONS = [
     ("apps", "pending TEXT"),
     ("apps", "pending_env TEXT"),  # JSON names of the variables a human must fill before the first build      # frozen app: JSON {sha, message, author, commits, at} of the pushes not built
 ]
-ROLES = ("admin", "editor", "author")  # author: writes drafts, an editor or an administrator publishes
+ROLES = ("admin", "editor", "author", "viewer")  # author: writes drafts, an editor or an administrator publishes
 EDITOR_ROLES = ("editor", "author")
+VIEWER_ROLE = "viewer"  # the whole dashboard, read only: no change, no secret
+MANAGED_ROLES = EDITOR_ROLES + (VIEWER_ROLE,)  # accounts an administrator creates from the dashboard
 API_TOKEN_SCOPES = ("read", "write", "create")  # create: write + new apps (allowed repositories)
 FOLDER_COLORS = ("zinc", "red", "orange", "amber", "emerald", "teal", "sky", "indigo", "violet", "pink")
 FOLDER_KINDS = ("app", "service")
@@ -508,7 +510,7 @@ class Database:
                              (user_id, app_id)).fetchone() is not None
 
     def set_user_role(self, user_id: int, role: str) -> None:
-        if role not in EDITOR_ROLES:
+        if role not in MANAGED_ROLES:
             raise ValueError(f"invalid role {role}")
         with self.tx() as c:
             c.execute("UPDATE users SET role = ? WHERE id = ? AND role != 'admin'", (role, user_id))

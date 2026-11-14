@@ -582,6 +582,7 @@ function PeopleCard() {
   const [users, setUsers] = useState<CmsUser[]>([]);
   const [apps, setApps] = useState<App[]>([]);
   const [username, setUsername] = useState("");
+  const [newRole, setNewRole] = useState("editor");
   const [secret, setSecret] = useState<{ username: string; password: string } | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
@@ -611,11 +612,10 @@ function PeopleCard() {
   const create = (e: FormEvent) => {
     e.preventDefault();
     run("create", async () => {
-      const r = await api<CmsUser & { password: string }>("/users", { method: "POST", body: { username } });
+      const r = await api<CmsUser & { password: string }>("/users", { method: "POST", body: { username, role: newRole } });
       setSecret({ username: r.username, password: r.password });
       setUsername("");
-      setEditing(r.id);
-      setPicked([]);
+      if (newRole !== "viewer") { setEditing(r.id); setPicked([]); }
     });
   };
   const reset = (u: CmsUser) => run(`reset-${u.id}`, async () => {
@@ -627,7 +627,8 @@ function PeopleCard() {
     setEditing(null);
   });
 
-  const editors = users.filter((u) => u.role !== "admin");
+  const editors = users.filter((u) => u.role === "editor" || u.role === "author");
+  const viewers = users.filter((u) => u.role === "viewer");
   const admins = users.filter((u) => u.role === "admin");
   const appName = (id: string) => apps.find((a) => a.id === id)?.name ?? id;
   const linked = apps.filter((a) => a.installation_id);
@@ -686,11 +687,35 @@ function PeopleCard() {
           ))}
           {editors.length === 0 && <li className="py-3 text-sm text-zinc-500">{t("No editor yet.")}</li>}
         </ul>
+        {viewers.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("Read-only accounts")}</p>
+            <ul className="divide-y divide-zinc-200/80 dark:divide-white/[0.06]">
+              {viewers.map((u) => (
+                <li key={u.id} className="flex flex-wrap items-center gap-2 py-2">
+                  <span className="font-medium">{u.username}</span>
+                  <Badge tone={u.totp_enabled ? "emerald" : "zinc"}>{u.totp_enabled ? "2FA" : t("no 2FA")}</Badge>
+                  <div className="ml-auto flex flex-wrap gap-1">
+                    <Button variant="ghost" disabled={!!busy} onClick={() => reset(u)}>{t("Reset password")}</Button>
+                    {u.totp_enabled && <Button variant="ghost" disabled={!!busy} onClick={() => run(`totp-${u.id}`, async () => { await api(`/users/${u.id}/totp/reset`, { method: "POST" }); })}>{t("Reset 2FA")}</Button>}
+                    <Button variant="ghost" onClick={() => setRemoving(u)}>{t("Delete")}</Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <form onSubmit={create} className="flex flex-wrap items-end gap-2">
           <div className="min-w-[14rem] flex-1">
             <Label title={t("New editor")} hint={t("Lowercase login name, for example the client company.")}>
               <Input value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="acme" />
             </Label>
+          </div>
+          <div className="mb-6">
+            <Select value={newRole} onChange={(e) => setNewRole(e.target.value)} aria-label={t("Role")}>
+              <option value="editor">{t("Editor (CMS of their sites)")}</option>
+              <option value="viewer">{t("Read-only (the whole dashboard, no change, no secret)")}</option>
+            </Select>
           </div>
           <Button variant="primary" className="mb-6" disabled={!username || busy === "create"}>{busy === "create" ? <Spinner /> : null}{t("Create")}</Button>
         </form>

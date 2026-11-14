@@ -47,7 +47,7 @@ from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
 from mas.config import Config, load_config
-from mas.db import Database
+from mas.db import VIEWER_ROLE, Database
 from mas.host import Host
 from mas.logs import get_logs
 from mas.models import Service, ServiceType
@@ -495,9 +495,13 @@ def create_app(
     def current_session(request: Request) -> SessionInfo:
         """Administrators only: every route that touches the server uses this one."""
         session = any_session(request)
-        if session.role != "admin":
-            raise HTTPException(403, "administrators only")
-        return session
+        if session.role == "admin":
+            return session
+        if session.role == VIEWER_ROLE and auth.api_token_allowed(request.url.path):
+            if request.method in SAFE_METHODS:
+                return session
+            raise HTTPException(403, "read-only account")  # sees everything, changes nothing
+        raise HTTPException(403, "administrators only")
 
     def find_service(service_id: str) -> Service:
         svc = scanner.get(service_id)

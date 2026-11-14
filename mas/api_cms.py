@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mas import auth, cms_backup, siterules as siterules_mod, preview as preview_mod, cookies as cookies_mod, legal as legal_mod, seo as seo_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
-from mas.db import EDITOR_ROLES, Database
+from mas.db import EDITOR_ROLES, MANAGED_ROLES, Database
 from mas.geo import ATTRIBUTION, GeoError
 from mas.notify import EVENTS, NotifyError
 from mas.sitestats import SiteStats
@@ -125,7 +125,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     def editor(user_id: int):
         user = db.get_user_by_id(user_id)
-        if user is None or user["role"] not in EDITOR_ROLES:
+        if user is None or user["role"] not in MANAGED_ROLES:
             raise HTTPException(404, "unknown editor")
         return user
 
@@ -149,8 +149,8 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             raise HTTPException(400, "username: 2-32 chars, lowercase letters, digits, . _ -")
         if db.get_user(username):
             raise HTTPException(409, f"{username} already exists")
-        if body.role not in EDITOR_ROLES:
-            raise HTTPException(400, "role: editor or author")
+        if body.role not in MANAGED_ROLES:
+            raise HTTPException(400, "role: editor, author or viewer")
         password = new_password()
         user_id = db.create_user(username, auth.hash_password(password), role=body.role)
         db.audit(s.username, "editor-create", True, detail=f"{username} ({body.role})")
@@ -159,8 +159,8 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.put("/api/users/{user_id}/role")
     def set_role(user_id: int, body: RoleBody, s=Depends(current_session)) -> dict:
         user = editor(user_id)
-        if body.role not in EDITOR_ROLES:
-            raise HTTPException(400, "role: editor or author")
+        if body.role not in MANAGED_ROLES:
+            raise HTTPException(400, "role: editor, author or viewer")
         db.set_user_role(user_id, body.role)
         db.audit(s.username, "editor-role", True, detail=f"{user['username']}: {body.role}")
         return user_payload(db.get_user_by_id(user_id))

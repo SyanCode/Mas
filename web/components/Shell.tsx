@@ -115,7 +115,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const t = useT();
   const pathname = usePathname();
   const router = useRouter();
-  const editor = !!session && session.role !== "admin";
+  const editor = !!session && session.role !== "admin" && session.role !== "viewer";  // CMS accounts only
 
   useEffect(() => {
     api<Session>("/session").then((s) => {
