@@ -58,3 +58,28 @@ def test_off_by_default_and_api_tokens_excluded(tmp_path):
     assert client.app.state.host_alerts.tick(force=True) == []
     from mas import auth
     assert not auth.api_token_allowed("/api/host-alerts")
+
+
+def test_a_service_that_was_running_and_stops(tmp_path):
+    from types import SimpleNamespace
+
+    from mas.models import Service, Status
+    client, db, alerts, state, hooks, h = setup(tmp_path)
+    svcs = [Service(id="api", name="api", status=Status.RUNNING, domains=["api.example.com"]),
+            Service(id="old", name="old", status=Status.STOPPED),  # never seen running: nothing to say
+            Service(id="shop", name="shop", status=Status.RUNNING, unit="mas-app-shop.service")]
+    alerts.scanner = SimpleNamespace(result=lambda: SimpleNamespace(services=svcs))
+    assert alerts.tick(now=1000, force=True) == []
+    svcs[0] = svcs[0].model_copy(update={"status": Status.STOPPED})
+    assert alerts.tick(now=2000, force=True) == ["service:api"]
+    assert "api is down" in hooks[-1][1]["message"]
+    svcs[2] = svcs[2].model_copy(update={"status": Status.STOPPED})
+    db.set_setting("asleep:shop", "1")  # asleep on purpose
+    assert alerts.tick(now=3000, force=True) == []
+    svcs[0] = svcs[0].model_copy(update={"status": Status.RUNNING})
+    assert alerts.tick(now=4000, force=True) == ["service:api"]  # back: said once
+    svcs[0] = svcs[0].model_copy(update={"status": Status.ERRORED})
+    assert alerts.tick(now=5000, force=True) == ["service:api"]
+    client.put("/api/host-alerts", headers=h, json={"enabled": True, "emails": ["me@example.com"], "services": False})
+    svcs[0] = svcs[0].model_copy(update={"status": Status.RUNNING})
+    assert alerts.tick(now=6000, force=True) == ["service:api"]  # the earlier alert still resolves

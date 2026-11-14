@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from urllib.parse import urlsplit
@@ -19,6 +20,7 @@ from mas.config import Config
 from mas.db import Database
 from mas.envcrypt import EnvError
 from mas.host import Host
+from mas.models import Status
 from mas.notify import EMAIL_RE, NotifyError, Notifier
 
 log = logging.getLogger(__name__)
@@ -27,12 +29,15 @@ SETTING = "hostalerts"
 ACTIVE = "hostalerts:active"
 LAST = "hostalerts:last"
 INTERVAL = 300  # seconds between two looks
-DEFAULTS = {"enabled": False, "emails": [], "disk_percent": 90}
+RUNNING = "hostalerts:running"  # ids of the services seen running: only those can "fall"
+APP_UNIT = re.compile(r"^mas-app-(.+?)(?:\.\d+)?(?:\.service)?$")
+DEFAULTS = {"enabled": False, "emails": [], "disk_percent": 90, "services": True}
 
 
 class HostAlerts:
-    def __init__(self, db: Database, host: Host, config: Config, notifier: Notifier) -> None:
+    def __init__(self, db: Database, host: Host, config: Config, notifier: Notifier, scanner=None) -> None:
         self.db, self.host, self.config, self.notifier = db, host, config, notifier
+        self.scanner = scanner
         self.disk_usage = shutil.disk_usage  # replaced in tests
         self.checks = None  # replaced in tests: () -> list of health Check
 
@@ -66,7 +71,7 @@ class HostAlerts:
             sealed = ""
         self.db.set_setting(SETTING, json.dumps({
             "enabled": bool(body.get("enabled")), "emails": [e.strip() for e in emails],
-            "disk_percent": percent, "webhook_sealed": sealed}))
+            "disk_percent": percent, "services": bool(body.get("services", True)), "webhook_sealed": sealed}))
         return self.settings()
 
     # -- what is wrong right now ------------------------------------------------------------------------
@@ -89,6 +94,8 @@ class HostAlerts:
             if percent >= cfg["disk_percent"]:
                 free = usage.free / 1024 ** 3
                 found[f"disk:{path}"] = (f"Disk {percent}% full ({path})", f"Only {free:.1f} GB left on the disk holding {path}.")
+        if cfg["services"]:
+            found.update(self.down_services())
         try:
             if self.checks is not None:
                 checks = self.checks()
@@ -101,6 +108,27 @@ class HostAlerts:
         for c in checks:
             if c.level == "error":
                 found[f"check:{c.category}:{c.title}"] = (c.title, c.detail)
+        return found
+
+    def down_services(self) -> dict[str, tuple[str, str]]:
+        """Services that were running and are not anymore (a stopped service nobody ever saw running, an app
+        asleep on purpose or a service that disappeared from the server raise nothing). Errored ones always do."""
+        if self.scanner is None:
+            return {}
+        services = self.scanner.result().services
+        tracked = set(json.loads(self.db.get_setting(RUNNING) or "[]"))
+        tracked |= {s.id for s in services if s.status == Status.RUNNING}
+        found: dict[str, tuple[str, str]] = {}
+        for svc in services:
+            if svc.status not in (Status.STOPPED, Status.ERRORED):
+                continue
+            m = APP_UNIT.match(svc.unit or "")
+            if m and self.db.get_setting(f"asleep:{m.group(1)}") == "1":
+                continue
+            if svc.status == Status.ERRORED or svc.id in tracked:
+                where = ", ".join(svc.domains[:2]) or svc.manager.value
+                found[f"service:{svc.id}"] = (f"{svc.display_name or svc.name} is down", f"{svc.status.value} ({where}).")
+        self.db.set_setting(RUNNING, json.dumps(sorted(tracked & {s.id for s in services})))
         return found
 
     # -- the background loop ------------------------------------------------------------------------------

@@ -877,12 +877,13 @@ function HostAlertsCard() {
   const [webhook, setWebhook] = useState("");
   const [hasWebhook, setHasWebhook] = useState(false);
   const [percent, setPercent] = useState(90);
+  const [services, setServices] = useState(true);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api<{ enabled: boolean; emails: string[]; disk_percent: number; has_webhook: boolean }>("/host-alerts").then((r) => {
-      setEnabled(r.enabled); setEmails(r.emails.join(", ")); setPercent(r.disk_percent); setHasWebhook(r.has_webhook);
+    api<{ enabled: boolean; emails: string[]; disk_percent: number; services: boolean; has_webhook: boolean }>("/host-alerts").then((r) => {
+      setServices(r.services); setEnabled(r.enabled); setEmails(r.emails.join(", ")); setPercent(r.disk_percent); setHasWebhook(r.has_webhook);
     }).catch(() => {});
   }, []);
 
@@ -892,7 +893,7 @@ function HostAlertsCard() {
     try {
       const r = await api<{ has_webhook: boolean }>("/host-alerts", {
         method: "PUT",
-        body: { enabled, emails: emails.split(/[,\s]+/).filter(Boolean), disk_percent: percent, webhook: webhook || undefined },
+        body: { enabled, emails: emails.split(/[,\s]+/).filter(Boolean), disk_percent: percent, services, webhook: webhook || undefined },
       });
       setHasWebhook(r.has_webhook); setWebhook("");
       setMsg(t("Saved."));
@@ -918,6 +919,10 @@ function HostAlertsCard() {
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           {t("Send server alerts")}
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={services} onChange={(e) => setServices(e.target.checked)} />
+          {t("Also tell me when a service that was running stops")}
         </label>
         <Input placeholder={t("E-mail addresses, separated by commas")} value={emails} onChange={(e) => setEmails(e.target.value)} />
         <Input type="url" placeholder={hasWebhook ? t("Webhook set (type a new address to replace it)") : t("Webhook https:// address (Slack, Discord…)")} value={webhook} onChange={(e) => setWebhook(e.target.value)} />

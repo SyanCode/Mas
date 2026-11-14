@@ -1952,5 +1952,6 @@
   "Who can open the previews": "Wer die Vorschauen öffnen darf",
   "Only these addresses can open a preview; everybody else gets a 403 (bots that find the new sub-domain are kept out, and search engines are told not to index it). One address or network per line.": "Nur diese Adressen können eine Vorschau öffnen; alle anderen erhalten einen 403-Fehler (Bots, die die neue Subdomain finden, bleiben draußen, und Suchmaschinen sollen sie nicht indexieren). Eine Adresse oder ein Netz pro Zeile.",
   "Save the addresses": "Adressen speichern",
-  "No address yet: nobody can open the previews.": "Noch keine Adresse: Niemand kann die Vorschauen öffnen."
+  "No address yet: nobody can open the previews.": "Noch keine Adresse: Niemand kann die Vorschauen öffnen.",
+  "Also tell me when a service that was running stops": "Auch benachrichtigen, wenn ein laufender Dienst stoppt"
 }

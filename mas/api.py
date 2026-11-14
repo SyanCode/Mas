@@ -308,7 +308,7 @@ def create_app(
     site_stats = SiteStats(host, config, db, find_service=scanner.get, geo=geo)
     notifier = Notifier(db, host, config, stats=site_stats, compliance=compliance)
     compliance.notifier = notifier
-    host_alerts = HostAlerts(db, host, config, notifier)
+    host_alerts = HostAlerts(db, host, config, notifier, scanner)
 
     def post_check(target: dict, release_id: int, result: dict) -> None:
         """The audit as a check on the commit that was published (shown on GitHub next to the build)."""
