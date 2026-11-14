@@ -85,3 +85,31 @@ def test_api_lists_and_runs_but_never_downloads(tmp_path, monkeypatch):
     assert client.put("/api/self-backup", headers=h, json={"auto": False}).json()["auto"] is False
     from mas import auth
     assert not auth.api_token_allowed("/api/self-backup")
+
+
+def test_cli_backup_create_list_restore(tmp_path, monkeypatch):
+    import server
+    from typer.testing import CliRunner
+
+    from mas import selfbackup
+    from mas.cli import app
+
+    monkeypatch.setattr(selfbackup, "CONFIG_PATH", str(tmp_path / "no-config.toml"))
+    fixture = server.build(tmp_path / "srv")
+    db_path = tmp_path / "mas.db"
+    Database(db_path).set_setting("hello", "world")
+    base = ["--fixture", str(fixture), "--db", str(db_path)]
+    run = CliRunner()
+    made = run.invoke(app, [*base, "backup", "create", "-o", str(tmp_path / "out")])
+    assert made.exit_code == 0, made.output
+    (archive,) = (tmp_path / "out").glob("mas-*.tar.gz")
+    assert archive.name in run.invoke(app, ["backup", "list", str(tmp_path / "out")]).output
+    Database(db_path).set_setting("hello", "changed")
+    refused = run.invoke(app, [*base, "backup", "restore", str(archive)], input="n\n")
+    assert refused.exit_code != 0 and Database(db_path).get_setting("hello") == "changed"  # asks first
+    done = run.invoke(app, [*base, "backup", "restore", str(archive), "--yes"])
+    assert done.exit_code == 0, done.output
+    assert Database(db_path).get_setting("hello") == "world" and (tmp_path / "mas.db.before-restore").exists()
+    bad = tmp_path / "bad.tar.gz"
+    bad.write_bytes(b"nope")
+    assert run.invoke(app, [*base, "backup", "restore", str(bad), "--yes"]).exit_code != 0
