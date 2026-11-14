@@ -191,6 +191,10 @@ class GitHubApp:
                            "previous_filename": f.get("previous_filename")} for f in c.get("files", [])],
                 "truncated": len(c.get("files", [])) >= 300}
 
+    def comment(self, installation_id: int, repo: str, number: int, text: str) -> None:
+        """A comment on a pull request (needs "Pull requests: write"; GitHubError 403 otherwise)."""
+        self._as_installation(installation_id, f"/repos/{repo}/issues/{number}/comments", "POST", {"body": text[:60000]})
+
     def create_check_run(self, installation_id: int, repo: str, head_sha: str, name: str, conclusion: str,
                          title: str, summary: str, text: str = "") -> None:
         """A check on a commit (needs the app's "Checks: write" permission; GitHubError 403 otherwise)."""

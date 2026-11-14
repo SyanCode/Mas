@@ -294,6 +294,7 @@ export interface Release {
 
 export interface App {
   id: string;
+  environment?: string;
   name: string;
   repo: string;
   branch: string;

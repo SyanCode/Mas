@@ -1943,5 +1943,10 @@
   "Webhook set (type a new address to replace it)": "Webhook gesetzt (neue Adresse eingeben, um ihn zu ersetzen)",
   "Webhook https:// address (Slack, Discord…)": "https://-Adresse des Webhooks (Slack, Discord…)",
   "Disk alert from {n}% full": "Platten-Warnung ab {n} % Belegung",
-  "Nobody could be reached: check the mail server and the webhook.": "Niemand konnte erreicht werden: prüfe Mailserver und Webhook."
+  "Nobody could be reached: check the mail server and the webhook.": "Niemand konnte erreicht werden: prüfe Mailserver und Webhook.",
+  "Preview deployments": "Vorschau-Deployments",
+  "Each pull request of this repository gets its own copy at pr<number>.{domain}, removed when it is closed. Needs a wildcard DNS record (*.{domain}) pointing at this server.": "Jeder Pull Request dieses Repositorys erhält eine eigene Kopie unter pr<Nummer>.{domain}, die beim Schließen entfernt wird. Benötigt einen Wildcard-DNS-Eintrag (*.{domain}), der auf diesen Server zeigt.",
+  "Deploy a preview for each pull request": "Für jeden Pull Request eine Vorschau bereitstellen",
+  "Give previews the variables of this app": "Vorschauen die Variablen dieser App geben",
+  "the code of a pull request runs with your secrets": "der Code eines Pull Requests läuft mit deinen Geheimnissen"
 }

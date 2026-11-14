@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from mas.appdb import AppDbError
 from mas.config import Config, save_section
 from mas.db import Database
+from mas.previews import Previews
 from mas.deploy import (
     BRANCH_RE, MAX_INSTANCES, PROXY_TYPES, REPO_RE, DeployError, Deployer, allocate_port, app_backends,
     app_instances, replacement_plan, suggest_start_command, used_ports, validate_app, validate_backends,
@@ -185,6 +186,8 @@ def register(
 ) -> None:
     manifest_states: dict[str, tuple[int, float]] = {}
     health_cache: dict[str, object] = {}
+    previews = Previews(db, deployer, lambda **kw: register_managed_app(host, config, db, **kw), github_client)
+    app.state.previews = previews
 
     def require_github() -> GitHubApp:
         gh = github_client()
@@ -406,8 +409,8 @@ def register(
             db.audit(f"github:{actor}", "webhook-push", True, detail=detail)
             return {"ok": True, "deployed": deployed, "frozen": waiting}
         if event == "pull_request":
-            # Preview deployments are not implemented yet; the event is acknowledged.
-            return {"ok": True, "ignored": "pull_request"}
+            actor = ((payload.get("pull_request") or {}).get("user") or {}).get("login") or "github"
+            return await asyncio.to_thread(previews.handle, payload, actor)
         return {"ok": True, "ignored": event}
 
     # -- apps --------------------------------------------------------------
@@ -682,9 +685,28 @@ def register(
             raise HTTPException(400, str(exc)) from None
         return {"release_id": rid}
 
+    @app.get("/api/apps/{app_id}/previews")
+    def get_previews(app_id: str, _=Depends(current_session)) -> dict:
+        find_app(app_id)
+        return {**previews.settings(app_id), "previews": previews.of_parent(app_id)}
+
+    @app.put("/api/apps/{app_id}/previews")
+    def put_previews(app_id: str, body: dict, s=Depends(current_session)) -> dict:
+        current = find_app(app_id)
+        if current["mode"] != "managed" or current.get("environment") == "preview" or not current.get("domain"):
+            raise HTTPException(400, "previews need an app deployed by Mas, with a domain")
+        try:
+            result = previews.configure(app_id, body)
+        except DeployError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "previews-config", True, service_id=app_id,
+                 detail=("on" if result["enabled"] else "off") + (", with variables" if result["env"] else ""))
+        return {**result, "previews": previews.of_parent(app_id)}
+
     @app.delete("/api/apps/{app_id}")
     async def delete_app(app_id: str, purge: bool = False, s=Depends(current_session)) -> dict:
         find_app(app_id)
+        await asyncio.to_thread(previews.remove_all, app_id)  # its previews go with it
         try:
             done = await asyncio.to_thread(deployer.remove_app, app_id, purge)
         except DeployError as exc:

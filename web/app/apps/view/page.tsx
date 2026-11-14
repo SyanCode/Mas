@@ -705,6 +705,59 @@ function CmsCard({ appId }: { appId: string }) {
   );
 }
 
+interface PreviewInfo { enabled: boolean; env: boolean; max: number; previews: { id: string; pr: number; domain: string; status: string | null }[] }
+
+function PreviewsCard({ app }: { app: App }) {
+  const t = useT();
+  const [info, setInfo] = useState<PreviewInfo | null>(null);
+  const [error, setError] = useState("");
+  const url = `/apps/${encodeURIComponent(app.id)}/previews`;
+  useEffect(() => { api<PreviewInfo>(url).then(setInfo).catch(() => {}); }, [url]);
+
+  async function save(patch: Partial<PreviewInfo>) {
+    if (!info) return;
+    setError("");
+    try {
+      setInfo(await api<PreviewInfo>(url, { method: "PUT", body: { enabled: info.enabled, env: info.env, max: info.max, ...patch } }));
+    } catch (err) {
+      setError((err as ApiError).detail);
+    }
+  }
+
+  if (!info) return null;
+  return (
+    <Card title={t("Preview deployments")} actions={info.enabled ? <Badge tone="emerald">{t("on")}</Badge> : <Badge tone="zinc">{t("off")}</Badge>}>
+      <div className="space-y-3 text-sm">
+        <p className="text-zinc-600 dark:text-zinc-400">
+          {t("Each pull request of this repository gets its own copy at pr<number>.{domain}, removed when it is closed. Needs a wildcard DNS record (*.{domain}) pointing at this server.", { domain: (app.domain ?? "").replace(/^www\./, "") })}
+        </p>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={info.enabled} onChange={(e) => save({ enabled: e.target.checked })} />
+          {t("Deploy a preview for each pull request")}
+        </label>
+        {info.enabled && (
+          <label className="flex items-start gap-2">
+            <input type="checkbox" className="mt-1" checked={info.env} onChange={(e) => save({ env: e.target.checked })} />
+            <span>{t("Give previews the variables of this app")} <span className="text-amber-700 dark:text-amber-400">({t("the code of a pull request runs with your secrets")})</span></span>
+          </label>
+        )}
+        <ErrorText>{error}</ErrorText>
+        {info.previews.length > 0 && (
+          <ul className="space-y-1">
+            {info.previews.map((p) => (
+              <li key={p.id} className="flex items-center gap-2">
+                <Badge tone="sky">PR #{p.pr}</Badge>
+                <a className="underline" href={`https://${p.domain}`} target="_blank" rel="noreferrer">{p.domain}</a>
+                <span className="text-zinc-500">{p.status ?? ""}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function SettingsCard({ app, onSaved }: { app: App; onSaved: (a: App) => void }) {
   const t = useT();
   const [branch, setBranch] = useState(app.branch);
@@ -1010,6 +1063,7 @@ function AppView() {
           {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && <ResourcesCard app={app} />}
           {app.mode === "managed" && <DatabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           {app.installation_id && <CmsCard appId={app.id} />}
+          {app.mode === "managed" && app.domain && app.installation_id && app.environment !== "preview" && <PreviewsCard app={app} />}
           {app.mode === "managed" && <EnvCard appId={app.id} onSaved={load} />}
         </div>
       </div>
