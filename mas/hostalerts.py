@@ -13,7 +13,9 @@ import logging
 import os
 import re
 import shutil
+import socket
 import time
+from datetime import datetime
 from urllib.parse import urlsplit
 
 from mas.config import Config
@@ -21,6 +23,7 @@ from mas.db import Database
 from mas.envcrypt import EnvError
 from mas.host import Host
 from mas.models import Status
+from mas import mailhtml
 from mas.notify import EMAIL_RE, NotifyError, Notifier
 
 log = logging.getLogger(__name__)
@@ -40,6 +43,7 @@ class HostAlerts:
         self.scanner = scanner
         self.disk_usage = shutil.disk_usage  # replaced in tests
         self.checks = None  # replaced in tests: () -> list of health Check
+        self.hints: dict[str, str] = {}  # problem key -> what to do (from the health checks)
 
     # -- settings -------------------------------------------------------------------------------------
 
@@ -80,6 +84,7 @@ class HostAlerts:
         """Key -> (title, detail) of what needs attention."""
         cfg = self.settings()
         found: dict[str, tuple[str, str]] = {}
+        self.hints = {}
         seen: set[int] = set()
         for path in ("/", self.config.apps_dir, os.path.dirname(self.config.db_path)):
             try:
@@ -94,6 +99,7 @@ class HostAlerts:
             if percent >= cfg["disk_percent"]:
                 free = usage.free / 1024 ** 3
                 found[f"disk:{path}"] = (f"Disk {percent}% full ({path})", f"Only {free:.1f} GB left on the disk holding {path}.")
+                self.hints[f"disk:{path}"] = "Remove old releases, logs or backups, or grow the disk (Resources page shows what takes room)."
         if cfg["services"]:
             found.update(self.down_services())
         try:
@@ -108,6 +114,8 @@ class HostAlerts:
         for c in checks:
             if c.level == "error":
                 found[f"check:{c.category}:{c.title}"] = (c.title, c.detail)
+                if c.fix:
+                    self.hints[f"check:{c.category}:{c.title}"] = c.fix
         return found
 
     def down_services(self) -> dict[str, tuple[str, str]]:
@@ -128,6 +136,7 @@ class HostAlerts:
             if svc.status == Status.ERRORED or svc.id in tracked:
                 where = ", ".join(svc.domains[:2]) or svc.manager.value
                 found[f"service:{svc.id}"] = (f"{svc.display_name or svc.name} is down", f"{svc.status.value} ({where}).")
+                self.hints[f"service:{svc.id}"] = "Open the service in Mas and read its logs, then restart it."
         self.db.set_setting(RUNNING, json.dumps(sorted(tracked & {s.id for s in services})))
         return found
 
@@ -153,12 +162,40 @@ class HostAlerts:
         text = "\n".join(lines)
         if gone:
             text += ("\n\n" if lines else "") + "Resolved: " + ", ".join(gone)
-        if self._send(cfg, title, text):
+        problems = [(current[k][0], current[k][1], self.hints.get(k, "")) for k in new]
+        html = mailhtml.render(title=title, level="alert" if new else "ok", text="Resolved: " + ", ".join(gone) if gone and not new else "",
+                               problems=problems, facts=self._facts(len(current)) + ([("Resolved", ", ".join(gone))] if gone and new else []),
+                               footer="Server alerts from Mas: one message when a problem appears, one when it is gone. Settings → Server alerts.")
+        if self._send(cfg, title, text, html):
             self.db.set_setting(ACTIVE, json.dumps(sorted(current)))  # retried at the next look when nobody was reached
         self.db.audit("hostalerts", "host-alert", True, detail=f"{len(new)} new, {len(gone)} resolved")
         return new + gone
 
-    def _send(self, cfg: dict, title: str, text: str) -> bool:
+    def _facts(self, active: int) -> list[tuple[str, str]]:
+        """Where and when, and how the server looks right now."""
+        facts = [("Server", socket.gethostname()), ("Time", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")),
+                 ("Problems now", str(active))]
+        try:
+            usage = self.disk_usage("/")
+            facts.append(("Disk /", f"{round(usage.used * 100 / usage.total)}% used, {usage.free / 1024 ** 3:.1f} GB free"))
+        except (OSError, ZeroDivisionError):
+            pass
+        try:
+            facts.append(("Load", " ".join(f"{x:.2f}" for x in os.getloadavg())))
+            info = dict(line.split(":", 1) for line in (self.host.read_text("/proc/meminfo") or "").splitlines() if ":" in line)
+            total, free = int(info["MemTotal"].split()[0]), int(info["MemAvailable"].split()[0])
+            facts.append(("Memory", f"{(total - free) // 1024} / {total // 1024} MB used"))
+        except (OSError, KeyError, ValueError):
+            pass
+        if self.scanner is not None:
+            try:
+                services = self.scanner.result().services
+                facts.append(("Services", f"{sum(1 for x in services if x.status == Status.RUNNING)} running of {len(services)}"))
+            except Exception:  # noqa: BLE001
+                pass
+        return facts
+
+    def _send(self, cfg: dict, title: str, text: str, html: str | None = None) -> bool:
         reached = False
         if cfg["webhook"]:
             try:
@@ -168,7 +205,7 @@ class HostAlerts:
                 log.warning("host alert webhook failed: %s", exc)
         if cfg["emails"]:
             try:
-                self.notifier.send_email(cfg["emails"], f"[Mas] {title}", text)
+                self.notifier.send_email(cfg["emails"], f"[Mas] {title}", text, html)
                 reached = True
             except (NotifyError, EnvError) as exc:
                 log.warning("host alert e-mail failed: %s", exc)
@@ -176,4 +213,6 @@ class HostAlerts:
 
     def test(self) -> bool:
         cfg = self.settings(reveal=True)
-        return self._send(cfg, "test", "Mas can reach you about this server.")
+        text = "Mas can reach you about this server."
+        html = mailhtml.render(title="Test of the server alerts", level="info", text=text, facts=self._facts(0))
+        return self._send(cfg, "test", text, html)

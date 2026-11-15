@@ -47,17 +47,19 @@ class Uptime:
         if ok and open_incident:
             self.db.close_incident(open_incident["id"], _iso(now))
             minutes = max(1, int((now - datetime.fromisoformat(open_incident["started"]).timestamp()) / 60))
-            self._tell(app, "Back online", f"{app['domain']} answers again after about {minutes} minute(s).")
+            self._tell(app, "Back online", f"{app['domain']} answers again after about {minutes} minute(s).", "ok",
+                       [("Down since", open_incident["started"]), ("Last status", f"HTTP {resp.status}")])
         elif not ok and not open_incident:
             recent = self.db.recent_uptime(app["id"], FAILS_FOR_DOWN)
             if len(recent) >= FAILS_FOR_DOWN and not any(r["ok"] for r in recent):
                 reason = {"tls": "invalid HTTPS certificate", "network": "no answer"}.get(resp.error) or f"HTTP {resp.status}"
                 self.db.open_incident_row(app["id"], recent[-1]["at"], reason)
-                self._tell(app, "Site down", f"{app['domain']} does not answer properly ({reason}).")
+                self._tell(app, "Site down", f"{app['domain']} does not answer properly ({reason}).", "alert",
+                           [("Reason", reason), ("Failed checks in a row", str(len(recent))), ("Last check", recent[-1]["at"])])
 
-    def _tell(self, app: dict, title: str, text: str) -> None:
+    def _tell(self, app: dict, title: str, text: str, level: str = "alert", facts: list[tuple[str, str]] | None = None) -> None:
         if self.notifier is not None:
-            self.notifier.notify(app["id"], "uptime", title, text)
+            self.notifier.notify(app["id"], "uptime", title, text, level=level, facts=facts)
 
     def tick(self, now: float | None = None) -> list[str]:
         """Check every site that has not been looked at for a minute, a few at a time."""

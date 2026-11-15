@@ -25,7 +25,7 @@ def make(tmp_path, statuses):
     sent = []
 
     class Notifier:
-        def notify(self, app_id, event, title, text):
+        def notify(self, app_id, event, title, text, **extra):
             sent.append((event, title, text))
             return []
     queue = list(statuses)

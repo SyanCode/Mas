@@ -23,6 +23,7 @@ from mas.config import Config
 from mas.db import Database
 from mas.envcrypt import EnvError, load_fernet
 from mas.host import Host
+from mas import mailhtml
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,19 @@ EMAIL_RE = __import__("re").compile(r"^[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+$"
 
 class NotifyError(Exception):
     pass
+
+
+def _log_tail(path: str | None, lines: int = 25, limit: int = 4000) -> str:
+    """The last lines of a build log (empty when there is none)."""
+    if not path:
+        return ""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - limit))
+            return "\n".join(fh.read().decode("utf-8", "replace").splitlines()[-lines:])
+    except OSError:
+        return ""
 
 
 class Notifier:
@@ -119,7 +133,7 @@ class Notifier:
 
     # -- sending ------------------------------------------------------------------------------------
 
-    def send_email(self, to: list[str], subject: str, text: str) -> None:
+    def send_email(self, to: list[str], subject: str, text: str, html: str | None = None) -> None:
         cfg = self.smtp(reveal=True)
         if not cfg["host"] or not to:
             raise NotifyError("the mail server is not set up")
@@ -127,6 +141,8 @@ class Notifier:
         msg["From"], msg["To"], msg["Subject"] = cfg["from"], ", ".join(to), subject
         msg["Date"], msg["Message-ID"] = formatdate(localtime=True), make_msgid()
         msg.set_content(text)
+        if html:
+            msg.add_alternative(html, subtype="html")
         if self.smtp_factory:
             conn = self.smtp_factory(cfg["host"], cfg["port"], cfg["security"])
         elif cfg["security"] == "ssl":
@@ -158,8 +174,10 @@ class Notifier:
         except OSError as exc:
             raise NotifyError(f"webhook: {exc}") from None
 
-    def notify(self, app_id: str, event: str, title: str, text: str) -> list[str]:
-        """Tell the people and tools set for this site; returns what was reached. Never raises."""
+    def notify(self, app_id: str, event: str, title: str, text: str, *, level: str | None = None,
+               facts: list[tuple[str, str]] | None = None, pre: str = "", pre_title: str = "") -> list[str]:
+        """Tell the people and tools set for this site; returns what was reached. Never raises.
+        The e-mail is also sent as HTML (``facts``: extra rows, ``pre``: a block of log lines)."""
         cfg = self.site(app_id, reveal=True)
         if event not in cfg["events"] and not (event == "digest" and cfg["digest"]):
             return []
@@ -173,7 +191,14 @@ class Notifier:
                 log.warning("webhook for %s failed: %s", app_id, exc)
         if cfg["emails"]:
             try:
-                self.send_email(cfg["emails"], f"[{app['name']}] {title}", text)
+                domain = app.get("domain") or ""
+                rows = [("Site", app["name"] + (f" ({domain})" if domain else "")), *(facts or []),
+                        ("When", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"))]
+                html = mailhtml.render(
+                    title=title, level=level or ("info" if event in ("digest", "scheduled") else "alert"), text=text, facts=rows,
+                    pre=pre, pre_title=pre_title, button=("Open the site", f"https://{domain}/") if domain else None,
+                    footer="You get this message because you are listed for this site in Mas (Notifications). Change it there at any time.")
+                self.send_email(cfg["emails"], f"[{app['name']}] {title}", text, html)
                 reached.append("email")
             except (NotifyError, EnvError) as exc:
                 log.warning("e-mail for %s failed: %s", app_id, exc)
@@ -203,6 +228,20 @@ class Notifier:
         lines.append(f"Changes this week: {len(changes)}")
         return "\n".join(lines) + "\n"
 
+    @staticmethod
+    def _release_facts(r: dict) -> list[tuple[str, str]]:
+        facts = [("Release", f"#{r['id']} ({r['trigger']})")]
+        if r.get("sha"):
+            facts.append(("Commit", r["sha"][:8] + (f" {r['message'].splitlines()[0]}" if r.get("message") else "")))
+        if r.get("author"):
+            facts.append(("Author", r["author"]))
+        try:
+            seconds = int((datetime.fromisoformat(r["finished_at"]) - datetime.fromisoformat(r["created_at"])).total_seconds())
+            facts.append(("Duration", f"{seconds // 60} min {seconds % 60} s"))
+        except (KeyError, TypeError, ValueError):
+            pass
+        return facts
+
     def tick(self, now: float | None = None) -> list[str]:
         """Failed deployments, and the weekly digest on Monday morning."""
         now = now or time.time()
@@ -224,7 +263,8 @@ class Notifier:
                         self.db.set_setting(f"notify:last_failed:{app['id']}", str(max(r["id"] for r in failed)))
                         r = failed[0]
                         self.notify(app["id"], "deploy_failed", "Deployment failed",
-                                    f"The release #{r['id']} ({r.get('message') or r['trigger']}) failed: {r.get('error') or 'see the build log'}.")
+                                    f"The release #{r['id']} ({r.get('message') or r['trigger']}) failed: {r.get('error') or 'see the build log'}.",
+                                    facts=self._release_facts(r), pre=_log_tail(r.get("log_path")), pre_title="End of the build log")
                         done.append(f"failed:{app['id']}")
             if cfg["digest"] and stamp.weekday() == 0 and stamp.hour >= 8:
                 week = stamp.strftime("%G-%V")

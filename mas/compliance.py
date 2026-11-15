@@ -626,7 +626,8 @@ class Compliance:
         if new or drop >= 10:
             lines = [f"Compliance score: {previous['score']} → {result['score']}/100."]
             lines += [f"- NEW blocking issue: {f['title']}" for f in new]
-            self.notifier.notify(app["id"], "compliance", "Compliance got worse", "\n".join(lines))
+            self.notifier.notify(app["id"], "compliance", "Compliance got worse", "\n".join(lines),
+                                 facts=[("Blocking issues", str(result["counts"]["critical"])), ("To improve", str(result["counts"]["warning"]))])
 
     def latest(self, app_id: str) -> dict | None:
         row = self.db.latest_compliance(app_id)

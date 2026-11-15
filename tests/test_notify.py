@@ -79,7 +79,9 @@ def test_events_reach_webhook_and_email_only_when_chosen(tmp_path):
     assert n.notify("shop", "compliance", "Compliance got worse", "92 → 61") == ["webhook", "email"]
     assert hooks[0][1]["event"] == "compliance" and "Compliance got worse" in hooks[0][1]["text"] and "content" in hooks[0][1]
     (args, logged, msg), = FakeSMTP.sent
-    assert logged == ("me", "pw") and msg["To"] == "client@shop.fr" and "92 → 61" in msg.get_content()
+    assert logged == ("me", "pw") and msg["To"] == "client@shop.fr" and "92 → 61" in msg.get_body(("plain",)).get_content()
+    html = msg.get_body(("html",)).get_content()  # the same mail, in HTML, with the facts about the site
+    assert "92 → 61" in html and "Compliance got worse" in html and "<table" in html and "When" in html
     assert n.notify("shop", "uptime", "Down", "x") == []  # not chosen
     assert client.post("/api/cms/sites/shop/notify/test", headers=h).json() == {"ok": True}
     assert len(hooks) == 2 and len(FakeSMTP.sent) == 2
@@ -126,3 +128,28 @@ def test_compliance_drop_notifies(tmp_path):
     page["body"] = bad
     comp.run(app, None, "manual")
     assert hooks and "NEW blocking issue" in hooks[-1][1]["message"]
+
+
+def test_html_mail_escapes_untrusted_text_and_shows_the_build_log(tmp_path):
+    from mas import mailhtml
+    html = mailhtml.render(title="<script>x</script>", text="- <b>bad</b>\nReason: a < b", facts=[("Commit", "<img src=x>")],
+                           problems=[("<i>t</i>", "d&d", "fix <it>")], pre="line <1>", button=("Go", "javascript:alert(1)"))
+    assert "<script>" not in html and "<b>bad</b>" not in html and "<img" not in html and "<i>t</i>" not in html
+    assert "&lt;script&gt;" in html and "javascript:" not in html and "line &lt;1&gt;" in html and "d&amp;d" in html
+    ok = mailhtml.render(title="Fine", level="ok", button=("Open", "https://shop.example.com/"))
+    assert 'href="https://shop.example.com/"' in ok and "Back to normal" in ok
+
+
+def test_failed_deployment_mail_carries_release_details_and_log_tail(tmp_path):
+    client, db, n, hooks, h = make(tmp_path)
+    client.put("/api/notify/smtp", headers=h, json={"host": "smtp.example.com", "from": "noreply@example.com"})
+    client.put("/api/cms/sites/shop/notify", headers=h, json={"emails": ["client@shop.fr"], "events": ["deploy_failed"]})
+    log = tmp_path / "build.log"
+    log.write_text("\n".join(f"step {i}" for i in range(40)) + "\nnpm ERR! boom\n")
+    FakeSMTP.sent.clear()
+    r = {"id": 7, "trigger": "push", "sha": "abcdef1234567", "message": "Fix menu", "author": "Syan",
+         "created_at": "2026-11-15T10:00:00", "finished_at": "2026-11-15T10:02:05"}
+    n.notify("shop", "deploy_failed", "Deployment failed", "boom", facts=n._release_facts(r), pre=__import__("mas.notify", fromlist=["x"])._log_tail(str(log)))
+    (_, _, msg), = FakeSMTP.sent
+    html = msg.get_body(("html",)).get_content()
+    assert "abcdef12" in html and "Fix menu" in html and "2 min 5 s" in html and "npm ERR! boom" in html and "step 0<" not in html
