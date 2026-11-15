@@ -192,10 +192,11 @@ class Notifier:
         if cfg["emails"]:
             try:
                 domain = app.get("domain") or ""
-                rows = [("Site", app["name"] + (f" ({domain})" if domain else "")), *(facts or []),
+                tiles = [(k, v) for k, v in (facts or []) if len(v) <= 16][:3]  # short values become the big numbers
+                rows = [("Site", app["name"] + (f" ({domain})" if domain else "")), *[f for f in (facts or []) if f not in tiles],
                         ("When", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"))]
                 html = mailhtml.render(
-                    title=title, level=level or ("info" if event in ("digest", "scheduled") else "alert"), text=text, facts=rows,
+                    title=title, level=level or ("info" if event in ("digest", "scheduled") else "alert"), text=text, facts=rows, tiles=tiles, context=domain or app["name"],
                     pre=pre, pre_title=pre_title, button=("Open the site", f"https://{domain}/") if domain else None,
                     footer="You get this message because you are listed for this site in Mas (Notifications). Change it there at any time.")
                 self.send_email(cfg["emails"], f"[{app['name']}] {title}", text, html)

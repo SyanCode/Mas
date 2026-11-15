@@ -164,12 +164,38 @@ class HostAlerts:
             text += ("\n\n" if lines else "") + "Resolved: " + ", ".join(gone)
         problems = [(current[k][0], current[k][1], self.hints.get(k, "")) for k in new]
         html = mailhtml.render(title=title, level="alert" if new else "ok", text="Resolved: " + ", ".join(gone) if gone and not new else "",
-                               problems=problems, facts=self._facts(len(current)) + ([("Resolved", ", ".join(gone))] if gone and new else []),
+                               problems=problems, context=socket.gethostname(), tiles=self._tiles(), facts=self._facts(len(current)) + ([("Resolved", ", ".join(gone))] if gone and new else []),
                                footer="Server alerts from Mas: one message when a problem appears, one when it is gone. Settings → Server alerts.")
         if self._send(cfg, title, text, html):
             self.db.set_setting(ACTIVE, json.dumps(sorted(current)))  # retried at the next look when nobody was reached
         self.db.audit("hostalerts", "host-alert", True, detail=f"{len(new)} new, {len(gone)} resolved")
         return new + gone
+
+    def _tiles(self) -> list[tuple[str, str]]:
+        """The big numbers at the top of the mail: disk, memory, load, running services."""
+        tiles: list[tuple[str, str]] = []
+        try:
+            usage = self.disk_usage("/")
+            tiles.append(("Disk", f"{round(usage.used * 100 / usage.total)}%"))
+        except (OSError, ZeroDivisionError):
+            pass
+        try:
+            info = dict(line.split(":", 1) for line in (self.host.read_text("/proc/meminfo") or "").splitlines() if ":" in line)
+            total, free = int(info["MemTotal"].split()[0]), int(info["MemAvailable"].split()[0])
+            tiles.append(("Memory", f"{round((total - free) * 100 / total)}%"))
+        except (KeyError, ValueError, ZeroDivisionError):
+            pass
+        try:
+            tiles.append(("Load", f"{os.getloadavg()[0]:.2f}"))
+        except OSError:
+            pass
+        if self.scanner is not None:
+            try:
+                services = self.scanner.result().services
+                tiles.append(("Services up", f"{sum(1 for x in services if x.status == Status.RUNNING)}/{len(services)}"))
+            except Exception:  # noqa: BLE001
+                pass
+        return tiles
 
     def _facts(self, active: int) -> list[tuple[str, str]]:
         """Where and when, and how the server looks right now."""
@@ -214,5 +240,5 @@ class HostAlerts:
     def test(self) -> bool:
         cfg = self.settings(reveal=True)
         text = "Mas can reach you about this server."
-        html = mailhtml.render(title="Test of the server alerts", level="info", text=text, facts=self._facts(0))
+        html = mailhtml.render(title="Test of the server alerts", level="info", text=text, context=socket.gethostname(), tiles=self._tiles(), facts=self._facts(0))
         return self._send(cfg, "test", text, html)
