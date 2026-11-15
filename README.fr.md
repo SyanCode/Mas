@@ -750,7 +750,7 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
 ## Modèle de sécurité
 
 - **Réseau** : l'API n'écoute que sur `127.0.0.1:7070` (`mas serve` refuse toute autre adresse).
-  Le point d'entrée public est le vhost nginx : HTTPS uniquement, HSTS, `X-Frame-Options: DENY`, CSP,
+  Le point d'entrée public est le vhost nginx : HTTPS uniquement, HSTS, `X-Frame-Options: SAMEORIGIN`, CSP,
   `client_max_body_size 2m`.
 - **Authentification** : les comptes administrateur sont créés sur le serveur (`mas user create`), jamais
   depuis le web. Les comptes d'éditeur CMS sont créés par un administrateur dans le tableau de bord et n'ont accès

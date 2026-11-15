@@ -2015,5 +2015,17 @@
   "Every AI account is switched off ({detail}): fix it in the AI accounts tab.": "Todas las cuentas de IA están desactivadas ({detail}): corrígelo en la pestaña Cuentas de IA.",
   "Connect an AI account first (AI accounts tab).": "Conecta primero una cuenta de IA (pestaña Cuentas de IA).",
   "The daily cap ({n}) is reached: it carries on tomorrow.": "Se alcanzó el límite diario ({n}): continúa mañana.",
-  "Something went wrong in the autopilot: {error}": "Algo falló en el piloto automático: {error}"
+  "Something went wrong in the autopilot: {error}": "Algo falló en el piloto automático: {error}",
+  "Close all windows": "Cerrar todas las ventanas",
+  "Load": "Carga",
+  "Open an app from the dock below.": "Abra una aplicación desde el dock de abajo.",
+  "Show desktop": "Mostrar escritorio",
+  "All checks pass.": "Todas las comprobaciones pasan.",
+  "CPU": "CPU",
+  "Desktop view": "Vista de escritorio",
+  "Open in a tab": "Abrir en una pestaña",
+  "Maximize": "Maximizar",
+  "Classic view": "Vista clásica",
+  "Nothing needs your attention.": "Nada requiere su atención.",
+  "Minimize": "Minimizar"
 }

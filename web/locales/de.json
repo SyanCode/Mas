@@ -2015,5 +2015,17 @@
   "Every AI account is switched off ({detail}): fix it in the AI accounts tab.": "Alle KI-Konten sind deaktiviert ({detail}): Behebe das im Tab KI-Konten.",
   "Connect an AI account first (AI accounts tab).": "Verbinde zuerst ein KI-Konto (Tab KI-Konten).",
   "The daily cap ({n}) is reached: it carries on tomorrow.": "Das Tageslimit ({n}) ist erreicht: es geht morgen weiter.",
-  "Something went wrong in the autopilot: {error}": "Im Autopilot ist etwas schiefgelaufen: {error}"
+  "Something went wrong in the autopilot: {error}": "Im Autopilot ist etwas schiefgelaufen: {error}",
+  "Close all windows": "Alle Fenster schließen",
+  "Load": "Last",
+  "Open an app from the dock below.": "Öffnen Sie unten im Dock eine App.",
+  "Show desktop": "Desktop anzeigen",
+  "All checks pass.": "Alle Prüfungen bestanden.",
+  "CPU": "CPU",
+  "Desktop view": "Desktop-Ansicht",
+  "Open in a tab": "In neuem Tab öffnen",
+  "Maximize": "Maximieren",
+  "Classic view": "Klassische Ansicht",
+  "Nothing needs your attention.": "Nichts erfordert Ihre Aufmerksamkeit.",
+  "Minimize": "Minimieren"
 }

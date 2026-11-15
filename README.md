@@ -242,6 +242,13 @@ The agent then deploys with `deploy_app`.
 
 Press <kbd>⌘K</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd> anywhere to jump to a service, an app or a page.
 
+**Desktop view** (user menu → *Desktop view*, `/desktop/`): the dashboard as an operating system. Every page is an
+app in a draggable, resizable window (maximize with a double click, snap to a half of the screen or to the top edge,
+minimize to the dock), with a dock, a menu bar (clock, search, robot status, notifications from the health checks),
+live widgets (CPU, memory, disk, services, health, recent activity) and your open windows restored at the next visit.
+On a phone every window is full screen. *Classic view* in the logo menu goes back; the choice is kept in the browser.
+The pages are the same ones, shown in same-origin frames (`X-Frame-Options: SAMEORIGIN`: other sites still cannot frame Mas).
+
 The dashboard speaks **English, French, Spanish and German**: the browser language is used by
 default, and the picker in the user menu (and on the sign-in page) remembers your choice. The
 English text is the key (`t("Deploy Supabase")`), translations live in `web/locales/<lang>.json`,
@@ -758,7 +765,7 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
 ## Security model
 
 - **Network**: the API listens on `127.0.0.1:7070` only (`mas serve` refuses anything else).
-  The public entry point is the nginx vhost: HTTPS only, HSTS, `X-Frame-Options: DENY`, CSP,
+  The public entry point is the nginx vhost: HTTPS only, HSTS, `X-Frame-Options: SAMEORIGIN`, CSP,
   `client_max_body_size 2m`.
 - **Authentication**: administrator accounts are created on the server (`mas user create`), never
   from the web. CMS editor accounts are created by an administrator in the dashboard and can only
@@ -887,6 +894,8 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Apply the advisor's proposals in one click**: *Apply everything* (Advisor → Proposals) analyses when nothing waits, then the robot applies every proposal in a row (on your sites, or on the server with Mas's own health fixes and service restarts), deploys it and closes it with its report or says what a person must do, as far as the AI accounts' usage limit allows and resuming by itself when it resets; an option applies new proposals as they come; failures are retried once, three in a row pause it.
 - [x] **Profiles**: full name, nickname, short presentation and picture for every account (Settings → Profile; the picture is cropped and shrunk in the browser, checked on the server, never an SVG).
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
+
+- [x] **Desktop view**: the dashboard as an OS (windows, dock, menu bar, live widgets, notifications, snapping, restored session); `/desktop/`, kept per browser.
 
 ## License
 

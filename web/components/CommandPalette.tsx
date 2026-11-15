@@ -27,7 +27,7 @@ const PAGES: Item[] = [
 // Group names shown in the list.
 const GROUPS: Record<string, string> = { Pages: msg("Pages"), Apps: msg("Apps"), Services: msg("Services") };
 
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({ open, onClose, onNavigate }: { open: boolean; onClose: () => void; onNavigate?: (href: string, label: string) => void }) {
   const t = useT();
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<Item[]>(PAGES);
@@ -63,7 +63,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const go = (item?: Item) => {
     if (!item) return;
     onClose();
-    window.location.href = item.href;
+    if (onNavigate) onNavigate(item.href, item.label);
+    else window.location.href = item.href;
   };
 
   return (

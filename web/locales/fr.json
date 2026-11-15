@@ -2019,5 +2019,17 @@
   "Every AI account is switched off ({detail}): fix it in the AI accounts tab.": "Tous les comptes IA sont désactivés ({detail}) : corrigez-le dans l'onglet Comptes IA.",
   "Connect an AI account first (AI accounts tab).": "Connectez d'abord un compte IA (onglet Comptes IA).",
   "The daily cap ({n}) is reached: it carries on tomorrow.": "Le plafond par jour ({n}) est atteint : la suite reprend demain.",
-  "Something went wrong in the autopilot: {error}": "Un problème est survenu dans le pilote automatique : {error}"
+  "Something went wrong in the autopilot: {error}": "Un problème est survenu dans le pilote automatique : {error}",
+  "Close all windows": "Fermer toutes les fenêtres",
+  "Load": "Charge",
+  "Open an app from the dock below.": "Ouvrez une application depuis le dock en bas.",
+  "Show desktop": "Afficher le bureau",
+  "All checks pass.": "Toutes les vérifications passent.",
+  "CPU": "CPU",
+  "Desktop view": "Vue bureau",
+  "Open in a tab": "Ouvrir dans un onglet",
+  "Maximize": "Agrandir",
+  "Classic view": "Vue classique",
+  "Nothing needs your attention.": "Rien ne demande votre attention.",
+  "Minimize": "Réduire"
 }

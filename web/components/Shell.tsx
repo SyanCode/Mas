@@ -4,13 +4,14 @@ import { UpdateBanner } from "@/components/Update";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { Activity, Database, Gauge, HeartPulse, LayoutDashboard, Menu, Newspaper, Rocket, Search, Server, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
+import { Activity, Database, Gauge, HeartPulse, LayoutDashboard, LayoutGrid, Menu, Newspaper, Rocket, Search, Server, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
 import { Avatar, myAvatarUrl, shownName } from "@/components/Avatar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
 import { RobotPill } from "@/components/RobotPill";
 import { api, rememberSession, type Session } from "@/lib/api";
+import { getUiMode, isEmbedded } from "@/lib/desktop";
 import { LanguagePicker, msg, useT } from "@/lib/i18n";
 
 const SessionContext = createContext<Session | null>(null);
@@ -103,6 +104,7 @@ function UserMenu({ session }: { session: Session }) {
             <LanguagePicker className="w-full" />
           </div>
           <div className="my-1 h-px bg-zinc-200 dark:bg-white/[0.06]" />
+          <Link href="/desktop/" className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]"><LayoutGrid className="size-3.5 opacity-70" />{t("Desktop view")}</Link>
           <Link href="/settings/" className="block rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]">{session.role !== "admin" ? t("Account") : t("Settings")}</Link>
           <button onClick={logout} className="block w-full rounded-md px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-zinc-100 dark:text-rose-400 dark:hover:bg-white/[0.06]">{t("Log out")}</button>
         </div>
@@ -120,12 +122,18 @@ export function Shell({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [palette, setPalette] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [embedded, setEmbedded] = useState(false);  // shown inside a window of the desktop
   const t = useT();
   const pathname = usePathname();
   const router = useRouter();
   const editor = !!session && session.role !== "admin" && session.role !== "viewer";  // CMS accounts only
 
   useEffect(() => {
+    const inside = isEmbedded();
+    setEmbedded(inside);
+    document.documentElement.classList.toggle("mas-embedded", inside);
+    // The desktop is the home page of whoever chose it (Classic view in its menu switches back).
+    if (!inside && window.location.pathname === "/" && getUiMode() === "desktop") window.location.replace("/desktop/");
     api<Session>("/session").then((s) => {
       rememberSession(s);
       setSession(s);
@@ -165,6 +173,18 @@ export function Shell({ children }: { children: ReactNode }) {
         <Backdrop />
         <Logo className="h-10 w-10 animate-pulse" />
       </div>
+    );
+  }
+
+  if (embedded) {
+    return (
+      <SessionContext.Provider value={session}>
+        <main key={pathname} className="page-in mx-auto max-w-6xl px-4 py-5 sm:px-8 sm:py-7">{session.role === "viewer" && (
+          <p className="mb-4 rounded-xl border border-sky-400/30 bg-sky-400/5 px-4 py-2 text-sm text-sky-800 dark:text-sky-300">
+            {t("Read-only account: you can look at everything, but nothing can be changed from here.")}
+          </p>
+        )}{children}</main>
+      </SessionContext.Provider>
     );
   }
 

@@ -66,14 +66,14 @@ IDLE_AFTER = 180   # seconds without a dashboard request: the dashboard is close
 IDLE_SCAN = 300    # full scan interval meanwhile
 TRUSTED_PROXIES = {"127.0.0.1", "::1"}
 SECURITY_HEADERS = {
-    "X-Frame-Options": "DENY",
+    "X-Frame-Options": "SAMEORIGIN",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
+        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; "
         "form-action 'self' https://github.com"  # GitHub App manifest form
     ),
 }

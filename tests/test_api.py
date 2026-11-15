@@ -205,8 +205,8 @@ def test_password_change_signs_out_other_sessions(env):
 def test_security_headers(env):
     client, *_ = env
     r = client.get("/api/health")
-    assert r.headers["x-frame-options"] == "DENY"
-    assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+    assert r.headers["x-frame-options"] == "SAMEORIGIN"
+    assert "frame-ancestors 'self'" in r.headers["content-security-policy"]
     assert r.headers["cache-control"] == "no-store"
 
 
