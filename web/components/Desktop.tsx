@@ -259,6 +259,7 @@ export function Desktop({ session }: { session: Session }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); }
+      if (e.altKey && e.shiftKey && e.code === "KeyD") { e.preventDefault(); setUiMode("classic"); window.location.href = "/"; }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -325,6 +326,7 @@ export function Desktop({ session }: { session: Session }) {
               <Bot className={`size-3.5 ${robot.status === "waiting" ? "" : "animate-pulse"}`} /><span className="hidden max-w-40 truncate sm:inline">{robot.status === "waiting" ? t("The robot needs you") : t("Robot working…")}</span>
             </button>
           )}
+          <button onClick={classic} title={`${t("Classic view")} (Alt+Shift+D)`} aria-label={t("Classic view")} className="flex h-6 items-center gap-1.5 rounded px-1.5 text-zinc-600 hover:bg-zinc-900/10 dark:text-zinc-300 dark:hover:bg-white/10"><LayoutPanelLeft className="size-3.5" /><span className="hidden text-xs md:inline">{t("Classic view")}</span></button>
           {usage?.server && <span className="hidden font-mono text-[11px] text-zinc-500 md:inline">{usage.server.cpu_percent == null ? "" : `${Math.round(usage.server.cpu_percent)}%`}</span>}
           {!editor && <button onClick={() => setPalette(true)} aria-label={t("Search…")} title={t("Search…")} className="flex h-6 items-center gap-1.5 rounded px-1.5 text-zinc-600 hover:bg-zinc-900/10 dark:text-zinc-300 dark:hover:bg-white/10"><Search className="size-3.5" /><span className="hidden lg:inline"><Kbd>⌘K</Kbd></span></button>}
           {!editor && (
@@ -357,6 +359,9 @@ export function Desktop({ session }: { session: Session }) {
                 <div className="px-2 py-1.5 text-sm font-medium">{name}<span className="block text-xs font-normal text-zinc-500">@{session.username} · v{session.version}</span></div>
                 <div className="space-y-2 p-1.5"><ThemePicker /><ModePicker /></div>
                 <div className="px-1.5 pb-1"><LanguagePicker className="w-full" /></div>
+                <div className="my-1 h-px bg-zinc-200 dark:bg-white/[0.06]" />
+                <MenuItem icon={LayoutPanelLeft} onClick={classic}>{t("Classic view")}</MenuItem>
+                <MenuItem icon={LogOut} danger onClick={logout}>{t("Log out")}</MenuItem>
               </div>
             )}
           </div>

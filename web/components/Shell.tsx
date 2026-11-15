@@ -11,7 +11,7 @@ import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
 import { RobotPill } from "@/components/RobotPill";
 import { api, rememberSession, type Session } from "@/lib/api";
-import { getUiMode, isEmbedded } from "@/lib/desktop";
+import { getUiMode, isEmbedded, setUiMode } from "@/lib/desktop";
 import { LanguagePicker, msg, useT } from "@/lib/i18n";
 
 const SessionContext = createContext<Session | null>(null);
@@ -104,7 +104,7 @@ function UserMenu({ session }: { session: Session }) {
             <LanguagePicker className="w-full" />
           </div>
           <div className="my-1 h-px bg-zinc-200 dark:bg-white/[0.06]" />
-          <Link href="/desktop/" className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]"><LayoutGrid className="size-3.5 opacity-70" />{t("Desktop view")}</Link>
+          <Link href="/desktop/" onClick={() => setUiMode("desktop")} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]"><LayoutGrid className="size-3.5 opacity-70" />{t("Desktop view")}</Link>
           <Link href="/settings/" className="block rounded-md px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-white/[0.06]">{session.role !== "admin" ? t("Account") : t("Settings")}</Link>
           <button onClick={logout} className="block w-full rounded-md px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-zinc-100 dark:text-rose-400 dark:hover:bg-white/[0.06]">{t("Log out")}</button>
         </div>
@@ -154,6 +154,14 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (editor && !EDITOR_PATHS.some((p) => pathname.startsWith(p))) router.replace("/cms/");
   }, [editor, pathname, router]);
+
+  useEffect(() => {  // Alt+Shift+D: switch to the desktop view
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && e.shiftKey && e.code === "KeyD" && !isEmbedded()) { e.preventDefault(); setUiMode("desktop"); window.location.href = "/desktop/"; }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -213,6 +221,10 @@ export function Shell({ children }: { children: ReactNode }) {
                   {t("Enable 2FA")}
                 </Link>
               )}
+              <Link href="/desktop/" onClick={() => setUiMode("desktop")} title={`${t("Desktop view")} (Alt+Shift+D)`} aria-label={t("Desktop view")}
+                className="glass flex h-9 items-center gap-2 whitespace-nowrap rounded-lg px-2.5 text-xs text-zinc-600 transition hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white">
+                <LayoutGrid className="size-4 text-indigo-500" /><span className="hidden md:inline">{t("Desktop view")}</span>
+              </Link>
               {!editor && <button
                 onClick={() => setPalette(true)}
                 className="glass hidden h-9 items-center gap-8 whitespace-nowrap rounded-lg px-3 text-xs text-zinc-500 transition hover:text-zinc-800 sm:flex dark:hover:text-zinc-200"

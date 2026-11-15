@@ -242,7 +242,7 @@ The agent then deploys with `deploy_app`.
 
 Press <kbd>⌘K</kbd> / <kbd>Ctrl</kbd>+<kbd>K</kbd> anywhere to jump to a service, an app or a page.
 
-**Desktop view** (user menu → *Desktop view*, `/desktop/`): the dashboard as an operating system. Every page is an
+**Desktop view** (the *Desktop view* button in the header, <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>, or `/desktop/`; *Classic view* in the menu bar, the same shortcut or the user menu switches back): the dashboard as an operating system. Every page is an
 app in a draggable, resizable window (maximize with a double click, snap to a half of the screen or to the top edge,
 minimize to the dock), with a dock, a menu bar (clock, search, robot status, notifications from the health checks),
 live widgets (CPU, memory, disk, services, health, recent activity) and your open windows restored at the next visit.
