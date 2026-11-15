@@ -20,7 +20,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from mas import preview as preview_mod
-from mas import __version__, advisor as advisor_mod, ai as ai_mod, claudelogin as claudelogin_mod, api_advisor, robot as robot_mod, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, advisor as advisor_mod, ai as ai_mod, claudelogin as claudelogin_mod, api_advisor, robot as robot_mod, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_shares, shares as shares_mod, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -255,6 +255,10 @@ def create_app(
                 await asyncio.to_thread(app.state.previews.sweep)
             except Exception:
                 log.exception("preview sweep failed")
+            try:  # shared files that expired or reached their download limit
+                await asyncio.to_thread(shares_mod.sweep, db)
+            except Exception:
+                log.exception("shares sweep failed")
             try:  # Mas's own backup, once a night
                 made = await asyncio.to_thread(selfbackup.nightly, db, config)
                 if made:
@@ -1054,6 +1058,8 @@ def create_app(
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,
                      stats=site_stats, geo=geo, compliance=compliance, notifier=notifier, uptime=uptime,
                      rules=site_rules, seo_fetch=seo_fetch)
+
+    api_shares.register(app, db=db, current_session=current_session, client_ip=client_ip)
 
     # -- dashboard ---------------------------------------------------------
 

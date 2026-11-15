@@ -538,6 +538,26 @@ export async function uploadFile<T>(path: string, file: Blob): Promise<T> {
   return data as T;
 }
 
+/** PUT a file as the raw request body with progress (hosted files); the browser streams it from disk. */
+export function putFile<T>(path: string, file: Blob, onProgress: (done: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", `/api${path}`);
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    if (csrf) xhr.setRequestHeader("X-CSRF-Token", csrf);
+    xhr.upload.onprogress = (e) => onProgress(e.loaded);
+    xhr.onerror = () => reject(new ApiError(0, "Upload interrupted"));
+    xhr.onload = () => {
+      let data: { detail?: unknown } = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as T);
+      else reject(new ApiError(xhr.status, typeof data.detail === "string" ? data.detail : `HTTP ${xhr.status}`));
+    };
+    xhr.send(file);
+  });
+}
+
 export function githubUrl(remote: string | null): string | null {
   if (!remote) return null;
   const m = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);

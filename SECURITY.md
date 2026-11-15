@@ -18,7 +18,7 @@ Mas is in beta: only the latest release receives security fixes.
 
 ## Scope
 
-In scope: the API and dashboard, authentication (passwords, TOTP and recovery codes, sessions, CSRF, read-only accounts), preview deployments, the backups of Mas and their S3 copy, the
+In scope: the API and dashboard, authentication (passwords, TOTP and recovery codes, sessions, CSRF, read-only accounts), preview deployments, hosted files and their download links (`/d/<id>`), the backups of Mas and their S3 copy, the
 deployment pipeline, the generated nginx/systemd configuration, the GitHub webhook, the DNS
 provider integrations and the installer. The [security model](README.md#security-model)
 describes what Mas is designed to protect against.

@@ -895,6 +895,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Profiles**: full name, nickname, short presentation and picture for every account (Settings → Profile; the picture is cropped and shrunk in the browser, checked on the server, never an SVG).
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
+- [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
 - [x] **Desktop view**: the dashboard as an OS (windows, dock, menu bar, live widgets, notifications, snapping, restored session); `/desktop/`, kept per browser.
 
 ## License

@@ -4,7 +4,7 @@ import { UpdateBanner } from "@/components/Update";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { Activity, Database, Gauge, HeartPulse, LayoutDashboard, LayoutGrid, Menu, Newspaper, Rocket, Search, Server, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
+import { Activity, Database, FolderUp, Gauge, HeartPulse, LayoutDashboard, LayoutGrid, Menu, Newspaper, Rocket, Search, Server, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
 import { Avatar, myAvatarUrl, shownName } from "@/components/Avatar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
@@ -50,6 +50,7 @@ const NAV_GROUPS: { title: string; items: NavEntry[] }[] = [
   ] },
   { title: msg("Content"), items: [
     { href: "/cms/", label: msg("CMS"), icon: Newspaper, match: (p) => p.startsWith("/cms") },
+    { href: "/files/", label: msg("Files"), icon: FolderUp, match: (p) => p.startsWith("/files") },
   ] },
   { title: msg("Account"), items: [
     { href: "/settings/", label: msg("Settings"), icon: Settings, match: (p) => p.startsWith("/settings") },

@@ -302,6 +302,19 @@ CREATE TABLE IF NOT EXISTS folder_items (    -- an app or a detected service is 
     folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
     PRIMARY KEY (kind, item_id)
 );
+CREATE TABLE IF NOT EXISTS shares (          -- hosted files with a download link (mas.shares)
+    id TEXT PRIMARY KEY,                       -- 128 random bits, the secret part of the link
+    name TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    password_hash TEXT,                        -- argon2, NULL = no password
+    expires_at REAL,
+    max_downloads INTEGER,
+    downloads INTEGER NOT NULL DEFAULT 0,
+    last_download REAL,
+    ready INTEGER NOT NULL DEFAULT 0,          -- 1 once the file is fully received
+    created_at REAL NOT NULL,
+    created_by TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS projects (        -- several apps (repositories) deployed together (mas.projects)
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
