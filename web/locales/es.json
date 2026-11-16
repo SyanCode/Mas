@@ -2076,5 +2076,9 @@
   "For each site, choose what the person may do: a client who only follows the visits gets Statistics only and cannot change anything.": "Para cada sitio, elija lo que la persona puede hacer: un cliente que solo sigue las visitas recibe «Solo estadísticas» y no puede cambiar nada.",
   "For each site, what this person may do.": "Para cada sitio, lo que esta persona puede hacer.",
   "Your access to this site is limited to what the menu shows.": "Su acceso a este sitio se limita a lo que muestra el menú.",
-  "your account can write drafts only: an editor publishes": "su cuenta solo puede escribir borradores: un editor publica"
+  "your account can write drafts only: an editor publishes": "su cuenta solo puede escribir borradores: un editor publica",
+  "This page could not be shown": "No se pudo mostrar esta página",
+  "Mas was updated while this tab was open. Reload the page.": "Mas se actualizó mientras esta pestaña estaba abierta. Recargue la página.",
+  "An error occurred in the page. Reload it; if it comes back, send this message to your administrator:": "Se produjo un error en la página. Recárguela; si vuelve a aparecer, envíe este mensaje a su administrador:",
+  "Try again": "Reintentar"
 }

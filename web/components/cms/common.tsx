@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import { Badge } from "@/components/cms/ui/badge";
 import { Card, CardContent } from "@/components/cms/ui/card";
 import type { CmsActivity, CmsStatus, ReleaseStatus } from "@/lib/api";
@@ -63,7 +63,8 @@ const VERBS: Record<string, string> = {
 /** One line for the history: who did what, to what. */
 export function useDescribe() {
   const t = useT();
-  return (a: CmsActivity): string => {
+  // Stable between renders: SiteInbox reloads when it changes, so a new function each time loops forever.
+  return useCallback((a: CmsActivity): string => {
     const detail = (a.detail ?? "").replace(/ → [0-9a-f]{7,8}$/, "").replace(/ → supabase$/, "");
     if (a.action === "cms-status") {
       const [what, state] = detail.split(": ");
@@ -72,7 +73,7 @@ export function useDescribe() {
     }
     const verb = VERBS[a.action];
     return `${verb ? t(verb) : a.action}${detail ? ` ${detail}` : ""}`;
-  };
+  }, [t]);
 }
 
 export function formatDate(iso: string, lang: string, withTime = true): string {
