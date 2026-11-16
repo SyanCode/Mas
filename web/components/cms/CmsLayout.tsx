@@ -4,7 +4,7 @@ import { RobotPill } from "@/components/RobotPill";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Archive, ScanSearch,
+import { Archive, Eye, ScanSearch,
   Activity, BarChart3, Bell, Cookie, FileSignature, HeartPulse, Search, ShieldCheck, ExternalLink, FileText, Image as ImageIcon, LayoutDashboard, LogOut, Menu, Moon, Newspaper,
   Server, Settings as SettingsIcon, Sun, Users, X,
 } from "lucide-react";
@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/cms/ui/skeleton";
 import { SiteInbox } from "@/components/cms/Inbox";
 import { Palette } from "@/components/cms/Palette";
 import { Toaster } from "sonner";
-import { api, rememberSession, type CmsOverview, type CmsSite, type Session, type SitePerm } from "@/lib/api";
+import { api, rememberSession, stopViewAs, viewingAs, type CmsOverview, type CmsSite, type Session, type SitePerm } from "@/lib/api";
 import { LanguagePicker, useT } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -215,7 +215,10 @@ function Frame({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    api<Session>("/session").then((s) => { rememberSession(s); setSession(s); }).catch(() => { window.location.href = "/login/"; });
+    api<Session>("/session").then((s) => { rememberSession(s); setSession(s); }).catch(() => {
+      if (viewingAs()) stopViewAs();  // the account previewed is gone: back to the administrator's own view
+      else window.location.href = "/login/";
+    });
     api<CmsSite[]>("/cms/sites").then(setSites).catch(() => setSites([]));
   }, []);
 
@@ -250,6 +253,7 @@ function Frame({ children }: { children: ReactNode }) {
           </div>
         )}
         <div className="lg:pl-60">
+          {session.viewed_by && <ViewAsBanner name={session.username} />}
           <Topbar onMenu={() => setOpen(true)} onSearch={() => setPalette(true)} />
           <main className="mx-auto max-w-6xl px-5 py-10 sm:px-10">{children}</main>
         </div>
@@ -257,6 +261,18 @@ function Frame({ children }: { children: ReactNode }) {
         <Toaster position="bottom-right" richColors closeButton />
       </div>
     </CmsContext.Provider>
+  );
+}
+
+/** Shown while an administrator looks at the CMS through an editor's account. */
+function ViewAsBanner({ name }: { name: string }) {
+  const t = useT();
+  return (
+    <div className="flex flex-wrap items-center gap-3 bg-amber-400 px-5 py-2 text-[13px] text-amber-950 sm:px-8">
+      <Eye className="size-4 shrink-0" />
+      <span className="min-w-0 flex-1">{t("You see the CMS as {name} sees it. Read only: nothing can be changed from here.", { name })}</span>
+      <button type="button" onClick={stopViewAs} className="rounded-md bg-amber-950 px-3 py-1 text-xs font-medium text-amber-50 hover:bg-amber-900">{t("Back to my view")}</button>
+    </div>
   );
 }
 

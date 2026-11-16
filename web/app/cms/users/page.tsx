@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Copy, KeyRound, MoreHorizontal, Pencil, ShieldOff, Trash2, UserPlus } from "lucide-react";
+import { Copy, Eye, KeyRound, MoreHorizontal, Pencil, ShieldOff, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { CmsLayout, PageTitle, useCms } from "@/components/cms/CmsLayout";
 import { Avatar } from "@/components/cms/ui/avatar";
@@ -16,7 +16,7 @@ import { Input } from "@/components/cms/ui/input";
 import { Label } from "@/components/cms/ui/label";
 import { Skeleton } from "@/components/cms/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/cms/ui/table";
-import { api, type ApiError, type CmsUser } from "@/lib/api";
+import { api, startViewAs, type ApiError, type CmsUser } from "@/lib/api";
 import { SitePermsPicker, usePermSummary, type SiteAccess } from "@/components/SitePermsPicker";
 import { useT } from "@/lib/i18n";
 
@@ -67,6 +67,7 @@ function People() {
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-8" aria-label={t("Actions")}><MoreHorizontal /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        {(u.role === "editor" || u.role === "author") && <DropdownMenuItem onSelect={() => startViewAs(u)}><Eye />{t("View as this person")}</DropdownMenuItem>}
                         <DropdownMenuItem onSelect={() => setAccess({ user: u, access: u.access ?? {} })}><UserPlus />{t("Manage sites")}</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => act(async () => { await api(`/users/${u.id}/role`, { method: "PUT", body: { role: u.role === "author" ? "editor" : "author" } }); toast.success(t("Role changed.")); })}><Pencil />{u.role === "author" ? t("Let them publish (editor)") : t("Drafts only (author)")}</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => act(async () => { const r = await api<{ password: string }>(`/users/${u.id}/password`, { method: "POST" }); setSecret({ username: u.username, password: r.password }); })}><KeyRound />{t("Reset password")}</DropdownMenuItem>

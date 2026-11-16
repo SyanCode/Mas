@@ -82,6 +82,7 @@ export interface Session {
   bio?: string | null;
   has_avatar?: boolean;
   avatar_v?: number;
+  viewed_by?: string | null;  // "view as": the administrator previewing this account
 }
 
 // -- CMS ------------------------------------------------------------------------
@@ -505,6 +506,21 @@ export class ApiError extends Error {
 
 let csrf: string | null = null;
 
+/** "View as": this tab shows the CMS as an editor sees it (the server answers with their rights, read only). */
+const VIEW_AS_KEY = "mas-view-as";
+export function viewingAs(): { id: number; name: string } | null {
+  if (typeof window === "undefined") return null;
+  try { return JSON.parse(sessionStorage.getItem(VIEW_AS_KEY) ?? "null"); } catch { return null; }
+}
+export function startViewAs(user: { id: number; username: string }) {
+  try { sessionStorage.setItem(VIEW_AS_KEY, JSON.stringify({ id: user.id, name: user.username })); } catch {}
+  window.location.href = "/cms/";
+}
+export function stopViewAs() {
+  try { sessionStorage.removeItem(VIEW_AS_KEY); } catch {}
+  window.location.href = "/cms/users/";
+}
+
 export function rememberSession(s: Session) {
   csrf = s.csrf;
 }
@@ -514,6 +530,8 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET" && csrf) headers["X-CSRF-Token"] = csrf;
+  const as = viewingAs();
+  if (as) headers["X-Mas-View-As"] = String(as.id);
 
   const res = await fetch(`/api${path}`, {
     method,
@@ -538,6 +556,8 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 export async function uploadFile<T>(path: string, file: Blob): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json", "Content-Type": file.type || "application/octet-stream" };
   if (csrf) headers["X-CSRF-Token"] = csrf;
+  const as = viewingAs();
+  if (as) headers["X-Mas-View-As"] = String(as.id);  // refused by the server: a preview changes nothing
   const res = await fetch(`/api${path}`, { method: "POST", headers, body: file, credentials: "same-origin", cache: "no-store" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, typeof data.detail === "string" ? data.detail : `HTTP ${res.status}`);

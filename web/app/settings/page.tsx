@@ -6,7 +6,7 @@ import { Avatar, myAvatarUrl, shrinkPicture, userAvatarUrl, shownName } from "@/
 import { Shell, useSession } from "@/components/Shell";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
-import { api, ApiError, timeAgo, type ApiToken, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
+import { api, ApiError, startViewAs, timeAgo, type ApiToken, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { AiAccountsList } from "@/components/AiAccounts";
 import { SitePermsPicker, usePermSummary, type SiteAccess } from "@/components/SitePermsPicker";
@@ -657,6 +657,7 @@ function PeopleCard() {
                 <span className="text-xs text-zinc-500">{t("since {when}", { when: timeAgo(u.created_at) })}</span>
                 <div className="ml-auto flex flex-wrap gap-1">
                   <Button onClick={() => { setEditing(editing === u.id ? null : u.id); setPicked(u.access ?? {}); }}>{t("Sites")}</Button>
+                  <Button variant="ghost" onClick={() => startViewAs(u)}>{t("View as this person")}</Button>
                   <Button variant="ghost" disabled={!!busy} onClick={() => reset(u)}>{busy === `reset-${u.id}` ? <Spinner /> : null}{t("Reset password")}</Button>
                   {u.totp_enabled && (
                     <Button variant="ghost" disabled={!!busy} onClick={() => run(`totp-${u.id}`, async () => { await api(`/users/${u.id}/totp/reset`, { method: "POST" }); })}>{t("Reset 2FA")}</Button>

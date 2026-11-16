@@ -126,3 +126,34 @@ def test_letting_an_author_publish_adds_publish_where_they_write(env):
                headers=admin)
     r = client.put(f"/api/users/{made['id']}/role", json={"role": "editor"}, headers=admin)
     assert r.json()["access"] == {"site": ["content", "publish"], "other": ["stats"]}
+
+
+def test_an_administrator_sees_the_cms_as_an_editor_and_changes_nothing(env):
+    client, db, gh = env
+    admin = {"x-csrf-token": login(client)}
+    token = invite(client, admin, {"site": ["stats"]})
+    signup(client, token)
+    uid = db.get_user("client")["id"]
+    client.cookies.clear()
+    admin = {"x-csrf-token": login(client)}
+    as_client = {**admin, "x-mas-view-as": str(uid)}
+
+    s = client.get("/api/session", headers=as_client).json()
+    assert s["username"] == "client" and s["role"] == "editor" and s["viewed_by"] == "admin"
+    assert [(x["id"], x["perms"]) for x in client.get("/api/cms/sites", headers=as_client).json()] == [("site", ["stats"])]
+    assert client.get(f"{BASE}/stats", headers=as_client).status_code == 200
+    assert client.get(BASE, headers=as_client).status_code == 403          # exactly what the client gets
+    assert client.get("/api/users", headers=as_client).status_code == 403  # not an administrator in there
+    # read only, even where the administrator could write
+    r = client.put(f"{BASE}/goals", json={"paths": []}, headers=as_client)
+    assert r.status_code == 403 and "read only" in r.json()["detail"]
+    assert client.post("/api/logout", headers=as_client).status_code == 403
+    # only editors can be looked through, and only by an administrator's own session
+    assert client.get("/api/session", headers={**admin, "x-mas-view-as": "1"}).status_code == 404
+    assert client.get("/api/session", headers={**admin, "x-mas-view-as": "x"}).status_code == 404
+    assert client.get("/api/session", headers=admin).json()["viewed_by"] is None
+    h = {"x-csrf-token": login(client, "client", PW)}
+    assert client.get("/api/cms/sites", headers={**h, "x-mas-view-as": str(uid)}).status_code == 403
+    client.cookies.clear()
+    bearer = make_token(db, db.get_user("admin")["id"], "write")
+    assert client.get("/api/session", headers={**bearer, "x-mas-view-as": str(uid)}).json()["username"] != "client"

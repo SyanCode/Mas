@@ -2080,5 +2080,8 @@
   "This page could not be shown": "No se pudo mostrar esta página",
   "Mas was updated while this tab was open. Reload the page.": "Mas se actualizó mientras esta pestaña estaba abierta. Recargue la página.",
   "An error occurred in the page. Reload it; if it comes back, send this message to your administrator:": "Se produjo un error en la página. Recárguela; si vuelve a aparecer, envíe este mensaje a su administrador:",
-  "Try again": "Reintentar"
+  "Try again": "Reintentar",
+  "View as this person": "Ver como esta persona",
+  "You see the CMS as {name} sees it. Read only: nothing can be changed from here.": "Ve el CMS como lo ve {name}. Solo lectura: no se puede cambiar nada desde aquí.",
+  "Back to my view": "Volver a mi vista"
 }

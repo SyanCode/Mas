@@ -541,6 +541,11 @@ In **Apps → New app**, a repository with a valid `mas.cms.json` shows a **Mas 
    server checks each route against them; the menu only shows what is allowed. The app page has
    the same switch in its **CMS** card, which also checks the schema (and, for Supabase
    collections, creates the table).
+
+   **View as this person** (CMS → Users, or Settings → People) opens the CMS in that tab as the
+   editor sees it: the server answers with their account and permissions, and refuses every change
+   (read only). Only an administrator's own session can do it, never an API token; a banner brings
+   you back to your view.
 2. The client signs in to the same dashboard and only sees **My sites** and **Account** (password,
    2FA). Every other API route answers `403` for an editor.
 

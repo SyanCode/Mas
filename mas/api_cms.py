@@ -532,7 +532,8 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     def cookies_log_csv(app_id: str, s=Depends(any_session)) -> Response:
         """The proof of consent, as a file to keep or hand to a regulator."""
         site(s, app_id, "privacy")
-        db.audit(s.username, "cms-consent-export", True, service_id=app_id)
+        actor = f"{s.viewed_by} (as {s.username})" if getattr(s, "viewed_by", None) else s.username
+        db.audit(actor, "cms-consent-export", True, service_id=app_id)
         return Response(cookies_mod.log_csv(db, app_id), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="consent-log-{app_id}.csv"'})
 

@@ -52,7 +52,7 @@ from mas.stack_backups import StackBackups
 from mas.stacks import StackManager
 from mas.supabase import SupabaseManager
 from mas.config import Config, load_config
-from mas.db import VIEWER_ROLE, Database
+from mas.db import EDITOR_ROLES, VIEWER_ROLE, Database
 from mas.host import Host
 from mas.logs import get_logs
 from mas.models import Service, ServiceType
@@ -62,6 +62,7 @@ log = logging.getLogger(__name__)
 
 COOKIE = "mas_session"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+VIEW_AS_HEADER = "x-mas-view-as"  # id of the editor an administrator previews the CMS as (read only)
 IDLE_AFTER = 180   # seconds without a dashboard request: the dashboard is closed
 IDLE_SCAN = 300    # full scan interval meanwhile
 TRUSTED_PROXIES = {"127.0.0.1", "::1"}
@@ -161,6 +162,7 @@ class SessionInfo:
     role: str = "admin"
     scope: str | None = None  # API token: read | write | create; None for a dashboard session
     token_id: int | None = None
+    viewed_by: str | None = None  # "view as": the administrator looking through this account (read only)
 
 
 def default_web_dir(config: Config) -> Path | None:
@@ -501,7 +503,27 @@ def create_app(
             sent = request.headers.get("x-csrf-token", "")
             if not hmac.compare_digest(sent, session.csrf):
                 raise HTTPException(403, "invalid CSRF token")
+        if request.headers.get(VIEW_AS_HEADER):
+            return view_as(request, session)
         return session
+
+    def view_as(request: Request, admin: SessionInfo) -> SessionInfo:
+        """An administrator sees the CMS exactly as an editor does: that account's rights, and nothing can change.
+
+        Only from a dashboard session of an administrator (never an API token), only for editor accounts,
+        and only for reading: the server answers every request with the editor's permissions."""
+        if admin.role != "admin":
+            raise HTTPException(403, "only administrators can view the dashboard as someone else")
+        if request.method not in SAFE_METHODS:
+            raise HTTPException(403, "preview as another person: read only")
+        try:
+            target = db.get_user_by_id(int(request.headers[VIEW_AS_HEADER]))
+        except ValueError:
+            target = None
+        if target is None or target["role"] not in EDITOR_ROLES:
+            raise HTTPException(404, "unknown editor")
+        return SessionInfo(admin.token_hash, target["id"], target["username"], admin.csrf, bool(target["totp_secret"]),
+                           target["role"], viewed_by=admin.username)
 
     def token_session(request: Request, token: str) -> SessionInfo:
         """Personal API token (scripts, MCP agents). No cookie, so no CSRF to check."""
@@ -543,7 +565,7 @@ def create_app(
     def session_payload(s: SessionInfo) -> dict:
         user = db.get_user_by_id(s.user_id)
         return {"username": s.username, "csrf": s.csrf, "totp_enabled": s.totp_enabled, "role": s.role,
-                "version": __version__, **(profile_payload(user) if user else {})}
+                "version": __version__, "viewed_by": s.viewed_by, **(profile_payload(user) if user else {})}
 
     def avatar_response(user_id: int) -> Response:
         found = db.get_avatar(user_id)
