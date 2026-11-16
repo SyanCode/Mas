@@ -239,11 +239,16 @@ export interface CmsMedia {
   supabase: boolean;
 }
 
+/** What an account may do on one site of the CMS ("publish" brings "content"). */
+export type SitePerm = "content" | "publish" | "stats" | "seo" | "privacy";
+export const SITE_PERMS: SitePerm[] = ["content", "publish", "stats", "seo", "privacy"];
+
 export interface CmsSite {
   id: string;
   name: string;
   domain: string | null;
   url: string | null;
+  perms: SitePerm[];
   last_release: { id: number; status: ReleaseStatus; trigger: string; message: string | null; created_at: string; finished_at: string | null } | null;
 }
 
@@ -254,6 +259,7 @@ export interface CmsUser {
   totp_enabled: boolean;
   created_at: string;
   apps: string[];
+  access?: Record<string, SitePerm[]>;
   display_name?: string | null;
   nickname?: string | null;
   has_avatar?: boolean;

@@ -623,7 +623,9 @@ def create_app(
                 raise HTTPException(403, "this invitation link was already used or has expired")
         role = invite["role"] if invite else "editor"
         user_id = db.create_user(username, auth.hash_password(body.password), role=role)
-        if invite:
+        if invite and invite.get("access") is not None:  # permissions chosen site by site
+            db.set_user_access(user_id, {a: p for a, p in invite["access"].items() if db.get_app(a)})
+        elif invite:
             db.set_user_apps(user_id, [a for a in invite["apps"] if db.get_app(a)])
         db.audit(username, "signup", True,
                  detail=f"from {ip}" + (f", invited by {invite['created_by']}" if invite else ""))

@@ -56,7 +56,7 @@ function Editor() {
   const params = useSearchParams();
   const cid = params.get("c") ?? "";
   const slug = params.get("slug");
-  const { site, session, reloadOverview } = useCms();
+  const { site, reloadOverview } = useCms();
   const publisher = usePublisher(site);
   const [collection, setCollection] = useState<CmsCollection | null>(null);
   const [original, setOriginal] = useState<Values | null>(null);
@@ -143,7 +143,7 @@ function Editor() {
   const busy = publisher.busy;
   const drafts = !!collection?.drafts;
   const mainLabel = !drafts ? t("Publish") : status === "draft" ? t("Save draft") : status === "scheduled" ? t("Schedule") : origStatus === "published" && slug ? t("Update") : t("Publish");
-  const author = session.role === "author";
+  const author = !site.perms?.includes("publish");  // drafts only on this site
   const locked = author && (!drafts || (slug !== null && origStatus !== "draft"));  // an author never touches what is online
   const scheduleInvalid = status === "scheduled" && (!when || new Date(when).getTime() <= Date.now());
 

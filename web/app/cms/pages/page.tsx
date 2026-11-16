@@ -67,7 +67,7 @@ function PageEditor() {
           <div className="sticky bottom-4 z-10 mt-4 flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3 shadow-md">
             <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={100} placeholder={t("What did you change? (optional)")} className="min-w-[12rem] flex-1" />
             {dirty && <Button type="button" variant="ghost" onClick={() => setValues(page.values)}>{t("Discard")}</Button>}
-            <Button disabled={!dirty || publisher.busy}>{publisher.busy && <Loader2 className="animate-spin" />}{t("Publish")}</Button>
+            <Button disabled={!dirty || publisher.busy || !site.perms?.includes("publish")} title={site.perms?.includes("publish") ? undefined : t("your account can write drafts only: an editor publishes")}>{publisher.busy && <Loader2 className="animate-spin" />}{t("Publish")}</Button>
           </div>
         </form>
       )}

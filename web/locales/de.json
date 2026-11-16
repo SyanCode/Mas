@@ -2060,5 +2060,21 @@
   "not enough free disk space": "Nicht genügend freier Speicherplatz.",
   "unknown share": "Unbekannte Freigabe.",
   "this share already has its file": "Diese Freigabe hat bereits ihre Datei.",
-  "more bytes than announced": "Mehr Bytes als angekündigt."
+  "more bytes than announced": "Mehr Bytes als angekündigt.",
+  "Visits, top pages, countries and availability": "Besuche, meistbesuchte Seiten, Länder und Verfügbarkeit",
+  "Read pages and entries, write drafts, add media": "Seiten und Einträge lesen, Entwürfe schreiben, Medien hinzufügen",
+  "Put changes online, delete, undo": "Änderungen veröffentlichen, löschen, rückgängig machen",
+  "The SEO look at the site": "Die SEO-Analyse der Website",
+  "Privacy": "Datenschutz",
+  "Compliance, legal pages and cookie banner": "Konformität, Rechtsseiten und Cookie-Banner",
+  "Statistics only": "Nur Statistiken",
+  "Full access": "Vollzugriff",
+  "Drafts only": "Nur Entwürfe",
+  "Access to {name}": "Zugriff auf {name}",
+  "No access": "Kein Zugriff",
+  "Custom": "Benutzerdefiniert",
+  "For each site, choose what the person may do: a client who only follows the visits gets Statistics only and cannot change anything.": "Wählen Sie für jede Website, was die Person darf: Ein Kunde, der nur die Besuche verfolgt, erhält „Nur Statistiken“ und kann nichts ändern.",
+  "For each site, what this person may do.": "Für jede Website, was diese Person darf.",
+  "Your access to this site is limited to what the menu shows.": "Ihr Zugriff auf diese Website beschränkt sich auf das, was das Menü zeigt.",
+  "your account can write drafts only: an editor publishes": "Ihr Konto kann nur Entwürfe schreiben: ein Redakteur veröffentlicht"
 }

@@ -2064,5 +2064,21 @@
   "not enough free disk space": "Pas assez d'espace disque libre.",
   "unknown share": "Partage inconnu.",
   "this share already has its file": "Ce partage a déjà son fichier.",
-  "more bytes than announced": "Plus d'octets que annoncé."
+  "more bytes than announced": "Plus d'octets que annoncé.",
+  "Visits, top pages, countries and availability": "Visites, pages les plus vues, pays et disponibilité",
+  "Read pages and entries, write drafts, add media": "Lire les pages et les entrées, écrire des brouillons, ajouter des médias",
+  "Put changes online, delete, undo": "Mettre en ligne, supprimer, annuler",
+  "The SEO look at the site": "L'analyse SEO du site",
+  "Privacy": "Confidentialité",
+  "Compliance, legal pages and cookie banner": "Conformité, pages légales et bandeau cookies",
+  "Statistics only": "Statistiques seulement",
+  "Full access": "Accès complet",
+  "Drafts only": "Brouillons seulement",
+  "Access to {name}": "Accès à {name}",
+  "No access": "Aucun accès",
+  "Custom": "Personnalisé",
+  "For each site, choose what the person may do: a client who only follows the visits gets Statistics only and cannot change anything.": "Pour chaque site, choisissez ce que la personne peut faire : un client qui suit seulement les visites reçoit « Statistiques seulement » et ne peut rien modifier.",
+  "For each site, what this person may do.": "Pour chaque site, ce que cette personne peut faire.",
+  "Your access to this site is limited to what the menu shows.": "Votre accès à ce site se limite à ce que montre le menu.",
+  "your account can write drafts only: an editor publishes": "votre compte ne peut écrire que des brouillons : un éditeur publie"
 }

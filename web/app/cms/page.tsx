@@ -86,7 +86,9 @@ function Dashboard() {
         <Card>
           <CardHeader><CardTitle>{t("At a glance")}</CardTitle><CardDescription>{site?.name}</CardDescription></CardHeader>
           <CardContent className="space-y-4">
-            {!overview ? <Skeleton className="h-32" /> : overview.collections.length === 0 ? (
+            {site && !site.perms?.includes("content") ? (
+              <p className="text-sm text-muted-foreground">{t("Your access to this site is limited to what the menu shows.")}</p>
+            ) : !overview ? <Skeleton className="h-32" /> : overview.collections.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t("This site only has pages.")}</p>
             ) : overview.collections.map((c) => (
               <div key={c.id} className="space-y-2">

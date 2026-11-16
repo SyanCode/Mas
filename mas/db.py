@@ -347,6 +347,8 @@ MIGRATIONS = [
     ("apps", "resources TEXT"),    # JSON {memory_mb, sleep_after_min, autoscale: {min, max}} (mas.resources)
     ("apps", "project TEXT"),      # id of the project (mas.projects) the app belongs to
     ("invites", "role TEXT NOT NULL DEFAULT 'editor'"),
+    ("app_access", "perms TEXT"),   # JSON list of SITE_PERMS; NULL: what the role gives (ROLE_PERMS)
+    ("invites", "access TEXT"),     # JSON {app_id: [perm]}: permissions per site chosen for this invitation
     ("advisor_suggestions", "run_id INTEGER"),          # autopilot: the robot run that applies it
     ("advisor_suggestions", "attempts INTEGER NOT NULL DEFAULT 0"),
     ("advisor_suggestions", "result TEXT"),             # the robot's report, or why it failed
@@ -364,7 +366,10 @@ MIGRATIONS = [
 ROLES = ("admin", "editor", "author", "viewer")  # author: writes drafts, an editor or an administrator publishes
 EDITOR_ROLES = ("editor", "author")
 VIEWER_ROLE = "viewer"  # the whole dashboard, read only: no change, no secret
-MANAGED_ROLES = EDITOR_ROLES + (VIEWER_ROLE,)  # accounts an administrator creates from the dashboard
+MANAGED_ROLES = EDITOR_ROLES + (VIEWER_ROLE,)
+# What an account may do on one site of the CMS. "publish" needs "content"; an author never publishes.
+SITE_PERMS = ("content", "publish", "stats", "seo", "privacy")
+ROLE_PERMS = {"editor": SITE_PERMS, "author": ("content", "stats", "seo", "privacy")}  # accounts an administrator creates from the dashboard
 API_TOKEN_SCOPES = ("read", "write", "create")  # create: write + new apps (allowed repositories)
 FOLDER_COLORS = ("zinc", "red", "orange", "amber", "emerald", "teal", "sky", "indigo", "violet", "pink")
 FOLDER_KINDS = ("app", "service")
@@ -528,31 +533,86 @@ class Database:
 
     # -- CMS access ------------------------------------------------------
 
+    @staticmethod
+    def clean_perms(perms) -> list[str] | None:
+        """Known permissions in a fixed order (publish brings content); None stays None (role default)."""
+        if perms is None:
+            return None
+        got = set(perms)
+        if "publish" in got:
+            got.add("content")
+        return [p for p in SITE_PERMS if p in got]
+
+    @staticmethod
+    def effective_perms(role: str, perms: list[str] | None) -> list[str]:
+        if role == "admin":
+            return list(SITE_PERMS)
+        base = list(ROLE_PERMS.get(role, ())) if perms is None else perms
+        return [p for p in base if p in ROLE_PERMS.get(role, ())]  # an author cannot publish, whatever was stored
+
     def user_apps(self, user_id: int) -> list[str]:
         with self.tx() as c:
             return [r[0] for r in c.execute("SELECT app_id FROM app_access WHERE user_id = ? ORDER BY app_id",
                                             (user_id,))]
+
+    def user_access(self, user_id: int) -> dict[str, list[str]]:
+        """{app_id: effective permissions} of one account."""
+        with self.tx() as c:
+            user = c.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+            rows = c.execute("SELECT app_id, perms FROM app_access WHERE user_id = ? ORDER BY app_id",
+                             (user_id,)).fetchall()
+        role = user["role"] if user else ""
+        return {r["app_id"]: self.effective_perms(role, None if r["perms"] is None else json.loads(r["perms"]))
+                for r in rows}
 
     def app_editors(self, app_id: str) -> list[int]:
         with self.tx() as c:
             return [r[0] for r in c.execute("SELECT user_id FROM app_access WHERE app_id = ?", (app_id,))]
 
     def set_user_apps(self, user_id: int, app_ids: list[str]) -> None:
+        """Sites of an account; a site it already had keeps its permissions, a new one gets the role's."""
+        with self.tx() as c:
+            keep = {r["app_id"]: r["perms"] for r in c.execute(
+                "SELECT app_id, perms FROM app_access WHERE user_id = ?", (user_id,))}
+            c.execute("DELETE FROM app_access WHERE user_id = ?", (user_id,))
+            c.executemany("INSERT INTO app_access (user_id, app_id, created_at, perms) VALUES (?, ?, ?, ?)",
+                          [(user_id, a, _now(), keep.get(a)) for a in set(app_ids)])
+
+    def set_user_access(self, user_id: int, access: dict[str, list[str] | None]) -> None:
+        """Sites of an account with the permissions on each (None: the role's); a site with none is removed."""
         with self.tx() as c:
             c.execute("DELETE FROM app_access WHERE user_id = ?", (user_id,))
-            c.executemany("INSERT INTO app_access VALUES (?, ?, ?)", [(user_id, a, _now()) for a in set(app_ids)])
+            rows = []
+            for app_id, perms in access.items():
+                perms = self.clean_perms(perms)
+                if perms == []:
+                    continue
+                rows.append((user_id, app_id, _now(), None if perms is None else json.dumps(perms)))
+            c.executemany("INSERT INTO app_access (user_id, app_id, created_at, perms) VALUES (?, ?, ?, ?)", rows)
 
     def set_app_editors(self, app_id: str, user_ids: list[int]) -> None:
+        """Who may open one site; those who already could keep their permissions."""
         with self.tx() as c:
-            c.execute("DELETE FROM app_access WHERE app_id = ?", (app_id,))
-            c.executemany("INSERT INTO app_access VALUES (?, ?, ?)", [(u, app_id, _now()) for u in set(user_ids)])
+            wanted = set(user_ids)
+            had = {r[0] for r in c.execute("SELECT user_id FROM app_access WHERE app_id = ?", (app_id,))}
+            for u in had - wanted:
+                c.execute("DELETE FROM app_access WHERE app_id = ? AND user_id = ?", (app_id, u))
+            c.executemany("INSERT INTO app_access (user_id, app_id, created_at) VALUES (?, ?, ?)",
+                          [(u, app_id, _now()) for u in wanted - had])
+
+    def site_perms(self, user_id: int, role: str, app_id: str) -> list[str] | None:
+        """What this account may do on this site, None when it cannot open it at all."""
+        if role == "admin":
+            return list(SITE_PERMS)
+        with self.tx() as c:
+            row = c.execute("SELECT perms FROM app_access WHERE user_id = ? AND app_id = ?",
+                            (user_id, app_id)).fetchone()
+        if row is None:
+            return None
+        return self.effective_perms(role, None if row["perms"] is None else json.loads(row["perms"]))
 
     def can_edit(self, user_id: int, role: str, app_id: str) -> bool:
-        if role == "admin":
-            return True
-        with self.tx() as c:
-            return c.execute("SELECT 1 FROM app_access WHERE user_id = ? AND app_id = ?",
-                             (user_id, app_id)).fetchone() is not None
+        return self.site_perms(user_id, role, app_id) is not None
 
     def set_user_role(self, user_id: int, role: str) -> None:
         if role not in MANAGED_ROLES:
@@ -567,26 +627,38 @@ class Database:
     # -- invites -----------------------------------------------------------
 
     def create_invite(self, token_hash: str, apps: list[str], note: str | None, created_by: str,
-                      expires_at: float, role: str = "editor") -> int:
+                      expires_at: float, role: str = "editor", access: dict[str, list[str]] | None = None) -> int:
         if role not in EDITOR_ROLES:
             raise ValueError(f"invalid role {role}")
+        if access is not None:
+            access = {a: self.clean_perms(p) for a, p in access.items()}
+            access = {a: p for a, p in access.items() if p}
+            apps = list(access)
         with self.tx() as c:
-            cur = c.execute("INSERT INTO invites (token_hash, apps, note, created_by, created_at, expires_at, role) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (token_hash, json.dumps(apps), note, created_by, _now(), expires_at, role))
+            cur = c.execute("INSERT INTO invites (token_hash, apps, note, created_by, created_at, expires_at, role, "
+                            "access) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            (token_hash, json.dumps(apps), note, created_by, _now(), expires_at, role,
+                             None if access is None else json.dumps(access)))
             return int(cur.lastrowid)
+
+    @staticmethod
+    def _invite(row) -> dict:
+        d = dict(row)
+        d["apps"] = json.loads(d["apps"])
+        d["access"] = json.loads(d["access"]) if d.get("access") else None
+        return d
 
     def pending_invites(self) -> list[dict]:
         with self.tx() as c:
             rows = c.execute("SELECT * FROM invites WHERE used_at IS NULL AND expires_at > ? ORDER BY id DESC",
                              (time.time(),)).fetchall()
-        return [{**dict(r), "apps": json.loads(r["apps"])} for r in rows]
+        return [self._invite(r) for r in rows]
 
     def valid_invite(self, token_hash: str) -> dict | None:
         with self.tx() as c:
             row = c.execute("SELECT * FROM invites WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
                             (token_hash, time.time())).fetchone()
-        return {**dict(row), "apps": json.loads(row["apps"])} if row else None
+        return self._invite(row) if row else None
 
     def consume_invite(self, token_hash: str, username: str) -> dict | None:
         """Mark the invite used, once: None if it was already used, revoked or expired."""

@@ -9,6 +9,7 @@ import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, 
 import { api, ApiError, timeAgo, type ApiToken, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { AiAccountsList } from "@/components/AiAccounts";
+import { SitePermsPicker, usePermSummary, type SiteAccess } from "@/components/SitePermsPicker";
 import Link from "next/link";
 
 function PasswordForm() {
@@ -490,14 +491,14 @@ function SignupSettings() {
   );
 }
 
-interface Invite { id: number; apps: string[]; note: string | null; created_by: string; created_at: string; expires_at: number }
+interface Invite { id: number; apps: string[]; access: SiteAccess | null; role: string; note: string | null; created_by: string; created_at: string; expires_at: number }
 
 function InviteLinks({ apps }: { apps: App[] }) {
   const t = useT();
+  const summary = usePermSummary();
   const [invites, setInvites] = useState<Invite[]>([]);
-  const [role, setRole] = useState("editor");
   const [creating, setCreating] = useState(false);
-  const [picked, setPicked] = useState<string[]>([]);
+  const [picked, setPicked] = useState<SiteAccess>({});
   const [note, setNote] = useState("");
   const [link, setLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -519,10 +520,10 @@ function InviteLinks({ apps }: { apps: App[] }) {
   }
 
   const create = () => run(async () => {
-    const r = await api<{ path: string }>("/invites", { method: "POST", body: { apps: picked, note, role } });
+    const r = await api<{ path: string }>("/invites", { method: "POST", body: { access: picked, note, role: "editor" } });
     setLink(`${window.location.origin}${r.path}`);
     setCreating(false);
-    setPicked([]);
+    setPicked({});
     setNote("");
   });
   const appName = (id: string) => apps.find((a) => a.id === id)?.name ?? id;
@@ -534,20 +535,11 @@ function InviteLinks({ apps }: { apps: App[] }) {
         {!creating && <Button onClick={() => { setCreating(true); setLink(null); }}>{t("New link")}</Button>}
       </div>
       <p className="text-xs text-zinc-500">{t("A link works once, for 7 days, even when sign-up is closed. The person picks a username and a password and lands directly on the sites you chose.")}</p>
+      <p className="text-xs text-zinc-500">{t("For each site, choose what the person may do: a client who only follows the visits gets Statistics only and cannot change anything.")}</p>
       {creating && (
         <div className="space-y-2">
           <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("For whom? (e.g. Acme bakery)")} maxLength={100} />
-          <Select value={role} onChange={(e) => setRole(e.target.value)} aria-label={t("Role")}>
-            <option value="editor">{t("Editor: writes and publishes")}</option>
-            <option value="author">{t("Author: writes drafts, an editor publishes")}</option>
-          </Select>
-          {apps.map((a) => (
-            <label key={a.id} className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={picked.includes(a.id)}
-                onChange={(e) => setPicked(e.target.checked ? [...picked, a.id] : picked.filter((p) => p !== a.id))} />
-              {a.name} <span className="text-xs text-zinc-500">{a.domain ?? a.repo}</span>
-            </label>
-          ))}
+          <SitePermsPicker sites={apps.map((a) => ({ id: a.id, name: a.name, domain: a.domain ?? a.repo }))} value={picked} onChange={setPicked} />
           <div className="flex gap-2">
             <Button variant="primary" disabled={busy} onClick={create}>{busy ? <Spinner /> : null}{t("Create the link")}</Button>
             <Button variant="ghost" onClick={() => setCreating(false)}>{t("Cancel")}</Button>
@@ -565,7 +557,9 @@ function InviteLinks({ apps }: { apps: App[] }) {
           {invites.map((i) => (
             <li key={i.id} className="flex flex-wrap items-center gap-2">
               <span>{i.note || t("Link #{id}", { id: i.id })}</span>
-              {i.apps.map((a) => <Badge key={a} tone="sky">{appName(a)}</Badge>)}
+              {i.access
+                ? Object.entries(i.access).map(([a, p]) => <Badge key={a} tone="sky">{appName(a)} · {summary(p)}</Badge>)
+                : i.apps.map((a) => <Badge key={a} tone="sky">{appName(a)}{i.role === "author" ? ` · ${t("Drafts only")}` : ""}</Badge>)}
               <span className="text-xs text-zinc-500">{t("expires {date}", { date: new Date(i.expires_at * 1000).toLocaleDateString() })}</span>
               <button className="ml-auto text-xs text-rose-500 hover:underline" disabled={busy}
                 onClick={() => run(async () => { await api(`/invites/${i.id}`, { method: "DELETE" }); })}>{t("Revoke")}</button>
@@ -586,7 +580,8 @@ function PeopleCard() {
   const [newRole, setNewRole] = useState("editor");
   const [secret, setSecret] = useState<{ username: string; password: string } | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
-  const [picked, setPicked] = useState<string[]>([]);
+  const [picked, setPicked] = useState<SiteAccess>({});
+  const summary = usePermSummary();
   const [removing, setRemoving] = useState<CmsUser | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -616,7 +611,7 @@ function PeopleCard() {
       const r = await api<CmsUser & { password: string }>("/users", { method: "POST", body: { username, role: newRole } });
       setSecret({ username: r.username, password: r.password });
       setUsername("");
-      if (newRole !== "viewer") { setEditing(r.id); setPicked([]); }
+      if (newRole !== "viewer") { setEditing(r.id); setPicked({}); }
     });
   };
   const reset = (u: CmsUser) => run(`reset-${u.id}`, async () => {
@@ -624,7 +619,8 @@ function PeopleCard() {
     setSecret({ username: u.username, password: r.password });
   });
   const saveApps = (u: CmsUser) => run(`apps-${u.id}`, async () => {
-    await api(`/users/${u.id}/apps`, { method: "PUT", body: { apps: picked } });
+    const access: SiteAccess = Object.fromEntries(Object.keys(u.access ?? {}).map((a) => [a, []]));
+    await api(`/users/${u.id}/access`, { method: "PUT", body: { access: { ...access, ...picked } } });
     setEditing(null);
   });
 
@@ -660,7 +656,7 @@ function PeopleCard() {
                 <Badge tone={u.totp_enabled ? "emerald" : "zinc"}>{u.totp_enabled ? "2FA" : t("no 2FA")}</Badge>
                 <span className="text-xs text-zinc-500">{t("since {when}", { when: timeAgo(u.created_at) })}</span>
                 <div className="ml-auto flex flex-wrap gap-1">
-                  <Button onClick={() => { setEditing(editing === u.id ? null : u.id); setPicked(u.apps); }}>{t("Sites")}</Button>
+                  <Button onClick={() => { setEditing(editing === u.id ? null : u.id); setPicked(u.access ?? {}); }}>{t("Sites")}</Button>
                   <Button variant="ghost" disabled={!!busy} onClick={() => reset(u)}>{busy === `reset-${u.id}` ? <Spinner /> : null}{t("Reset password")}</Button>
                   {u.totp_enabled && (
                     <Button variant="ghost" disabled={!!busy} onClick={() => run(`totp-${u.id}`, async () => { await api(`/users/${u.id}/totp/reset`, { method: "POST" }); })}>{t("Reset 2FA")}</Button>
@@ -670,19 +666,12 @@ function PeopleCard() {
               </div>
               {editing === u.id ? (
                 <div className="space-y-2 rounded-xl border border-zinc-200/80 p-3 dark:border-white/[0.06]">
-                  {linked.map((a) => (
-                    <label key={a.id} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={picked.includes(a.id)}
-                        onChange={(e) => setPicked(e.target.checked ? [...picked, a.id] : picked.filter((p) => p !== a.id))} />
-                      {a.name} <span className="text-xs text-zinc-500">{a.domain ?? a.repo}</span>
-                    </label>
-                  ))}
-                  {linked.length === 0 && <p className="text-sm text-zinc-500">{t("No app linked to GitHub yet.")}</p>}
+                  <SitePermsPicker sites={linked.map((a) => ({ id: a.id, name: a.name, domain: a.domain ?? a.repo }))} value={picked} onChange={setPicked} />
                   <Button variant="primary" disabled={!!busy} onClick={() => saveApps(u)}>{busy === `apps-${u.id}` ? <Spinner /> : null}{t("Save access")}</Button>
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-1">
-                  {u.apps.map((a) => <Badge key={a} tone="sky">{appName(a)}</Badge>)}
+                  {u.apps.map((a) => <Badge key={a} tone="sky">{appName(a)} · {summary(u.access?.[a] ?? [])}</Badge>)}
                   {u.apps.length === 0 && <span className="text-xs text-zinc-500">{t("No site yet.")}</span>}
                 </div>
               )}

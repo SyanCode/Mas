@@ -2060,5 +2060,21 @@
   "not enough free disk space": "No hay suficiente espacio libre en disco.",
   "unknown share": "Recurso compartido desconocido.",
   "this share already has its file": "Este recurso ya tiene su archivo.",
-  "more bytes than announced": "Más bytes de los anunciados."
+  "more bytes than announced": "Más bytes de los anunciados.",
+  "Visits, top pages, countries and availability": "Visitas, páginas más vistas, países y disponibilidad",
+  "Read pages and entries, write drafts, add media": "Leer páginas y entradas, escribir borradores, añadir medios",
+  "Put changes online, delete, undo": "Publicar cambios, eliminar, deshacer",
+  "The SEO look at the site": "El análisis SEO del sitio",
+  "Privacy": "Privacidad",
+  "Compliance, legal pages and cookie banner": "Cumplimiento, páginas legales y banner de cookies",
+  "Statistics only": "Solo estadísticas",
+  "Full access": "Acceso completo",
+  "Drafts only": "Solo borradores",
+  "Access to {name}": "Acceso a {name}",
+  "No access": "Sin acceso",
+  "Custom": "Personalizado",
+  "For each site, choose what the person may do: a client who only follows the visits gets Statistics only and cannot change anything.": "Para cada sitio, elija lo que la persona puede hacer: un cliente que solo sigue las visitas recibe «Solo estadísticas» y no puede cambiar nada.",
+  "For each site, what this person may do.": "Para cada sitio, lo que esta persona puede hacer.",
+  "Your access to this site is limited to what the menu shows.": "Su acceso a este sitio se limita a lo que muestra el menú.",
+  "your account can write drafts only: an editor publishes": "su cuenta solo puede escribir borradores: un editor publica"
 }

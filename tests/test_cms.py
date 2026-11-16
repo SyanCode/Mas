@@ -315,7 +315,9 @@ def test_admin_sees_schema_problems_and_permissions(env):
     r = client.put("/api/apps/site/cms/editors", json={"user_ids": [user["id"]]}, headers={"x-csrf-token": csrf})
     assert r.status_code == 200
     assert client.get("/api/apps/site/cms").json()["editors"] == [{"id": user["id"], "username": "client",
-                                                                  "allowed": True}]
+                                                                  "allowed": True,
+                                                                  "perms": ["content", "publish", "stats", "seo",
+                                                                            "privacy"]}]
     page = client.get("/api/cms/sites/site").json()["pages"][0]
     r = client.put("/api/cms/sites/site/pages/home", json={"values": {"title": "X"}, "sha": page["sha"]},
                    headers={"x-csrf-token": csrf})

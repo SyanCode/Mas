@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/cms/ui/skeleton";
 import { SiteInbox } from "@/components/cms/Inbox";
 import { Palette } from "@/components/cms/Palette";
 import { Toaster } from "sonner";
-import { api, rememberSession, type CmsOverview, type CmsSite, type Session } from "@/lib/api";
+import { api, rememberSession, type CmsOverview, type CmsSite, type Session, type SitePerm } from "@/lib/api";
 import { LanguagePicker, useT } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -68,6 +68,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   const here = (p: string) => pathname.startsWith(p);
   const collection = params.get("c");
   const page = params.get("p");
+  const may = (p: SitePerm) => !!site?.perms?.includes(p);
 
   return (
     <div className="flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) onNavigate(); }}>
@@ -99,14 +100,14 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
               </Group>
             )}
             <Group title={t("Site")}>
-              <NavLink href={`/cms/media/?${q}`} icon={ImageIcon} active={here("/cms/media")}>{t("Media")}</NavLink>
-              {site.domain && <NavLink href={`/cms/stats/?${q}`} icon={BarChart3} active={here("/cms/stats")}>{t("Statistics")}</NavLink>}
-              {site.domain && <NavLink href={`/cms/uptime/?${q}`} icon={HeartPulse} active={here("/cms/uptime")}>{t("Availability")}</NavLink>}
-              {site.domain && <NavLink href={`/cms/seo/?${q}`} icon={ScanSearch} active={here("/cms/seo")}>{t("Search engines")}</NavLink>}
-              <NavLink href={`/cms/compliance/?${q}`} icon={ShieldCheck} active={here("/cms/compliance")}>{t("Compliance")}</NavLink>
-              <NavLink href={`/cms/legal/?${q}`} icon={FileSignature} active={here("/cms/legal")}>{t("Legal pages")}</NavLink>
-              <NavLink href={`/cms/cookies/?${q}`} icon={Cookie} active={here("/cms/cookies")}>{t("Cookie banner")}</NavLink>
-              <NavLink href={`/cms/activity/?${q}`} icon={Activity} active={here("/cms/activity")}>{t("History")}</NavLink>
+              {may("content") && <NavLink href={`/cms/media/?${q}`} icon={ImageIcon} active={here("/cms/media")}>{t("Media")}</NavLink>}
+              {site.domain && may("stats") && <NavLink href={`/cms/stats/?${q}`} icon={BarChart3} active={here("/cms/stats")}>{t("Statistics")}</NavLink>}
+              {site.domain && may("stats") && <NavLink href={`/cms/uptime/?${q}`} icon={HeartPulse} active={here("/cms/uptime")}>{t("Availability")}</NavLink>}
+              {site.domain && may("seo") && <NavLink href={`/cms/seo/?${q}`} icon={ScanSearch} active={here("/cms/seo")}>{t("Search engines")}</NavLink>}
+              {may("privacy") && <NavLink href={`/cms/compliance/?${q}`} icon={ShieldCheck} active={here("/cms/compliance")}>{t("Compliance")}</NavLink>}
+              {may("privacy") && <NavLink href={`/cms/legal/?${q}`} icon={FileSignature} active={here("/cms/legal")}>{t("Legal pages")}</NavLink>}
+              {may("privacy") && <NavLink href={`/cms/cookies/?${q}`} icon={Cookie} active={here("/cms/cookies")}>{t("Cookie banner")}</NavLink>}
+              {may("content") && <NavLink href={`/cms/activity/?${q}`} icon={Activity} active={here("/cms/activity")}>{t("History")}</NavLink>}
             </Group>
           </>
         )}
@@ -172,7 +173,7 @@ function Topbar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
           <span className="flex items-center gap-2"><Search className="size-3.5" />{t("Search…")}</span><kbd className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium">⌘K</kbd>
         </button>
         <LanguagePicker className="hidden h-9 rounded-lg bg-card px-2.5 text-xs shadow-[0_0_0_1px_var(--border)] sm:block" />
-        {site && <SiteInbox site={site} />}
+        {site && site.perms?.includes("content") && <SiteInbox site={site} />}
         <Button variant="ghost" size="icon" aria-label={t("Theme")}
           onClick={() => { const next = !dark; setDark(next); setMode(next ? "dark" : "light"); }}>
           {dark ? <Sun /> : <Moon />}

@@ -533,8 +533,14 @@ In **Apps → New app**, a repository with a valid `mas.cms.json` shows a **Mas 
      limited to 5 per hour per address and written to the audit log.
    - **New editor**: you choose the username, Mas generates a password shown once.
 
-   **Sites** on each editor chooses which apps it may edit; the app page has the same switch in
-   its **CMS** card, which also checks the schema (and, for Supabase collections, creates the table).
+   **Permissions per site.** The invitation link, and **Sites** on each editor, set for every site
+   what the person may do: *Statistics only* (visits and availability, nothing can be changed:
+   for a client who just follows the figures), *Author* (drafts only), *Editor* (everything), or
+   one by one: `content` (read and write drafts, media), `publish` (put online, delete, undo;
+   brings `content`), `stats`, `seo`, `privacy` (compliance, legal pages, cookie banner). The
+   server checks each route against them; the menu only shows what is allowed. The app page has
+   the same switch in its **CMS** card, which also checks the schema (and, for Supabase
+   collections, creates the table).
 2. The client signs in to the same dashboard and only sees **My sites** and **Account** (password,
    2FA). Every other API route answers `403` for an editor.
 

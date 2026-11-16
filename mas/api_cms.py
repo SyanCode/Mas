@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from mas import auth, cms_backup, siterules as siterules_mod, preview as preview_mod, cookies as cookies_mod, legal as legal_mod, seo as seo_mod
 from mas.cms import MAX_UPLOAD_KB, CmsConflict, CmsError, CmsManager
-from mas.db import EDITOR_ROLES, MANAGED_ROLES, Database
+from mas.db import EDITOR_ROLES, MANAGED_ROLES, SITE_PERMS, Database
 from mas.geo import ATTRIBUTION, GeoError
 from mas.notify import EVENTS, NotifyError
 from mas.sitestats import SiteStats
@@ -39,6 +39,10 @@ class AppIds(BaseModel):
     apps: list[str] = Field(max_length=500)
 
 
+class AccessBody(BaseModel):
+    access: dict[str, list[str]] = Field(max_length=500)  # {app_id: permissions}; [] removes the site
+
+
 class UserIds(BaseModel):
     user_ids: list[int] = Field(max_length=500)
 
@@ -47,6 +51,7 @@ class InviteBody(BaseModel):
     role: str = Field(default="editor", max_length=10)
     apps: list[str] = Field(default_factory=list, max_length=500)
     note: str = Field(default="", max_length=100)  # who it is for, shown in the list
+    access: dict[str, list[str]] | None = Field(default=None, max_length=500)  # permissions per site, else role's
     days: int = Field(default=7, ge=1, le=30)
 
 
@@ -132,6 +137,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     def user_payload(u) -> dict:
         return {"id": u["id"], "username": u["username"], "role": u["role"], "totp_enabled": bool(u["totp_secret"]),
                 "created_at": u["created_at"], "apps": db.user_apps(u["id"]) if u["role"] in EDITOR_ROLES else [],
+                "access": db.user_access(u["id"]) if u["role"] in EDITOR_ROLES else {},
                 "display_name": u["display_name"], "nickname": u["nickname"], "has_avatar": bool(u["has_avatar"]),
                 "avatar_v": u["avatar_v"] or 0}
 
@@ -164,6 +170,9 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         if body.role not in MANAGED_ROLES:
             raise HTTPException(400, "role: editor, author or viewer")
         db.set_user_role(user_id, body.role)
+        if user["role"] == "author" and body.role == "editor":  # "let them publish": where they write, they publish
+            db.set_user_access(user_id, {a: (p + ["publish"]) if "content" in p else p
+                                         for a, p in db.user_access(user_id).items()})
         db.audit(s.username, "editor-role", True, detail=f"{user['username']}: {body.role}")
         return user_payload(db.get_user_by_id(user_id))
 
@@ -200,9 +209,34 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
         db.audit(s.username, "editor-access", True, detail=f"{user['username']}: {', '.join(body.apps) or 'none'}")
         return user_payload(db.get_user_by_id(user_id))
 
+    def checked_access(access: dict[str, list[str]]) -> dict[str, list[str]]:
+        unknown = [a for a in access if db.get_app(a) is None]
+        if unknown:
+            raise HTTPException(400, f"unknown apps: {', '.join(unknown)}")
+        bad = sorted({p for perms in access.values() for p in perms if p not in SITE_PERMS})
+        if bad:
+            raise HTTPException(400, f"unknown permissions: {', '.join(bad)} (known: {', '.join(SITE_PERMS)})")
+        return {a: db.clean_perms(p) for a, p in access.items()}
+
+    def access_text(access: dict[str, list[str]]) -> str:
+        return "; ".join(f"{a} ({', '.join(p) or 'none'})" for a, p in access.items()) or "none"
+
+    @app.put("/api/users/{user_id}/access")
+    def set_user_access(user_id: int, body: AccessBody, s=Depends(current_session)) -> dict:
+        """The sites of an editor and, on each, what it may do (an empty list removes the site)."""
+        user = editor(user_id)
+        if user["role"] not in EDITOR_ROLES:
+            raise HTTPException(400, "only editor accounts have sites")
+        access = checked_access(body.access)
+        if user["role"] == "author" and any("publish" in p for p in access.values()):
+            db.set_user_role(user_id, "editor")  # publishing somewhere: the per-site list now decides
+        db.set_user_access(user_id, access)
+        db.audit(s.username, "editor-access", True, detail=f"{user['username']}: {access_text(access)}"[:500])
+        return user_payload(db.get_user_by_id(user_id))
+
     @app.get("/api/invites")
     def list_invites(_=Depends(current_session)) -> list[dict]:
-        return [{k: i[k] for k in ("id", "apps", "note", "created_by", "created_at", "expires_at", "role")}
+        return [{k: i[k] for k in ("id", "apps", "note", "created_by", "created_at", "expires_at", "role", "access")}
                 for i in db.pending_invites()]
 
     @app.post("/api/invites")
@@ -212,12 +246,17 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             raise HTTPException(400, f"unknown apps: {', '.join(unknown)}")
         if body.role not in EDITOR_ROLES:
             raise HTTPException(400, "role: editor or author")
+        role = body.role
+        access = None
+        if body.access is not None:  # chosen site by site: the list decides, not the role
+            access = {a: p for a, p in checked_access(body.access).items() if p}
+            role = "editor"
         token = secrets.token_urlsafe(24)
         expires_at = time.time() + body.days * 86400
         invite_id = db.create_invite(auth.hash_token(token), body.apps, body.note.strip() or None, s.username,
-                                     expires_at, body.role)
-        db.audit(s.username, "invite-create", True,
-                 detail=f"#{invite_id} {body.note.strip()} → {', '.join(body.apps) or 'no site'}".strip())
+                                     expires_at, role, access)
+        what = access_text(access) if access is not None else ", ".join(body.apps) or "no site"
+        db.audit(s.username, "invite-create", True, detail=f"#{invite_id} {body.note.strip()} → {what}".strip()[:500])
         # URL fragments stay in the browser and are not sent in HTTP requests,
         # access logs, or Referer headers.
         return {"id": invite_id, "path": f"/signup/#invite={token}", "expires_at": expires_at}
@@ -235,7 +274,8 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
             raise HTTPException(404, f"unknown app {app_id}")
         check = await asyncio.to_thread(manager.check, app_id)
         allowed = set(db.app_editors(app_id))
-        editors = [{"id": u["id"], "username": u["username"], "allowed": u["id"] in allowed}
+        editors = [{"id": u["id"], "username": u["username"], "allowed": u["id"] in allowed,
+                    "perms": db.site_perms(u["id"], u["role"], app_id) or []}
                    for u in db.list_users() if u["role"] in EDITOR_ROLES]
         return {**check, "editors": editors}
 
@@ -285,20 +325,26 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     # -- editing (editors and administrators) ------------------------------
 
-    def publisher(s) -> None:
-        """Authors write drafts: whatever goes live, or changes how the site behaves, is for an editor."""
-        if s.role == "author":
-            raise HTTPException(403, "your account can write drafts only: an editor publishes")
-
-    def site(s, app_id: str) -> dict:
+    def site(s, app_id: str, *need: str) -> dict:
+        """The app if this account may open it and holds every permission in ``need``."""
         target = db.get_app(app_id)
-        if target is None or not db.can_edit(s.user_id, s.role, app_id):
+        perms = db.site_perms(s.user_id, s.role, app_id) if target is not None else None
+        if perms is None:
             raise HTTPException(404, "unknown site")  # same answer: no hint that the app exists
+        missing = [p for p in need if p not in perms]
+        if missing == ["publish"] and "content" in perms:
+            raise HTTPException(403, "your account can write drafts only: an editor publishes")
+        if missing:
+            raise HTTPException(403, f"your access to this site does not include: {', '.join(missing)}")
         return target
 
-    def site_payload(a: dict) -> dict:
+    def can(s, app_id: str, perm: str) -> bool:
+        return perm in (db.site_perms(s.user_id, s.role, app_id) or [])
+
+    def site_payload(a: dict, s=None) -> dict:
         last = (db.list_releases(a["id"], 1) or [None])[0]
-        return {"id": a["id"], "name": a["name"], "domain": a["domain"],
+        perms = list(SITE_PERMS) if s is None else db.site_perms(s.user_id, s.role, a["id"]) or []
+        return {"id": a["id"], "name": a["name"], "domain": a["domain"], "perms": perms,
                 "url": f"https://{a['domain']}" if a["domain"] else None,
                 "last_release": {k: last[k] for k in ("id", "status", "trigger", "message", "created_at",
                                                       "finished_at")} if last else None}
@@ -306,18 +352,18 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.get("/api/cms/sites")
     def sites(s=Depends(any_session)) -> list[dict]:
         apps = db.list_apps() if s.role == "admin" else [a for a in (db.get_app(i) for i in db.user_apps(s.user_id)) if a]
-        return [site_payload(a) for a in apps if a["repo"] and a["installation_id"]]
+        return [site_payload(a, s) for a in apps if a["repo"] and a["installation_id"]]
 
     @app.get("/api/cms/sites/{app_id}")
     async def load(app_id: str, s=Depends(any_session)) -> dict:
-        target = site(s, app_id)
+        target = site(s, app_id, "content")
         content = await asyncio.to_thread(call, manager.load, app_id)
-        return {**site_payload(target), **content}
+        return {**site_payload(target, s), **content}
 
     @app.get("/api/cms/sites/{app_id}/stats")
     async def site_stats(app_id: str, days: int = Query(30, ge=7, le=365), s=Depends(any_session)) -> dict:
         """Visits per day, from the nginx access logs of the site (totals only)."""
-        target = site(s, app_id)
+        target = site(s, app_id, "stats")
         if stats is None or not target["domain"]:
             return {"days": [], "totals": None, "top_pages": [], "countries": [], "geo": False, "since": None,
                     "tracked_since": None}
@@ -327,8 +373,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.put("/api/cms/sites/{app_id}/goals")
     def goals_config(app_id: str, body: dict, s=Depends(any_session)) -> dict:
         """Pages that count as a goal ("/merci", "/blog/*") and the steps of the funnel."""
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "stats", "publish")
 
         def clean(items, pattern) -> list[str]:
             items = items if isinstance(items, list) else []
@@ -356,12 +401,11 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/status")
     def status(app_id: str, s=Depends(any_session)) -> dict:
-        return site_payload(site(s, app_id))
+        return site_payload(site(s, app_id), s)
 
     @app.put("/api/cms/sites/{app_id}/pages/{page_id}")
     async def save(app_id: str, page_id: str, body: SaveBody, s=Depends(any_session)) -> dict:
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "content", "publish")
         try:
             result = await asyncio.to_thread(call, manager.save, app_id, page_id, body.values, body.sha,
                                              s.user_id, s.username, body.note)
@@ -376,8 +420,8 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     async def save_entry(s, app_id: str, cid: str, slug: str | None, values: dict, sha: str | None, note: str,
                          new_slug: str | None = None, status: str | None = None,
                          publish_at: str | None = None) -> dict:
-        site(s, app_id)
-        if s.role == "author":  # drafts only, and only drafts
+        site(s, app_id, "content")
+        if not can(s, app_id, "publish"):  # drafts only, and only drafts
             if status != "draft":
                 raise HTTPException(403, "your account can write drafts only: an editor publishes")
             if slug and (await asyncio.to_thread(call, manager.load_entry, app_id, cid, slug)).get("status") != "draft":
@@ -396,7 +440,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}")
     async def load_entry(app_id: str, cid: str, slug: str, s=Depends(any_session)) -> dict:
-        site(s, app_id)
+        site(s, app_id, "content")
         return await asyncio.to_thread(call, manager.load_entry, app_id, cid, slug)
 
     @app.post("/api/cms/sites/{app_id}/collections/{cid}/entries")
@@ -412,8 +456,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.post("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}/status")
     async def entry_status(app_id: str, cid: str, slug: str, body: StatusBody, s=Depends(any_session)) -> dict:
         """Publish, unpublish or schedule an entry from the list, without opening it."""
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "content", "publish")
         try:
             result = await asyncio.to_thread(call, manager.set_status, app_id, cid, slug, body.status,
                                              body.publish_at, s.username)
@@ -434,15 +477,18 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     async def dashboard(s=Depends(any_session)) -> dict:
         """One card per site: visits of the last 7 days, last deployment, scheduled entries."""
         apps = visible_apps(s)
-        scheduled = db.cms_scheduled([a["id"] for a in apps])
+        perms = {a["id"]: db.site_perms(s.user_id, s.role, a["id"]) or [] for a in apps}
+        scheduled = db.cms_scheduled([a["id"] for a in apps if "content" in perms[a["id"]]])
 
-        def one(a: dict) -> dict:
-            report = stats.report(a, 7) if stats is not None and a["domain"] else None
-            last = compliance.latest(a["id"]) if compliance is not None else None
-            return {**site_payload(a), "visits": report, "scheduled": [r for r in scheduled if r["app_id"] == a["id"]],
+        def one(a: dict) -> dict:  # each figure only where the account has the matching permission
+            p = perms[a["id"]]
+            report = stats.report(a, 7) if stats is not None and a["domain"] and "stats" in p else None
+            last = compliance.latest(a["id"]) if compliance is not None and "privacy" in p else None
+            return {**site_payload(a, s), "visits": report,
+                    "scheduled": [r for r in scheduled if r["app_id"] == a["id"]],
                     "compliance": {"score": last["score"], "verdict": last["verdict"], "at": last["at"]} if last else None}
         sites_ = await asyncio.gather(*(asyncio.to_thread(one, a) for a in apps))
-        names = {a["id"]: a["name"] for a in apps}
+        names = {a["id"]: a["name"] for a in apps if "content" in perms[a["id"]]}
         activity = [dict(r) | {"site": names.get(r["service_id"])} for r in db.cms_activity(list(names), 12)]
         totals = {k: sum((x["visits"] or {}).get("totals", {}).get(k, 0) for x in sites_ if x["visits"])
                   for k in ("pageviews", "visitors", "requests")}
@@ -464,7 +510,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.get("/api/cms/activity")
     def activity(app_id: str | None = Query(None, max_length=100), limit: int = Query(100, ge=1, le=500),
                  s=Depends(any_session)) -> list[dict]:
-        apps = visible_apps(s)
+        apps = [a for a in visible_apps(s) if can(s, a["id"], "content")]  # the history tells what changed
         ids = [a["id"] for a in apps if app_id in (None, a["id"])]
         names = {a["id"]: a["name"] for a in apps}
         rows = db.cms_activity(ids, limit)
@@ -476,7 +522,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/cookies")
     def cookies_get(app_id: str, s=Depends(any_session)) -> dict:
-        site(s, app_id)
+        site(s, app_id, "privacy")
         return {"config": cookies_mod.load(db, app_id), "stats": cookies_mod.report(db, app_id),
                 "log": [{"at": r["at"], "consent_id": r["consent_id"], "decision": r["decision"],
                          "categories": json.loads(r["categories"] or "{}"), "banner": r["banner"]}
@@ -485,21 +531,20 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.get("/api/cms/sites/{app_id}/cookies/log.csv")
     def cookies_log_csv(app_id: str, s=Depends(any_session)) -> Response:
         """The proof of consent, as a file to keep or hand to a regulator."""
-        site(s, app_id)
+        site(s, app_id, "privacy")
         db.audit(s.username, "cms-consent-export", True, service_id=app_id)
         return Response(cookies_mod.log_csv(db, app_id), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="consent-log-{app_id}.csv"'})
 
     @app.get("/api/cms/sites/{app_id}/cookies/versions")
     def cookies_versions(app_id: str, s=Depends(any_session)) -> list[dict]:
-        site(s, app_id)
+        site(s, app_id, "privacy")
         return [{"version": v["version"], "first_seen": v["first_seen"], "config": json.loads(v["config"])}
                 for v in db.consent_versions(app_id)]
 
     @app.put("/api/cms/sites/{app_id}/cookies")
     def cookies_put(app_id: str, body: dict, s=Depends(any_session)) -> dict:
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "privacy", "publish")
         try:
             config = cookies_mod.save(db, app_id, body)
         except ValueError as exc:
@@ -509,7 +554,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/compliance")
     def compliance_get(app_id: str, s=Depends(any_session)) -> dict:
-        target = site(s, app_id)
+        target = site(s, app_id, "privacy")
         if compliance is None:
             raise HTTPException(404, "audits are not available")
         return {"latest": compliance.latest(app_id), "history": compliance.history(app_id),
@@ -517,8 +562,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.post("/api/cms/sites/{app_id}/compliance/run")
     async def compliance_run(app_id: str, s=Depends(any_session)) -> dict:
-        publisher(s)
-        target = site(s, app_id)
+        target = site(s, app_id, "privacy", "publish")
         if compliance is None or not target["domain"]:
             raise HTTPException(400, "the site needs a domain to be audited")
         last = compliance.latest(app_id)
@@ -544,13 +588,12 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/legal")
     def legal_get(app_id: str, lang: str = Query("fr", max_length=2), s=Depends(any_session)) -> dict:
-        site(s, app_id)
+        site(s, app_id, "privacy")
         return legal_payload(app_id, lang)
 
     @app.put("/api/cms/sites/{app_id}/legal")
     def legal_put(app_id: str, body: dict, lang: str = Query("fr", max_length=2), s=Depends(any_session)) -> dict:
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "privacy", "publish")
         try:
             legal_mod.save(db, app_id, body)
         except ValueError as exc:
@@ -561,8 +604,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.post("/api/cms/sites/{app_id}/legal/publish")
     async def legal_publish(app_id: str, body: dict, s=Depends(any_session)) -> dict:
         """Write the three pages as Markdown files in a folder of the repository."""
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "privacy", "content", "publish")
         lang = str(body.get("lang", "fr"))
         docs = legal_payload(app_id, lang)["documents"]
         files = {d["filename"]: d["markdown"] for d in docs}
@@ -573,14 +615,13 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/changes")
     def changes(app_id: str, s=Depends(any_session)) -> list[dict]:
-        site(s, app_id)
+        site(s, app_id, "content")
         return manager.changes(app_id)
 
     @app.post("/api/cms/sites/{app_id}/changes/{change_id}/revert")
     async def revert(app_id: str, change_id: int, s=Depends(any_session)) -> dict:
         """Undo a change with a new commit (the history keeps both)."""
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "content", "publish")
         try:
             result = await asyncio.to_thread(call, manager.revert, app_id, change_id, s.username)
         except HTTPException as exc:
@@ -591,7 +632,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/uptime")
     async def uptime_get(app_id: str, days: int = Query(30, ge=1, le=35), s=Depends(any_session)) -> dict:
-        site(s, app_id)
+        site(s, app_id, "stats")
         return await asyncio.to_thread(uptime.report, app_id, days)
 
     @app.put("/api/cms/sites/{app_id}/uptime")
@@ -757,10 +798,10 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/seo")
     async def seo_get(app_id: str, s=Depends(any_session)) -> dict:
-        target = site(s, app_id)
+        target = site(s, app_id, "seo")
         last = json.loads(db.get_setting(f"seo_audit:{app_id}") or "null")
         state = await asyncio.to_thread(call, rules.state, app_id) if rules else None
-        if state is not None and s.role == "author":
+        if state is not None and not can(s, app_id, "publish"):
             state = {k: v for k, v in state.items() if k != "redirects"}
         collections = []
         try:
@@ -820,7 +861,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.post("/api/cms/sites/{app_id}/seo/audit")
     async def seo_audit(app_id: str, s=Depends(any_session)) -> dict:
-        target = site(s, app_id)
+        target = site(s, app_id, "seo")
         if not target["domain"]:
             raise HTTPException(400, "give the site a domain first")
         key = f"seo_audit:{app_id}"
@@ -838,7 +879,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.post("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}/preview")
     async def preview_link(app_id: str, cid: str, slug: str, body: PreviewBody, s=Depends(any_session)) -> dict:
         """A link that shows this entry, draft included, to someone without an account."""
-        site(s, app_id)
+        site(s, app_id, "content")
         await asyncio.to_thread(call, manager.load_entry, app_id, cid, slug)  # it exists, and the schema knows it
         token, expires = preview_mod.make(db, app_id, cid, slug, body.days)
         db.audit(s.username, "cms-preview", True, service_id=app_id, detail=f"{cid}/{slug} {body.days} d")
@@ -854,23 +895,24 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.get("/api/cms/sites/{app_id}/search")
     async def search(app_id: str, q: str = Query(max_length=100), s=Depends(any_session)) -> list[dict]:
         """Full-text search in the pages and entries of one site (the command palette)."""
-        site(s, app_id)
+        site(s, app_id, "content")
         return await asyncio.to_thread(call, manager.search, app_id, q)
 
     @app.get("/api/cms/sites/{app_id}/overview")
     async def overview(app_id: str, s=Depends(any_session)) -> dict:
-        site(s, app_id)
+        if not can(s, site(s, app_id)["id"], "content"):
+            return {"pages": [], "collections": []}  # nothing to edit: the menu shows the other pages only
         return await asyncio.to_thread(call, manager.overview, app_id)
 
     @app.get("/api/cms/sites/{app_id}/media")
     async def media(app_id: str, s=Depends(any_session)) -> dict:
-        site(s, app_id)
+        site(s, app_id, "content")
         return await asyncio.to_thread(call, manager.media, app_id)
 
     @app.post("/api/cms/sites/{app_id}/media")
     async def media_add(app_id: str, request: Request, folder: str = Query(max_length=300),
                         name: str = Query("image", max_length=200), s=Depends(any_session)) -> dict:
-        site(s, app_id)
+        site(s, app_id, "content")
         limit = MAX_UPLOAD_KB * 1024
         data = bytearray()
         async for chunk in request.stream():
@@ -883,8 +925,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.post("/api/cms/sites/{app_id}/media/delete")
     async def media_delete(app_id: str, body: MediaRef, s=Depends(any_session)) -> dict:
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "content", "publish")
         result = await asyncio.to_thread(call, manager.delete_media, app_id, body.value, s.username)
         db.audit(s.username, "cms-media", True, service_id=app_id, detail=f"delete {body.value.rsplit('/', 1)[-1]}")
         return result
@@ -892,8 +933,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.delete("/api/cms/sites/{app_id}/collections/{cid}/entries/{slug}")
     async def delete_entry(app_id: str, cid: str, slug: str, sha: str = Query(max_length=64),
                            s=Depends(any_session)) -> dict:
-        publisher(s)
-        site(s, app_id)
+        site(s, app_id, "content", "publish")
         try:
             result = await asyncio.to_thread(call, manager.delete_entry, app_id, cid, slug, sha, s.username)
         except HTTPException as exc:
@@ -906,7 +946,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.post("/api/cms/sites/{app_id}/uploads")
     async def upload(app_id: str, request: Request, name: str = Query("image", max_length=200),
                      s=Depends(any_session)) -> dict:
-        site(s, app_id)
+        site(s, app_id, "content")
         limit = MAX_UPLOAD_KB * 1024
         if int(request.headers.get("content-length") or 0) > limit:
             raise HTTPException(413, f"image larger than {MAX_UPLOAD_KB // 1024} MB")
@@ -920,6 +960,6 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     @app.get("/api/cms/sites/{app_id}/image")
     async def image(app_id: str, src: str = Query(max_length=500), s=Depends(any_session)) -> Response:
-        site(s, app_id)
+        site(s, app_id, "content")
         data, mime = await asyncio.to_thread(call, manager.read_image, app_id, src)
         return Response(data, media_type=mime, headers={"Content-Security-Policy": "default-src 'none'"})

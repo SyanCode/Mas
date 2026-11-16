@@ -15,9 +15,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/cms/ui/input";
 import { Label } from "@/components/cms/ui/label";
 import { Skeleton } from "@/components/cms/ui/skeleton";
-import { Switch } from "@/components/cms/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/cms/ui/table";
 import { api, type ApiError, type CmsUser } from "@/lib/api";
+import { SitePermsPicker, usePermSummary, type SiteAccess } from "@/components/SitePermsPicker";
 import { useT } from "@/lib/i18n";
 
 function People() {
@@ -29,7 +29,8 @@ function People() {
   const [username, setUsername] = useState("");
   const [role, setRole] = useState("editor");
   const [secret, setSecret] = useState<{ username: string; password: string } | null>(null);
-  const [access, setAccess] = useState<{ user: CmsUser; apps: string[] } | null>(null);
+  const [access, setAccess] = useState<{ user: CmsUser; access: SiteAccess } | null>(null);
+  const summary = usePermSummary();
   const [removing, setRemoving] = useState<CmsUser | null>(null);
 
   const load = useCallback(() => {
@@ -59,14 +60,14 @@ function People() {
               <TableRow key={u.id}>
                 <TableCell><span className="flex items-center gap-2.5"><Avatar name={u.username} /><span className="font-medium">{u.username}</span></span></TableCell>
                 <TableCell><Badge variant={u.role === "admin" ? "default" : "secondary"}>{u.role === "admin" ? t("Administrator") : u.role === "author" ? t("Author") : t("Editor")}</Badge></TableCell>
-                <TableCell>{u.role === "admin" ? <span className="text-muted-foreground">{t("All sites")}</span> : u.apps.length === 0 ? <span className="text-muted-foreground">{t("None")}</span> : <span className="flex flex-wrap gap-1">{u.apps.map((a) => <Badge key={a} variant="outline">{siteName(a)}</Badge>)}</span>}</TableCell>
+                <TableCell>{u.role === "admin" ? <span className="text-muted-foreground">{t("All sites")}</span> : u.apps.length === 0 ? <span className="text-muted-foreground">{t("None")}</span> : <span className="flex flex-wrap gap-1">{u.apps.map((a) => <Badge key={a} variant="outline">{siteName(a)} · {summary(u.access?.[a] ?? [])}</Badge>)}</span>}</TableCell>
                 <TableCell>{u.totp_enabled ? <Badge variant="success">{t("On")}</Badge> : <Badge variant="outline">{t("Off")}</Badge>}</TableCell>
                 <TableCell>
                   {u.role !== "admin" && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-8" aria-label={t("Actions")}><MoreHorizontal /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => setAccess({ user: u, apps: u.apps })}><UserPlus />{t("Manage sites")}</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setAccess({ user: u, access: u.access ?? {} })}><UserPlus />{t("Manage sites")}</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => act(async () => { await api(`/users/${u.id}/role`, { method: "PUT", body: { role: u.role === "author" ? "editor" : "author" } }); toast.success(t("Role changed.")); })}><Pencil />{u.role === "author" ? t("Let them publish (editor)") : t("Drafts only (author)")}</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => act(async () => { const r = await api<{ password: string }>(`/users/${u.id}/password`, { method: "POST" }); setSecret({ username: u.username, password: r.password }); })}><KeyRound />{t("Reset password")}</DropdownMenuItem>
                         {u.totp_enabled && <DropdownMenuItem onSelect={() => act(async () => { await api(`/users/${u.id}/totp/reset`, { method: "POST" }); toast.success(t("2FA reset.")); })}><ShieldOff />{t("Reset 2FA")}</DropdownMenuItem>}
@@ -108,17 +109,11 @@ function People() {
         <DialogContent>
           {access && (
             <>
-              <DialogHeader><DialogTitle>{t("Sites of {name}", { name: access.user.username })}</DialogTitle><DialogDescription>{t("The sites this editor can change.")}</DialogDescription></DialogHeader>
-              <div className="space-y-3">
-                {sites.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between gap-3">
-                    <Label htmlFor={`a-${s.id}`}>{s.name}<span className="ml-2 text-xs font-normal text-muted-foreground">{s.domain}</span></Label>
-                    <Switch id={`a-${s.id}`} checked={access.apps.includes(s.id)}
-                      onCheckedChange={(on) => setAccess({ ...access, apps: on ? [...access.apps, s.id] : access.apps.filter((a) => a !== s.id) })} />
-                  </div>
-                ))}
+              <DialogHeader><DialogTitle>{t("Sites of {name}", { name: access.user.username })}</DialogTitle><DialogDescription>{t("For each site, what this person may do.")}</DialogDescription></DialogHeader>
+              <div className="max-h-[60vh] overflow-y-auto">
+                <SitePermsPicker sites={sites} value={access.access} onChange={(next) => setAccess({ ...access, access: next })} />
               </div>
-              <DialogFooter><Button onClick={() => act(async () => { await api(`/users/${access.user.id}/apps`, { method: "PUT", body: { apps: access.apps } }); setAccess(null); toast.success(t("Saved.")); })}>{t("Save")}</Button></DialogFooter>
+              <DialogFooter><Button onClick={() => act(async () => { await api(`/users/${access.user.id}/access`, { method: "PUT", body: { access: access.access } }); setAccess(null); toast.success(t("Saved.")); })}>{t("Save")}</Button></DialogFooter>
             </>
           )}
         </DialogContent>
