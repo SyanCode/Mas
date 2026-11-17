@@ -546,8 +546,11 @@ In **Apps → New app**, a repository with a valid `mas.cms.json` shows a **Mas 
    editor sees it: the server answers with their account and permissions, and refuses every change
    (read only). Only an administrator's own session can do it, never an API token; a banner brings
    you back to your view.
-2. The client signs in to the same dashboard and only sees **My sites** and **Account** (password,
-   2FA). Every other API route answers `403` for an editor.
+2. The client signs in to the same address and lands straight in the CMS, whatever their permissions
+   (editor, drafts only, statistics only…): any server page they open (`/`, `/apps/`, the desktop
+   view) sends them back to it, and **Account** (profile, password, 2FA) is a CMS page. Every other
+   API route answers `403` for an editor. An administrator reaches both: **Server dashboard** in the
+   CMS, **CMS** in the server menu.
 
 What keeps the site safe: the schema is always read from the repository (never from the browser);
 only the declared fields of the declared files (or tables) are written, and keys the schema does not

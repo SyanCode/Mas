@@ -123,7 +123,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
       <div className="border-t border-sidebar-border p-3">
         {session.role === "admin"
           ? <NavLink href="/" icon={Server} active={false}>{t("Server dashboard")}</NavLink>
-          : <NavLink href="/settings/" icon={SettingsIcon} active={false}>{t("Account")}</NavLink>}
+          : <NavLink href="/cms/account/" icon={SettingsIcon} active={here("/cms/account")}>{t("Account")}</NavLink>}
       </div>
       {sites.length === 0 && null}
     </div>
@@ -188,7 +188,8 @@ function Topbar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
               <div className="text-xs font-normal text-muted-foreground">{session.nickname && session.display_name ? `${session.nickname} · ` : ""}@{session.username} · {session.role === "admin" ? t("Administrator") : t("Editor")}</div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild><Link href="/settings/"><SettingsIcon />{t("Account")}</Link></DropdownMenuItem>
+            <DropdownMenuItem asChild><Link href={session.role === "admin" ? "/settings/" : "/cms/account/"}><SettingsIcon />{t("Account")}</Link></DropdownMenuItem>
+            {session.role === "admin" && <DropdownMenuItem asChild><Link href="/"><Server />{t("Server dashboard")}</Link></DropdownMenuItem>}
             <DropdownMenuItem onSelect={logout} destructive><LogOut />{t("Log out")}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

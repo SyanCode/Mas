@@ -278,3 +278,39 @@ def test_advisor_apply_everything_button(live):
     page.get_by_role("button", name="Done").click()
     page.get_by_text("Alt texts added.").wait_for()
     assert not errors, errors
+
+
+def test_cms_accounts_land_in_the_cms_and_administrators_reach_both(live):
+    ctx, base, db, gh = live
+    browser = ctx.browser
+    uid = db.create_user("statsonly", auth.hash_password(PASSWORD), role="editor")
+    db.set_user_access(uid, {"site": ["stats"]})
+    editor = browser.new_context(viewport={"width": 1400, "height": 900}, locale="en-US")
+    editor.add_init_script("localStorage.setItem('mas-lang', 'en')")
+    try:
+        page = editor.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(base + "/login/?next=%2Fapps%2F")
+        page.get_by_placeholder("Username").fill("statsonly")
+        page.get_by_placeholder("Password").fill(PASSWORD)
+        page.keyboard.press("Enter")
+        page.wait_for_url("**/cms/")  # straight to the CMS, not the server page asked for
+        page.get_by_role("link", name="Statistics").first.wait_for()
+        assert page.get_by_role("link", name="Server dashboard").count() == 0
+        for path, lands in (("/", "/cms/"), ("/apps/", "/cms/"), ("/desktop/", "/cms/"), ("/settings/", "/cms/account/")):
+            page.goto(base + path)
+            page.wait_for_url(f"**{lands}")
+        page.get_by_role("heading", name="Your account").wait_for()  # the account page, inside the CMS
+        page.get_by_placeholder("Current password").wait_for()
+        assert not errors, errors
+    finally:
+        editor.close()
+
+    page, errors = open_page(live, "/cms/?app=site")  # the administrator: the CMS and the server, both ways
+    page.get_by_role("link", name="Server dashboard").click()
+    page.wait_for_url(base + "/")
+    page.get_by_role("link", name="CMS").first.click()
+    page.wait_for_url("**/cms/**")
+    page.get_by_role("heading", name="Dashboard").wait_for()
+    assert not errors, errors

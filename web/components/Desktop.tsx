@@ -420,7 +420,11 @@ export function DesktopRoot() {
   const [session, setSession] = useState<Session | null>(null);
   useEffect(() => {
     setUiMode("desktop");
-    api<Session>("/session").then((s) => { rememberSession(s); setSession(s); }).catch(() => {});
+    api<Session>("/session").then((s) => {
+      // The desktop is the server's: a CMS account goes to its CMS.
+      if (s.role !== "admin" && s.role !== "viewer") return window.location.replace("/cms/");
+      rememberSession(s); setSession(s);
+    }).catch(() => {});
   }, []);
   if (!session) return <div className="flex min-h-screen items-center justify-center"><Backdrop /><Logo className="h-10 w-10 animate-pulse" /></div>;
   return <Desktop session={session} />;

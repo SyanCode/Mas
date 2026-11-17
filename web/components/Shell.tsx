@@ -16,6 +16,14 @@ import { LanguagePicker, msg, useT } from "@/lib/i18n";
 
 const SessionContext = createContext<Session | null>(null);
 export const useSession = () => useContext(SessionContext);
+/** For pages outside the Shell (the CMS) that reuse cards reading the session. */
+export const SessionProvider = SessionContext.Provider;
+
+/** Where a CMS account (editor, author, statistics only…) lands for a server page: its CMS, or its account there. */
+export function cmsPathFor(path: string): string {
+  if (path.startsWith("/cms")) return path;
+  return path.startsWith("/settings") ? "/cms/account/" : "/cms/";
+}
 
 export function Logo({ className = "h-6 w-6" }: { className?: string }) {
   return (
@@ -62,7 +70,7 @@ const EDITOR_NAV: NavEntry[] = [
   { href: "/cms/", label: msg("My sites"), icon: Newspaper, match: (p) => p.startsWith("/cms") },
   { href: "/settings/", label: msg("Account"), icon: Settings, match: (p) => p.startsWith("/settings") },
 ];
-const EDITOR_PATHS = ["/cms", "/settings"];
+const EDITOR_PATHS = ["/cms"];  // CMS accounts never see the server dashboard, their account included
 
 function UserMenu({ session }: { session: Session }) {
   const t = useT();
@@ -153,7 +161,7 @@ export function Shell({ children }: { children: ReactNode }) {
   }, [drawer]);
 
   useEffect(() => {
-    if (editor && !EDITOR_PATHS.some((p) => pathname.startsWith(p))) router.replace("/cms/");
+    if (editor && !EDITOR_PATHS.some((p) => pathname.startsWith(p))) router.replace(cmsPathFor(pathname));
   }, [editor, pathname, router]);
 
   useEffect(() => {  // Alt+Shift+D: switch to the desktop view

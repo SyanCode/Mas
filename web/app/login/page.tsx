@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
-import { Backdrop, Logo } from "@/components/Shell";
+import { Backdrop, Logo, cmsPathFor } from "@/components/Shell";
 import { Button, ErrorText, Input, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { LanguagePicker, msg, useT } from "@/lib/i18n";
@@ -41,7 +41,7 @@ export default function LoginPage() {
     try {
       const s = await api<{ role: string }>("/login", { method: "POST", body: { username, password, otp: needOtp ? otp : undefined } });
       const next = safeNext();
-      window.location.href = s.role !== "admin" && s.role !== "viewer" && !/^\/(cms|settings)/.test(next) ? "/cms/" : next;
+      window.location.href = s.role !== "admin" && s.role !== "viewer" ? cmsPathFor(next) : next;  // CMS accounts go straight to the CMS
     } catch (err) {
       const detail = (err as ApiError).detail;
       if (detail === "otp_required") {
