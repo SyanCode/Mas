@@ -8,6 +8,8 @@ export interface SparkChartProps {
   color?: string;
   height?: number;
   formatValue?: (value: number) => string;
+  /** One label per point (e.g. its day), shown above the value while scrubbing. */
+  labels?: string[];
   onValueChange?: (value: number, index: number) => void;
   onActiveChange?: (active: boolean) => void;
   className?: string;
@@ -17,9 +19,10 @@ export interface SparkChartProps {
 
 const VW = 400;
 const LABEL_H = 26;
+const LABEL_H_TWO_LINES = 42; // room for the point's label above its value
 const PAD_B = 4;
 
-function buildPath(data: number[], h: number): string {
+function buildPath(data: number[], h: number, labelH = LABEL_H): string {
   const n = data.length;
   if (n < 2) return "";
 
@@ -29,7 +32,7 @@ function buildPath(data: number[], h: number): string {
 
   const pts = data.map((v, i) => ({
     x: (i / (n - 1)) * VW,
-    y: LABEL_H + (1 - (v - min) / range) * (h - LABEL_H - PAD_B),
+    y: labelH + (1 - (v - min) / range) * (h - labelH - PAD_B),
   }));
 
   const t = 0.4;
@@ -90,6 +93,7 @@ export function SparkChart({
   color = "hsl(217, 91%, 60%)",
   height = 160,
   formatValue,
+  labels,
   onValueChange,
   onActiveChange,
   className,
@@ -102,10 +106,13 @@ export function SparkChart({
   const lineRef = useRef<HTMLDivElement>(null);
   const revealRef = useRef<SVGGElement>(null);
   const labelRef = useRef<HTMLSpanElement>(null);
+  const valueRef = useRef<HTMLSpanElement>(null);
+  const dayRef = useRef<HTMLSpanElement>(null);
+  const labelH = labels ? LABEL_H_TWO_LINES : LABEL_H;
 
   const [active, setActive] = useState(false);
 
-  const pathD = useMemo(() => buildPath(data, height), [data, height]);
+  const pathD = useMemo(() => buildPath(data, height, labelH), [data, height, labelH]);
   const fillD = useMemo(
     () => (pathD ? `${pathD} L ${VW} ${height} L 0 ${height} Z` : ""),
     [pathD, height],
@@ -136,12 +143,14 @@ export function SparkChart({
       }
       if (labelRef.current && formatValue) {
         labelRef.current.style.left = `${pct * 100}%`;
-        labelRef.current.textContent = formatValue(value);
+        // The value of the nearest day, not one interpolated between two days (31.837 visitors).
+        if (valueRef.current) valueRef.current.textContent = formatValue(data[index] ?? value);
+        if (dayRef.current) dayRef.current.textContent = labels?.[index] ?? "";
       }
 
       onValueChange?.(value, index);
     },
-    [data, height, formatValue, onValueChange],
+    [data, height, formatValue, labels, onValueChange],
   );
 
   const handleEnter = useCallback(
@@ -234,13 +243,16 @@ export function SparkChart({
         <span
           ref={labelRef}
           className={cn(
-            "pointer-events-none absolute top-0 -translate-x-1/2",
+            "pointer-events-none absolute top-0 flex -translate-x-1/2 flex-col items-center whitespace-nowrap",
             "rounded-md bg-muted px-2 py-0.5",
             "text-[13px] font-medium tabular-nums text-foreground",
             "transition-opacity duration-100",
             active ? "opacity-100" : "opacity-0",
           )}
-        />
+        >
+          {labels && <span ref={dayRef} className="text-[11px] font-normal leading-tight text-muted-foreground" />}
+          <span ref={valueRef} className="leading-tight" />
+        </span>
       )}
 
       {/* Scrub line */}

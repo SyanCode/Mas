@@ -6,7 +6,7 @@ import { CalendarClock, Eye, FilePlus2, Globe, Users } from "lucide-react";
 import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout";
 import { TrafficChart } from "@/components/cms/TrafficChart";
 import { CountryList, WorldMap } from "@/components/cms/WorldMap";
-import { DeployBadge, StatCard, formatDate, parseUtc, useDescribe } from "@/components/cms/common";
+import { DeployBadge, StatCard, dayLabels, formatDate, parseUtc, useDescribe } from "@/components/cms/common";
 import { Avatar } from "@/components/cms/ui/avatar";
 import { Badge } from "@/components/cms/ui/badge";
 import { Button } from "@/components/cms/ui/button";
@@ -65,8 +65,8 @@ function Dashboard() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {!data ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28" />) : (
           <>
-            <StatCard label={t("Page views · 7 days")} numeric={hasTraffic && view ? view.totals.pageviews : undefined} value="—" icon={<Eye />} trend={hasTraffic && view ? view.days.map((d) => d.pageviews) : undefined} hint={hasTraffic ? label : t("No traffic data yet")} />
-            <StatCard label={t("Visitors · 7 days")} numeric={hasTraffic && view ? view.totals.visitors : undefined} value="—" icon={<Users />} trend={hasTraffic && view ? view.days.map((d) => d.visitors) : undefined} trendColor={GOOD} hint={hasTraffic ? label : undefined} />
+            <StatCard label={t("Page views · 7 days")} numeric={hasTraffic && view ? view.totals.pageviews : undefined} value="—" icon={<Eye />} trend={hasTraffic && view ? view.days.map((d) => d.pageviews) : undefined} trendLabels={hasTraffic && view ? dayLabels(view.days, lang) : undefined} hint={hasTraffic ? label : t("No traffic data yet")} />
+            <StatCard label={t("Visitors · 7 days")} numeric={hasTraffic && view ? view.totals.visitors : undefined} value="—" icon={<Users />} trend={hasTraffic && view ? view.days.map((d) => d.visitors) : undefined} trendLabels={hasTraffic && view ? dayLabels(view.days, lang) : undefined} trendColor={GOOD} hint={hasTraffic ? label : undefined} />
             <StatCard label={t("Sites")} numeric={data.sites.length} icon={<Globe />} />
             <StatCard label={t("Scheduled")} numeric={view?.scheduled ?? data.scheduled} icon={<CalendarClock />} hint={session.role === "admin" && data.editors != null ? t("{n} editor(s)", { n: data.editors }) : undefined} />
           </>

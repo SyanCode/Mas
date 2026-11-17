@@ -7,8 +7,13 @@ import type { CmsActivity, CmsStatus, ReleaseStatus } from "@/lib/api";
 import { RollingNumber, Trend } from "@/components/cms/premium";
 import { msg, useI18n, useT } from "@/lib/i18n";
 
-export function StatCard({ label, value, numeric, format, trend, trendColor, trendFormat, hint, icon }: {
-  label: string; value?: ReactNode; numeric?: number; format?: (n: number) => string; trend?: number[]; trendColor?: string;
+/** "Mon 17 Nov" for each "2026-11-17": the day shown above a value of a trend. */
+export function dayLabels(days: { day: string }[], lang: string): string[] {
+  return days.map((d) => new Date(`${d.day}T12:00:00`).toLocaleDateString(lang, { weekday: "short", day: "numeric", month: "short" }));
+}
+
+export function StatCard({ label, value, numeric, format, trend, trendLabels, trendColor, trendFormat, hint, icon }: {
+  label: string; value?: ReactNode; numeric?: number; format?: (n: number) => string; trend?: number[]; trendLabels?: string[]; trendColor?: string;
   trendFormat?: (n: number) => string; hint?: ReactNode; icon: ReactNode;
 }) {
   const { lang } = useI18n();
@@ -24,7 +29,7 @@ export function StatCard({ label, value, numeric, format, trend, trendColor, tre
           </div>
           <div className="text-muted-foreground/70 transition-colors group-hover:text-brand [&_svg]:size-[18px]">{icon}</div>
         </div>
-        {trend && trend.length > 1 ? <Trend data={trend} color={trendColor} format={trendFormat ?? fmt} className="-mx-6 mt-3" /> : <div className="pb-6" />}
+        {trend && trend.length > 1 ? <Trend data={trend} labels={trendLabels} color={trendColor} format={trendFormat ?? fmt} className="-mx-6 mt-3" /> : <div className="pb-6" />}
       </CardContent>
     </Card>
   );

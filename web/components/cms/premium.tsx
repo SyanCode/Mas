@@ -37,11 +37,11 @@ export function RollingNumber({ value, format }: { value: number; format: (n: nu
 }
 
 /** Sparkline with a scrub label: data, optional colour and a formatter for the value under the cursor. */
-export function Trend({ data, color = BRAND, height = 72, format, className }: {
-  data: number[]; color?: string; height?: number; format?: (n: number) => string; className?: string;
+export function Trend({ data, labels, color = BRAND, height = 72, format, className }: {
+  data: number[]; labels?: string[]; color?: string; height?: number; format?: (n: number) => string; className?: string;
 }) {
   if (data.length < 2) return null;
-  return <SparkChart data={data} color={color} height={height} formatValue={format} className={className} />;
+  return <SparkChart data={data} labels={labels} color={color} height={labels ? height + 16 : height} formatValue={format} className={className} />;
 }
 
 /** Pill tabs that follow the pointer (Ruixen MagneticTabs). Uncontrolled: `value` is the first selection. */

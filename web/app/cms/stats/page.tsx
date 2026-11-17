@@ -6,7 +6,7 @@ import { Copy, Eye, Globe, Loader2, MapPinned, MousePointerClick, Smartphone, Ta
 import { toast } from "sonner";
 import { Badge } from "@/components/cms/ui/badge";
 import { CmsLayout, NoSite, PageTitle, useCms } from "@/components/cms/CmsLayout";
-import { StatCard } from "@/components/cms/common";
+import { StatCard, dayLabels } from "@/components/cms/common";
 import { TrafficChart } from "@/components/cms/TrafficChart";
 import { CountryList, WorldMap } from "@/components/cms/WorldMap";
 import { Button } from "@/components/cms/ui/button";
@@ -109,6 +109,7 @@ function Stats() {
   if (!site) return <NoSite />;
   const nf = (n: number) => new Intl.NumberFormat(lang).format(n);
   const empty = data && !data.totals;
+  const dayNames = data ? dayLabels(data.days, lang) : undefined;
   return (
     <>
       <PageTitle title={t("Statistics")} description={`${site.name}${site.domain ? ` · ${site.domain}` : ""}`}
@@ -121,10 +122,10 @@ function Stats() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {!data ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28" />) : (
               <>
-                <StatCard label={t("Page views")} numeric={data.totals!.pageviews} icon={<Eye />} trend={data.days.map((d) => d.pageviews)} />
-                <StatCard label={t("Visitors")} numeric={data.totals!.visitors} icon={<Users />} hint={t("Sum of the daily visitors")} trend={data.days.map((d) => d.visitors)} trendColor={GOOD} />
-                <StatCard label={t("Requests")} numeric={data.totals!.requests} icon={<Globe />} hint={t("Bots and files included")} trend={data.days.map((d) => d.requests)} trendColor={MUTED} />
-                <StatCard label={t("Conversion rate")} icon={<Target />}
+                <StatCard label={t("Page views")} trendLabels={dayNames} numeric={data.totals!.pageviews} icon={<Eye />} trend={data.days.map((d) => d.pageviews)} />
+                <StatCard label={t("Visitors")} trendLabels={dayNames} numeric={data.totals!.visitors} icon={<Users />} hint={t("Sum of the daily visitors")} trend={data.days.map((d) => d.visitors)} trendColor={GOOD} />
+                <StatCard label={t("Requests")} trendLabels={dayNames} numeric={data.totals!.requests} icon={<Globe />} hint={t("Bots and files included")} trend={data.days.map((d) => d.requests)} trendColor={MUTED} />
+                <StatCard label={t("Conversion rate")} trendLabels={dayNames} icon={<Target />}
                   trend={data.goals && data.goals.length > 0 ? data.days.map((d) => (d.visitors ? Math.round(((d.converted ?? 0) / d.visitors) * 1000) / 10 : 0)) : undefined} trendColor={WARN} trendFormat={(n) => `${n}%`}
                   value={data.goals && data.goals.length > 0 ? `${data.conversion?.rate ?? 0}%` : "—"}
                   hint={data.goals && data.goals.length > 0 ? t("{n} visitors reached a goal", { n: nf(data.conversion?.visitors ?? 0) }) : t("No goal tracked yet")} />
