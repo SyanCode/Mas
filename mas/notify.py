@@ -27,9 +27,9 @@ from mas import mailhtml
 
 log = logging.getLogger(__name__)
 
-EVENTS = ("compliance", "deploy_failed", "scheduled", "uptime", "digest")
+EVENTS = ("compliance", "deploy_failed", "scheduled", "uptime", "digest", "updates")
 SECURITY = ("none", "starttls", "ssl")
-DEFAULT_SITE = {"emails": [], "webhook": "", "events": ["compliance", "deploy_failed", "uptime"], "digest": False}
+DEFAULT_SITE = {"emails": [], "webhook": "", "events": ["compliance", "deploy_failed", "uptime", "updates"], "digest": False}
 EMAIL_RE = __import__("re").compile(r"^[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+$")
 
 

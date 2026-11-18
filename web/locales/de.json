@@ -2089,5 +2089,17 @@
   "Check the dependencies every day": "Abhängigkeiten täglich prüfen",
   "upgrade to {v}": "auf {v} aktualisieren",
   "No known vulnerability in the installed packages.": "Keine bekannte Schwachstelle in den installierten Paketen.",
-  "Checking…": "Prüfung…"
+  "Checking…": "Prüfung…",
+  "upgrade committed, deploying": "Aktualisierung committet, wird bereitgestellt",
+  "upgraded and deployed": "aktualisiert und bereitgestellt",
+  "pull request opened": "Pull Request geöffnet",
+  "upgrade undone: the release failed": "Aktualisierung rückgängig gemacht: die Bereitstellung ist fehlgeschlagen",
+  "automatic upgrade failed": "automatische Aktualisierung fehlgeschlagen",
+  "Automatic upgrades": "Automatische Aktualisierungen",
+  "Commit and deploy the fix (undone if the release fails)": "Korrektur committen und bereitstellen (rückgängig, wenn die Bereitstellung fehlschlägt)",
+  "Open a pull request": "Einen Pull Request öffnen",
+  "Off: only tell me": "Aus: nur benachrichtigen",
+  "Only security fixes within the same major version, computed without running any package script. A major upgrade is left to you or the robot.": "Nur Sicherheitskorrekturen innerhalb derselben Hauptversion, berechnet ohne ein Paketskript auszuführen. Ein Hauptversions-Upgrade bleibt Ihnen oder dem Roboter überlassen.",
+  "Upgrade now": "Jetzt aktualisieren",
+  "A vulnerable dependency was upgraded (or the upgrade failed)": "Eine verwundbare Abhängigkeit wurde aktualisiert (oder die Aktualisierung ist fehlgeschlagen)"
 }

@@ -577,15 +577,46 @@ def deps(
     check: Annotated[bool, typer.Option("--check", help="Ask the OSV database now instead of showing the last result.")] = False,
     on: Annotated[bool, typer.Option("--on", help="Turn the daily check on.")] = False,
     off: Annotated[bool, typer.Option("--off", help="Turn the daily check off (nothing is sent to OSV).")] = False,
+    auto: Annotated[str | None, typer.Option("--auto", help="Automatic upgrades: push (commit and deploy, undone "
+                                             "if the release fails), pr (pull request) or off.")] = None,
+    update: Annotated[bool, typer.Option("--update", help="Upgrade the vulnerable packages of APP_ID now.")] = False,
 ) -> None:
-    """Known vulnerabilities in the packages installed with each app (checked daily against osv.dev)."""
+    """Known vulnerabilities in the packages installed with each app (checked daily against osv.dev), upgraded automatically."""
     from mas.depaudit import DepAudit, upgrade_command
+    from mas.depupdate import MODES, DepUpdater, UpdateError
 
     env: Env = ctx.obj
     audit = DepAudit(env.db, env.host, env.config)
     if on or off:
         audit.configure(on)
         console.print(f"[green]✓[/] daily dependency check {'on' if on else 'off'}")
+        return
+    updater = DepUpdater(env.db, env.host, env.config, lambda: _github_client(env), None, audit)
+    if auto is not None:
+        if auto not in MODES:
+            fail(f"--auto: {', '.join(MODES)}")
+        updater.configure(auto)
+        console.print(f"[green]✓[/] automatic upgrades: {auto}")
+        return
+    if update:
+        found = env.db.get_app(app_id) if app_id else None
+        if found is None:
+            fail("give the app to upgrade: mas deps APP_ID --update")
+        audit.run([found], "cli")
+        try:
+            rec = updater.update(found, trigger="cli")
+        except UpdateError as exc:
+            fail(str(exc))
+        if rec["state"] == "deploying" and not found.get("auto_deploy"):
+            console.print("[dark_orange]the app does not deploy on push: run `mas deploy " + found["id"] + "`[/]")
+        for t in rec.get("done") or []:
+            console.print(f"[green]✓[/] {t['name']} {t['version']} → {t['now']}", highlight=False)
+        for t in (rec.get("failed") or []) + (rec.get("manual") or []):
+            console.print(f"[dark_orange]-[/] {t['name']} {t['version']}: {t.get('why') or 'not upgraded'}", highlight=False)
+        if rec.get("pr"):
+            console.print(f"pull request: {rec['pr'].get('url')}")
+        if rec["state"] == "failed":
+            fail(rec.get("error") or "the upgrade failed")
         return
     apps = None
     if app_id:
@@ -615,6 +646,7 @@ def deps(
                 console.print(f"     [green]fix:[/] {upgrade_command(f)}", highlight=False, markup=False)
     if not audit.settings()["enabled"]:
         console.print("[dim]The daily check is off (mas deps --on).[/]")
+    console.print(f"[dim]Automatic upgrades: {updater.mode()} (mas deps --auto push|pr|off)[/]")
     if total:
         raise typer.Exit(1)
 

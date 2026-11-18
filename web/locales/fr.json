@@ -2093,5 +2093,17 @@
   "Check the dependencies every day": "Vérifier les dépendances chaque jour",
   "upgrade to {v}": "passer à {v}",
   "No known vulnerability in the installed packages.": "Aucune faille connue dans les paquets installés.",
-  "Checking…": "Vérification…"
+  "Checking…": "Vérification…",
+  "upgrade committed, deploying": "mise à jour committée, déploiement en cours",
+  "upgraded and deployed": "mis à jour et déployé",
+  "pull request opened": "pull request ouverte",
+  "upgrade undone: the release failed": "mise à jour annulée : le déploiement a échoué",
+  "automatic upgrade failed": "échec de la mise à jour automatique",
+  "Automatic upgrades": "Mises à jour automatiques",
+  "Commit and deploy the fix (undone if the release fails)": "Committer et déployer le correctif (annulé si le déploiement échoue)",
+  "Open a pull request": "Ouvrir une pull request",
+  "Off: only tell me": "Désactivées : seulement me prévenir",
+  "Only security fixes within the same major version, computed without running any package script. A major upgrade is left to you or the robot.": "Uniquement des correctifs de sécurité dans la même version majeure, calculés sans exécuter aucun script de paquet. Une montée de version majeure reste à faire par vous ou le robot.",
+  "Upgrade now": "Mettre à jour maintenant",
+  "A vulnerable dependency was upgraded (or the upgrade failed)": "Une dépendance vulnérable a été mise à jour (ou la mise à jour a échoué)"
 }

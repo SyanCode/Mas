@@ -183,6 +183,15 @@ class GitHubApp:
                               {"sha": commit["sha"], "force": False})
         return commit["sha"]
 
+    def create_branch(self, installation_id: int, repo: str, branch: str, sha: str) -> None:
+        self._as_installation(installation_id, f"/repos/{repo}/git/refs", "POST", {"ref": f"refs/heads/{branch}", "sha": sha})
+
+    def open_pull(self, installation_id: int, repo: str, head: str, base: str, title: str, body: str) -> dict:
+        """{number, url} of the new pull request."""
+        pr = self._as_installation(installation_id, f"/repos/{repo}/pulls", "POST",
+                                   {"head": head, "base": base, "title": title, "body": body})
+        return {"number": pr.get("number"), "url": pr.get("html_url")}
+
     def get_commit(self, installation_id: int, repo: str, sha: str) -> dict:
         """{parents: [sha], files: [{filename, status, sha}]} of a commit (``sha`` is the blob after the change)."""
         c = self._as_installation(installation_id, f"/repos/{repo}/commits/{quote(sha, safe='')}")

@@ -38,6 +38,7 @@ from mas.envcrypt import EnvError
 from mas.offsite import Offsite, OffsiteError
 from mas.hostalerts import HostAlerts
 from mas.depaudit import OSV, DepAudit
+from mas.depupdate import DepUpdater, UpdateError as DepUpdateError
 from mas.notify import NotifyError, Notifier
 from mas.uptime import Uptime
 from mas import goals as goals_mod
@@ -191,6 +192,7 @@ def create_app(
     seo_fetch=None,  # tests: pages of the site as the SEO look sees them
     update_fetch=None,  # tests: what the official repository has
     osv_fetch=None,  # tests: the OSV vulnerability database
+    dep_runner=None,  # tests: npm when upgrading dependencies
 ) -> FastAPI:
     host = host or Host()
     config = config or load_config(host)
@@ -259,6 +261,10 @@ def create_app(
                 await asyncio.to_thread(dep_audit.tick)
             except Exception:
                 log.exception("dependency audit failed")
+            try:  # ... and their upgrade: commit, deploy, undone if the release fails
+                await asyncio.to_thread(dep_updater.tick)
+            except Exception:
+                log.exception("dependency upgrade failed")
             try:  # previews whose pull request closed while Mas did not hear about it
                 await asyncio.to_thread(app.state.previews.sweep)
             except Exception:
@@ -966,9 +972,31 @@ def create_app(
         db.audit(s.username, "host-alerts-config", True, detail="on" if result["enabled"] else "off")
         return result
 
+    dep_updater = DepUpdater(db, host, config, github_client, deployer, dep_audit, notifier, runner=dep_runner)
+
+    def dependencies_payload() -> dict:
+        apps = []
+        for row in dep_audit.report():
+            up = dep_updater.state(row["app"])
+            row["update"] = {k: up.get(k) for k in ("state", "at", "sha", "error", "done", "failed", "manual", "pr", "release_id")} if up else None
+            apps.append(row)
+        return {"settings": {**dep_audit.settings(), "auto": dep_updater.mode()}, "apps": apps}
+
     @app.get("/api/dependencies")
     def dependencies_get(_: SessionInfo = Depends(current_session)) -> dict:
-        return {"settings": dep_audit.settings(), "apps": dep_audit.report()}
+        return dependencies_payload()
+
+    @app.post("/api/dependencies/update")
+    async def dependencies_update(app_id: str, s: SessionInfo = Depends(current_session)) -> dict:
+        found = db.get_app(app_id)
+        if found is None:
+            raise HTTPException(404, f"unknown app {app_id}")
+        try:
+            rec = await asyncio.to_thread(dep_updater.update, found, None, "manual")
+        except DepUpdateError as exc:
+            raise HTTPException(409, str(exc)) from None
+        db.audit(s.username, "deps-update-start", rec.get("state") != "failed", service_id=app_id, detail=rec.get("state"))
+        return dependencies_payload()
 
     dep_running = asyncio.Lock()
 
@@ -985,14 +1013,20 @@ def create_app(
         async with dep_running:
             await asyncio.to_thread(dep_audit.run, apps, "manual")
         db.audit(s.username, "deps-scan", True, detail=app_id or "all")
-        return {"settings": dep_audit.settings(), "apps": dep_audit.report()}
+        return dependencies_payload()
 
     @app.put("/api/dependencies/settings")
     def dependencies_settings(body: dict, s: SessionInfo = Depends(current_session)) -> dict:
-        if not isinstance(body.get("enabled"), bool):
+        if "enabled" in body and not isinstance(body["enabled"], bool):
             raise HTTPException(400, "enabled: true or false")
-        result = dep_audit.configure(body["enabled"])
-        db.audit(s.username, "deps-config", True, detail="on" if result["enabled"] else "off")
+        if "auto" in body and body["auto"] not in ("off", "pr", "push"):
+            raise HTTPException(400, "auto: off, pr or push")
+        if "enabled" in body:
+            dep_audit.configure(body["enabled"])
+        if "auto" in body:
+            dep_updater.configure(body["auto"])
+        result = {**dep_audit.settings(), "auto": dep_updater.mode()}
+        db.audit(s.username, "deps-config", True, detail=f"check {'on' if result['enabled'] else 'off'}, upgrades {result['auto']}")
         return result
 
     @app.post("/api/host-alerts/test")

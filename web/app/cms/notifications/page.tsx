@@ -24,6 +24,7 @@ const EVENT_LABEL: Record<string, string> = {
   deploy_failed: msg("A deployment failed"),
   scheduled: msg("A scheduled entry went live"),
   uptime: msg("The site went down or came back"),
+  updates: msg("A vulnerable dependency was upgraded (or the upgrade failed)"),
 };
 
 function Notifications() {
