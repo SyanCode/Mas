@@ -19,6 +19,7 @@ const PAGES: Item[] = [
   { label: msg("New app"), hint: msg("deploy a repository"), href: "/apps/new/", group: "Pages" },
   { label: msg("Databases"), hint: msg("self-hosted Supabase"), href: "/databases/", group: "Pages" },
   { label: msg("Health"), hint: msg("certificates, nginx, DNS"), href: "/health/", group: "Pages" },
+  { label: msg("Dependencies"), hint: msg("vulnerable packages, automatic upgrades"), href: "/dependencies/", group: "Pages" },
   { label: msg("Activity"), hint: msg("audit log"), href: "/history/", group: "Pages" },
   { label: msg("Settings"), hint: msg("domains, GitHub, security"), href: "/settings/", group: "Pages" },
 ];

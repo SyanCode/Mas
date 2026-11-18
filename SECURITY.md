@@ -26,7 +26,7 @@ describes what Mas is designed to protect against.
 ## Dependencies of the hosted apps
 
 Mas checks the packages installed with each app against the public [OSV](https://osv.dev) database every day
-and after each release (`mas deps`, Settings → Vulnerable dependencies). Only package names and versions are
+and after each release (`mas deps`, the **Dependencies** page). Only package names and versions are
 sent to `api.osv.dev`, never code, files or domains; development packages are not sent. Turn it off with
 `mas deps --off` (only an administrator signed in, never an API token, can change it). A vulnerable package is
 reported in Health and by the server alerts with the version to upgrade to.

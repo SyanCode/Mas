@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { AppDependenciesCard } from "@/components/Dependencies";
 import { DomainStatus } from "@/components/DomainStatus";
 import { DomainPicker, type DomainChoice } from "@/components/DomainPicker";
 import { Shell } from "@/components/Shell";
@@ -1070,6 +1071,7 @@ function AppView() {
         </div>
 
         <div className="space-y-6">
+          {app.mode !== "stack" && app.environment !== "preview" && <AppDependenciesCard appId={app.id} />}
           {app.mode === "managed" && <DomainCard key={app.domain ?? ""} app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           {app.domain && (app.mode === "managed" || app.mode === "stack") && <MaintenanceCard appId={app.id} />}
           {app.mode === "stack" && <StackCard appId={app.id} onDeployed={(rid) => { setSelected(rid); load(); }} />}

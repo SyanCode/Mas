@@ -82,13 +82,13 @@ def plan(findings: list[dict], blocked: dict[str, float], now: float) -> tuple[l
         t = {"ecosystem": f["ecosystem"], "name": f["name"], "version": f["version"], "direct": f["direct"],
              "to": f.get("upgrade_to")}
         if not t["to"]:
-            manual.append(t | {"why": "no fixed version published"})
+            manual.append(t | {"why": "no fixed version published", "code": "nofix"})
         elif f["ecosystem"] not in ("npm", "PyPI"):
-            manual.append(t | {"why": f"{f['ecosystem']} packages are not upgraded automatically"})
+            manual.append(t | {"why": f"{f['ecosystem']} packages are not upgraded automatically", "code": "ecosystem"})
         elif _major(t["to"]) != _major(t["version"]):
-            manual.append(t | {"why": f"the fix is in a new major version ({t['to']})"})
+            manual.append(t | {"why": f"the fix is in a new major version ({t['to']})", "code": "major"})
         elif now - blocked.get(target_key(t), 0) < RETRY_AFTER:
-            manual.append(t | {"why": "the automatic upgrade failed, not retried before a week"})
+            manual.append(t | {"why": "the automatic upgrade failed, not retried before a week", "code": "blocked"})
         elif not any(x["ecosystem"] == t["ecosystem"] and x["name"] == t["name"] for x in todo):
             todo.append(t)
     return todo, manual

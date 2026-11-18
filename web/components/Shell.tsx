@@ -4,7 +4,7 @@ import { UpdateBanner } from "@/components/Update";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { Activity, Database, FolderUp, Gauge, HeartPulse, LayoutDashboard, LayoutGrid, Menu, Newspaper, Rocket, Search, Server, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
+import { Activity, Database, FolderUp, Gauge, HeartPulse, LayoutDashboard, LayoutGrid, Menu, Newspaper, Rocket, Search, Server, Settings, ShieldCheck, Sparkles, X, type LucideIcon } from "lucide-react";
 import { Avatar, myAvatarUrl, shownName } from "@/components/Avatar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
@@ -54,6 +54,7 @@ const NAV_GROUPS: { title: string; items: NavEntry[] }[] = [
     { href: "/cluster/", label: msg("Servers"), icon: Server, match: (p) => p.startsWith("/cluster") },
     { href: "/advisor/", label: msg("Advisor"), icon: Sparkles, match: (p) => p.startsWith("/advisor") },
     { href: "/health/", label: msg("Health"), icon: HeartPulse, match: (p) => p.startsWith("/health") },
+    { href: "/dependencies/", label: msg("Dependencies"), icon: ShieldCheck, match: (p) => p.startsWith("/dependencies") },
     { href: "/history/", label: msg("Activity"), icon: Activity, match: (p) => p.startsWith("/history") },
   ] },
   { title: msg("Content"), items: [

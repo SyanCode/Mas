@@ -6,7 +6,7 @@ import { Avatar, userAvatarUrl, shownName } from "@/components/Avatar";
 import { Shell, useSession } from "@/components/Shell";
 import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
 import { api, ApiError, startViewAs, timeAgo, type ApiToken, type App, type CmsUser, type DnsStatus, type GitHubStatus, type ProviderInfo } from "@/lib/api";
-import { msg, useT } from "@/lib/i18n";
+import { useT } from "@/lib/i18n";
 import { AiAccountsList } from "@/components/AiAccounts";
 import { SitePermsPicker, usePermSummary, type SiteAccess } from "@/components/SitePermsPicker";
 import Link from "next/link";
@@ -859,117 +859,6 @@ function HostAlertsCard() {
   );
 }
 
-
-type DepFinding = { name: string; version: string; direct: boolean; severity: string; upgrade_to: string | null; vulns: { id: string }[] };
-type DepUpdate = { state: string; error: string | null; done?: { name: string; version: string; now: string }[]; manual?: { name: string; version: string; why: string }[]; pr?: { url: string } };
-type DepApp = { app: string; name: string; at: string | null; packages: number; error: string | null; findings: DepFinding[]; update: DepUpdate | null };
-type DepPayload = { settings: { enabled: boolean; auto: string }; apps: DepApp[] };
-
-const UPDATE_STATE: Record<string, string> = {
-  deploying: msg("upgrade committed, deploying"), done: msg("upgraded and deployed"), pr: msg("pull request opened"),
-  reverted: msg("upgrade undone: the release failed"), failed: msg("automatic upgrade failed"),
-};
-
-function DependenciesCard() {
-  const t = useT();
-  const [enabled, setEnabled] = useState(true);
-  const [auto, setAuto] = useState("push");
-  const [apps, setApps] = useState<DepApp[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  function load(r: DepPayload) {
-    setEnabled(r.settings.enabled); setAuto(r.settings.auto); setApps(r.apps);
-  }
-
-  useEffect(() => {
-    api<DepPayload>("/dependencies").then(load).catch(() => {});
-  }, []);
-
-  async function save(body: { enabled?: boolean; auto?: string }) {
-    setError("");
-    try {
-      const r = await api<{ enabled: boolean; auto: string }>("/dependencies/settings", { method: "PUT", body });
-      setEnabled(r.enabled); setAuto(r.auto);
-    } catch (err) {
-      setError((err as ApiError).detail);
-    }
-  }
-
-  async function upgrade(appId: string) {
-    setError(""); setBusy(true);
-    try {
-      load(await api<DepPayload>(`/dependencies/update?app_id=${encodeURIComponent(appId)}`, { method: "POST" }));
-    } catch (err) {
-      setError((err as ApiError).detail);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function check() {
-    setError(""); setBusy(true);
-    try {
-      load(await api<DepPayload>("/dependencies/scan", { method: "POST" }));
-    } catch (err) {
-      setError((err as ApiError).detail);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const vulnerable = apps.reduce((n, a) => n + a.findings.length, 0);
-  return (
-    <Card title={t("Vulnerable dependencies")} actions={vulnerable ? <Badge tone="red">{vulnerable}</Badge> : enabled ? <Badge tone="emerald">{t("on")}</Badge> : <Badge tone="zinc">{t("off")}</Badge>}>
-      <div className="max-w-2xl space-y-3 text-sm">
-        <p className="text-zinc-600 dark:text-zinc-400">{t("Every day and after each release, Mas reads the lock files of each app and asks the public OSV database which installed versions have a known vulnerability. Only package names and versions are sent. A vulnerable package appears in Health and in the server alerts, with the version to install.")}</p>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={enabled} onChange={(e) => save({ enabled: e.target.checked })} />
-          {t("Check the dependencies every day")}
-        </label>
-        <Label title={t("Automatic upgrades")}>
-          <select value={auto} onChange={(e) => save({ auto: e.target.value })} className="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700">
-            <option value="push">{t("Commit and deploy the fix (undone if the release fails)")}</option>
-            <option value="pr">{t("Open a pull request")}</option>
-            <option value="off">{t("Off: only tell me")}</option>
-          </select>
-        </Label>
-        <p className="text-xs text-zinc-500">{t("Only security fixes within the same major version, computed without running any package script. A major upgrade is left to you or the robot.")}</p>
-        {apps.filter((a) => a.findings.length || a.error).map((a) => (
-          <div key={a.app} className="rounded border border-zinc-200 p-2 dark:border-zinc-800">
-            <p className="font-medium">{a.name}</p>
-            {a.error && <p className="text-xs text-amber-700 dark:text-amber-400">{a.error}</p>}
-            {a.update && UPDATE_STATE[a.update.state] && (
-              <p className="text-xs">
-                <Badge tone={a.update.state === "done" ? "emerald" : a.update.state === "deploying" || a.update.state === "pr" ? "sky" : "red"}>{t(UPDATE_STATE[a.update.state])}</Badge>{" "}
-                {a.update.pr?.url && <a className="underline" href={a.update.pr.url} target="_blank" rel="noreferrer">{t("open")}</a>}
-                {a.update.error && a.update.state !== "done" && <span className="text-zinc-500"> {a.update.error.slice(0, 300)}</span>}
-              </p>
-            )}
-            {a.update?.manual?.map((m) => <p key={m.name} className="text-xs text-zinc-500">{m.name} {m.version}: {m.why}</p>)}
-            <ul className="mt-1 space-y-0.5 text-xs">
-              {a.findings.map((f) => (
-                <li key={f.name + f.version}>
-                  <span className={f.direct ? "font-semibold text-red-700 dark:text-red-400" : ""}>{f.name} {f.version}</span>{" "}
-                  <span className="text-zinc-500">{f.severity} · {f.vulns.map((v) => v.id).join(", ")}</span>
-                  {f.upgrade_to && <span> → {t("upgrade to {v}", { v: f.upgrade_to })}</span>}
-                </li>
-              ))}
-            </ul>
-            {a.findings.some((f) => f.upgrade_to) && a.update?.state !== "deploying" && (
-              <Button type="button" className="mt-1" onClick={() => upgrade(a.app)} disabled={busy}>{t("Upgrade now")}</Button>
-            )}
-          </div>
-        ))}
-        {!vulnerable && apps.some((a) => a.at) && <p className="text-emerald-700 dark:text-emerald-400">{t("No known vulnerability in the installed packages.")}</p>}
-        <ErrorText>{error}</ErrorText>
-        <Button type="button" onClick={check} disabled={busy}>{busy ? t("Checking…") : t("Check now")}</Button>
-      </div>
-    </Card>
-  );
-}
-
-
 function Settings() {
   const t = useT();
   const session = useSession();
@@ -996,7 +885,6 @@ function Settings() {
       <PeopleCard />
       <AdvisorCard />
       <HostAlertsCard />
-      <DependenciesCard />
       <SelfBackupCard />
       <ClaudeCard totp={!!session?.totp_enabled} />
       <TwoFactor enabled={!!session?.totp_enabled} />

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FolderHeader, FolderLayout, FolderSidebar, MoveMenu, dragProps, useFolderView, useFolders, visibleIds, type FoldersApi } from "@/components/Folders";
+import { DependencyAlert } from "@/components/Dependencies";
 import { RestartAll } from "@/components/RestartAll";
 import { Shell } from "@/components/Shell";
 import {
@@ -197,6 +198,7 @@ function Overview() {
       </div>
 
       <div className="mb-4 space-y-3">
+        <DependencyAlert />
         <Notice>{notice}</Notice>
         <ErrorText>{error ? <span className="whitespace-pre-wrap">{error}</span> : null}</ErrorText>
       </div>
