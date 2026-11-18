@@ -303,7 +303,8 @@ def run_checks(host: Host, config: Config | None = None, dns: bool = True, publi
     lineages = load_lineages(host)
     checks = check_nginx(host, sites, sockets) + check_certificates(host, sites, lineages) + check_memory(host)
     if db is not None:
-        checks += check_backups(db)
+        from mas.depaudit import checks_from
+        checks += check_backups(db) + checks_from(db)
     if dns:
         names = {n for s in sites for n in s.names} | {d for lin in lineages for d in lin.domains}
         checks += check_dns(names, public_ip or ctx.config.public_ip)

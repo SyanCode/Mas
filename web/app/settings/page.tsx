@@ -860,6 +860,78 @@ function HostAlertsCard() {
 }
 
 
+type DepFinding = { name: string; version: string; direct: boolean; severity: string; upgrade_to: string | null; vulns: { id: string }[] };
+type DepApp = { app: string; name: string; at: string | null; packages: number; error: string | null; findings: DepFinding[] };
+
+function DependenciesCard() {
+  const t = useT();
+  const [enabled, setEnabled] = useState(true);
+  const [apps, setApps] = useState<DepApp[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function load(r: { settings: { enabled: boolean }; apps: DepApp[] }) {
+    setEnabled(r.settings.enabled); setApps(r.apps);
+  }
+
+  useEffect(() => {
+    api<{ settings: { enabled: boolean }; apps: DepApp[] }>("/dependencies").then(load).catch(() => {});
+  }, []);
+
+  async function toggle(on: boolean) {
+    setError("");
+    try {
+      const r = await api<{ enabled: boolean }>("/dependencies/settings", { method: "PUT", body: { enabled: on } });
+      setEnabled(r.enabled);
+    } catch (err) {
+      setError((err as ApiError).detail);
+    }
+  }
+
+  async function check() {
+    setError(""); setBusy(true);
+    try {
+      load(await api<{ settings: { enabled: boolean }; apps: DepApp[] }>("/dependencies/scan", { method: "POST" }));
+    } catch (err) {
+      setError((err as ApiError).detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const vulnerable = apps.reduce((n, a) => n + a.findings.length, 0);
+  return (
+    <Card title={t("Vulnerable dependencies")} actions={vulnerable ? <Badge tone="red">{vulnerable}</Badge> : enabled ? <Badge tone="emerald">{t("on")}</Badge> : <Badge tone="zinc">{t("off")}</Badge>}>
+      <div className="max-w-2xl space-y-3 text-sm">
+        <p className="text-zinc-600 dark:text-zinc-400">{t("Every day and after each release, Mas reads the lock files of each app and asks the public OSV database which installed versions have a known vulnerability. Only package names and versions are sent. A vulnerable package appears in Health and in the server alerts, with the version to install.")}</p>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={enabled} onChange={(e) => toggle(e.target.checked)} />
+          {t("Check the dependencies every day")}
+        </label>
+        {apps.filter((a) => a.findings.length || a.error).map((a) => (
+          <div key={a.app} className="rounded border border-zinc-200 p-2 dark:border-zinc-800">
+            <p className="font-medium">{a.name}</p>
+            {a.error && <p className="text-xs text-amber-700 dark:text-amber-400">{a.error}</p>}
+            <ul className="mt-1 space-y-0.5 text-xs">
+              {a.findings.map((f) => (
+                <li key={f.name + f.version}>
+                  <span className={f.direct ? "font-semibold text-red-700 dark:text-red-400" : ""}>{f.name} {f.version}</span>{" "}
+                  <span className="text-zinc-500">{f.severity} · {f.vulns.map((v) => v.id).join(", ")}</span>
+                  {f.upgrade_to && <span> → {t("upgrade to {v}", { v: f.upgrade_to })}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+        {!vulnerable && apps.some((a) => a.at) && <p className="text-emerald-700 dark:text-emerald-400">{t("No known vulnerability in the installed packages.")}</p>}
+        <ErrorText>{error}</ErrorText>
+        <Button type="button" onClick={check} disabled={busy}>{busy ? t("Checking…") : t("Check now")}</Button>
+      </div>
+    </Card>
+  );
+}
+
+
 function Settings() {
   const t = useT();
   const session = useSession();
@@ -886,6 +958,7 @@ function Settings() {
       <PeopleCard />
       <AdvisorCard />
       <HostAlertsCard />
+      <DependenciesCard />
       <SelfBackupCard />
       <ClaudeCard totp={!!session?.totp_enabled} />
       <TwoFactor enabled={!!session?.totp_enabled} />

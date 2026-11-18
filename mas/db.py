@@ -1185,6 +1185,7 @@ class Database:
             c.execute("DELETE FROM consent_versions WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM compliance_audits WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM settings WHERE key = ?", (f"cookies:{app_id}",))
+            c.execute("DELETE FROM settings WHERE key = ?", (f"deps:app:{app_id}",))
             c.execute("DELETE FROM goal_visitors WHERE app_id = ?", (app_id,))
             c.execute("DELETE FROM folder_items WHERE kind = 'app' AND item_id = ?", (app_id,))
 

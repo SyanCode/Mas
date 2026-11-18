@@ -37,6 +37,7 @@ from mas import selfbackup
 from mas.envcrypt import EnvError
 from mas.offsite import Offsite, OffsiteError
 from mas.hostalerts import HostAlerts
+from mas.depaudit import OSV, DepAudit
 from mas.notify import NotifyError, Notifier
 from mas.uptime import Uptime
 from mas import goals as goals_mod
@@ -189,6 +190,7 @@ def create_app(
     cluster_opener=None,  # tests: calls to the other Mas servers
     seo_fetch=None,  # tests: pages of the site as the SEO look sees them
     update_fetch=None,  # tests: what the official repository has
+    osv_fetch=None,  # tests: the OSV vulnerability database
 ) -> FastAPI:
     host = host or Host()
     config = config or load_config(host)
@@ -253,6 +255,10 @@ def create_app(
                 await asyncio.to_thread(host_alerts.tick)
             except Exception:
                 log.exception("host alerts failed")
+            try:  # known vulnerabilities in the packages of the apps (OSV), daily and after each release
+                await asyncio.to_thread(dep_audit.tick)
+            except Exception:
+                log.exception("dependency audit failed")
             try:  # previews whose pull request closed while Mas did not hear about it
                 await asyncio.to_thread(app.state.previews.sweep)
             except Exception:
@@ -334,6 +340,7 @@ def create_app(
     notifier = Notifier(db, host, config, stats=site_stats, compliance=compliance)
     compliance.notifier = notifier
     host_alerts = HostAlerts(db, host, config, notifier, scanner)
+    dep_audit = DepAudit(db, host, config, OSV(osv_fetch) if osv_fetch else None)
     offsite = Offsite(db, notifier)
 
     def post_check(target: dict, release_id: int, result: dict) -> None:
@@ -366,7 +373,7 @@ def create_app(
                     for svc in scanner.result().services][:120]
         try:
             checks = [{k: c.as_dict()[k] for k in ("level", "category", "title", "detail")}
-                      for c in run_checks(host, config, dns=False)][:60]
+                      for c in run_checks(host, config, dns=False, db=db)][:60]
         except Exception:  # noqa: BLE001 - a failing check must not block the advice
             checks = []
         apps = []
@@ -384,6 +391,10 @@ def create_app(
                 seo_last = json.loads(db.get_setting(f"seo_audit:{a['id']}") or "null")
                 if seo_last:
                     row["seo"] = {k: seo_last[k] for k in ("score", "verdict") if k in seo_last}
+            deps = dep_audit.latest(a["id"])
+            if deps and deps.get("findings"):
+                row["vulnerable_packages"] = [
+                    {k: f[k] for k in ("name", "version", "direct", "severity", "upgrade_to")} for f in deps["findings"][:10]]
             apps.append(row)
         return {"version": __version__, "services": services, "health_checks": checks, "apps": apps}
 
@@ -953,6 +964,35 @@ def create_app(
         except NotifyError as exc:
             raise HTTPException(400, str(exc)) from None
         db.audit(s.username, "host-alerts-config", True, detail="on" if result["enabled"] else "off")
+        return result
+
+    @app.get("/api/dependencies")
+    def dependencies_get(_: SessionInfo = Depends(current_session)) -> dict:
+        return {"settings": dep_audit.settings(), "apps": dep_audit.report()}
+
+    dep_running = asyncio.Lock()
+
+    @app.post("/api/dependencies/scan")
+    async def dependencies_scan(app_id: str | None = None, s: SessionInfo = Depends(current_session)) -> dict:
+        apps = None
+        if app_id:
+            found = db.get_app(app_id)
+            if found is None:
+                raise HTTPException(404, f"unknown app {app_id}")
+            apps = [found]
+        if dep_running.locked():
+            raise HTTPException(409, "a check is already running")
+        async with dep_running:
+            await asyncio.to_thread(dep_audit.run, apps, "manual")
+        db.audit(s.username, "deps-scan", True, detail=app_id or "all")
+        return {"settings": dep_audit.settings(), "apps": dep_audit.report()}
+
+    @app.put("/api/dependencies/settings")
+    def dependencies_settings(body: dict, s: SessionInfo = Depends(current_session)) -> dict:
+        if not isinstance(body.get("enabled"), bool):
+            raise HTTPException(400, "enabled: true or false")
+        result = dep_audit.configure(body["enabled"])
+        db.audit(s.username, "deps-config", True, detail="on" if result["enabled"] else "off")
         return result
 
     @app.post("/api/host-alerts/test")

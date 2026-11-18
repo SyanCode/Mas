@@ -125,6 +125,10 @@ HTTP_SERVER = """server {
     access_log /var/log/nginx/mas-app-@@APP@@.access.log;
     error_log /var/log/nginx/mas-app-@@APP@@.error.log;
     include /etc/nginx/mas-maintenance/@@APP@@[.]conf;
+    # Do not tell scanners which software and version answer (nginx, Next.js, Express, PHP).
+    server_tokens off;
+    proxy_hide_header X-Powered-By;
+    fastcgi_hide_header X-Powered-By;
 @@BODY@@}
 """
 
@@ -147,6 +151,10 @@ server {
     access_log /var/log/nginx/mas-app-@@APP@@.access.log;
     error_log /var/log/nginx/mas-app-@@APP@@.error.log;
     include /etc/nginx/mas-maintenance/@@APP@@[.]conf;
+    # Do not tell scanners which software and version answer (nginx, Next.js, Express, PHP).
+    server_tokens off;
+    proxy_hide_header X-Powered-By;
+    fastcgi_hide_header X-Powered-By;
 @@BODY@@}
 """
 

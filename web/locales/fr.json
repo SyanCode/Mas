@@ -2087,5 +2087,11 @@
   "Try again": "Réessayer",
   "View as this person": "Voir comme cette personne",
   "You see the CMS as {name} sees it. Read only: nothing can be changed from here.": "Vous voyez le CMS comme {name} le voit. Lecture seule : rien ne peut être modifié d'ici.",
-  "Back to my view": "Revenir à ma vue"
+  "Back to my view": "Revenir à ma vue",
+  "Vulnerable dependencies": "Dépendances vulnérables",
+  "Every day and after each release, Mas reads the lock files of each app and asks the public OSV database which installed versions have a known vulnerability. Only package names and versions are sent. A vulnerable package appears in Health and in the server alerts, with the version to install.": "Chaque jour et après chaque mise en ligne, Mas lit les fichiers de verrouillage de chaque app et demande à la base publique OSV quelles versions installées ont une faille connue. Seuls les noms et versions des paquets sont envoyés. Un paquet vulnérable apparaît dans Santé et dans les alertes du serveur, avec la version à installer.",
+  "Check the dependencies every day": "Vérifier les dépendances chaque jour",
+  "upgrade to {v}": "passer à {v}",
+  "No known vulnerability in the installed packages.": "Aucune faille connue dans les paquets installés.",
+  "Checking…": "Vérification…"
 }

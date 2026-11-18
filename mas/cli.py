@@ -570,6 +570,55 @@ def doctor(
         raise typer.Exit(1)
 
 
+@app.command()
+def deps(
+    ctx: typer.Context,
+    app_id: Annotated[str | None, typer.Argument(help="Only this app.")] = None,
+    check: Annotated[bool, typer.Option("--check", help="Ask the OSV database now instead of showing the last result.")] = False,
+    on: Annotated[bool, typer.Option("--on", help="Turn the daily check on.")] = False,
+    off: Annotated[bool, typer.Option("--off", help="Turn the daily check off (nothing is sent to OSV).")] = False,
+) -> None:
+    """Known vulnerabilities in the packages installed with each app (checked daily against osv.dev)."""
+    from mas.depaudit import DepAudit, upgrade_command
+
+    env: Env = ctx.obj
+    audit = DepAudit(env.db, env.host, env.config)
+    if on or off:
+        audit.configure(on)
+        console.print(f"[green]✓[/] daily dependency check {'on' if on else 'off'}")
+        return
+    apps = None
+    if app_id:
+        found = env.db.get_app(app_id)
+        if found is None:
+            fail(f"unknown app {app_id}")
+        apps = [found]
+    if check:
+        audit.run(apps, "cli")
+    rows = [r for r in audit.report() if not app_id or r["app"] == app_id]
+    total = 0
+    for r in rows:
+        if not r.get("at"):
+            console.print(f"[dim]{r['app']}: not checked yet (mas deps --check)[/]")
+            continue
+        head = f"[bold]{r['app']}[/] [dim]{r['packages']} packages ({', '.join(r['lockfiles']) or 'no lock file'}), {r['at']}[/]"
+        if r.get("error"):
+            head += f" [dark_orange]{r['error']}[/]"
+        console.print(head, highlight=False)
+        for f in r["findings"]:
+            total += 1
+            style = "bold red" if f["direct"] or f["severity"] in ("critical", "high") else "dark_orange"
+            ids = ", ".join(v["id"] for v in f["vulns"][:5])
+            console.print(f"  [{style}]{f['name']} {f['version']}[/] {f['severity']} "
+                          f"{'' if f['direct'] else '(sub-dependency) '}{ids}", highlight=False)
+            if f["upgrade_to"]:
+                console.print(f"     [green]fix:[/] {upgrade_command(f)}", highlight=False, markup=False)
+    if not audit.settings()["enabled"]:
+        console.print("[dim]The daily check is off (mas deps --on).[/]")
+    if total:
+        raise typer.Exit(1)
+
+
 # -- GitHub & deployments (phase 3) ------------------------------------------------
 
 github_app = typer.Typer(help="GitHub App configuration.", no_args_is_help=True)

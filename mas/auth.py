@@ -168,7 +168,7 @@ API_TOKEN_FORBIDDEN = (
     "/api/account/", "/api/users", "/api/invites", "/api/logout", "/api/signup",
     "/api/cluster/tokens", "/api/github/manifest", "/api/supabase/credentials", "/api/dns/providers",
     "/api/tokens", "/api/mcp", "/api/host-alerts", "/api/self-backup", "/api/update", "/api/advisor", "/api/ai", "/api/robot",
-    "/api/shares",
+    "/api/shares", "/api/dependencies/settings",
 )
 API_TOKEN_FORBIDDEN_RE = re.compile(r"^/api/apps/[^/]+/env$")
 

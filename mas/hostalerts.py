@@ -107,7 +107,7 @@ class HostAlerts:
                 checks = self.checks()
             else:
                 from mas.health import run_checks
-                checks = run_checks(self.host, self.config, dns=False)
+                checks = run_checks(self.host, self.config, dns=False, db=self.db)
         except Exception:  # noqa: BLE001 - a failing check must not stop the disk alerts
             log.exception("host checks failed")
             checks = []
