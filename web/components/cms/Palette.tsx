@@ -56,7 +56,7 @@ export function Palette({ open, onClose, site, sites, overview, admin }: {
       ...(overview?.pages ?? []).map((p) => ({ key: `p-${p.id}`, label: p.label, hint: t("Pages"), icon: FileText, href: `/cms/pages/?${q}&p=${encodeURIComponent(p.id)}` })),
       ...entries.map((e) => ({ key: `e-${e.collection.id}-${e.slug}`, label: e.title, hint: e.collection.label, icon: ClipboardList, href: `/cms/entry/?${q}&c=${encodeURIComponent(e.collection.id)}&slug=${encodeURIComponent(e.slug)}` })),
       { key: "media", label: t("Media"), icon: ImageIcon, href: `/cms/media/?${q}` },
-      { key: "stats", label: t("Statistics"), icon: BarChart3, href: `/cms/stats/?${q}` },
+      { key: "stats", label: t("Statistics"), icon: BarChart3, href: `/cms/audience/?${q}` },
       { key: "up", label: t("Availability"), icon: HeartPulse, href: `/cms/uptime/?${q}` },
       { key: "seo", label: t("Search engines"), icon: ScanSearch, href: `/cms/seo/?${q}` },
       { key: "comp", label: t("Compliance"), icon: ShieldCheck, href: `/cms/compliance/?${q}` },

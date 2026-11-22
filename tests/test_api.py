@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pyotp
 import pytest
@@ -254,22 +255,40 @@ def test_remove_the_site_of_a_stopped_service(env):
     assert client.get("/api/services/shop.example.com").status_code == 404
 
 
-def test_a_browser_sent_to_a_data_file_gets_the_page(tmp_path):
-    """After an update an old tab falls back to /cms/stats/index.txt: show the page, not the raw payload."""
+def test_old_statistics_address_moves_to_audience(tmp_path):
+    """Blocklists (EasyPrivacy "/cms/stats/*") block every file under /cms/stats/: the page lives at /cms/audience/."""
     from fastapi.testclient import TestClient
     import server
     from mas.api import create_app
     from mas.config import Config
     from mas.db import Database
     from mas.host import FixtureHost
-    web = tmp_path / "out" / "cms" / "stats"
+    web = Path(__file__).resolve().parent.parent / "web" / "app" / "cms"
+    assert (web / "audience" / "page.tsx").is_file() and not (web / "stats").exists()
+    app = create_app(FixtureHost(server.build(tmp_path / "srv")), Config(cookie_secure=False), Database(tmp_path / "m.db"),
+                     background=False)
+    c = TestClient(app, follow_redirects=False)
+    for old, new in (("/cms/stats/?app=x", "/cms/audience/?app=x"), ("/cms/stats", "/cms/audience/")):
+        r = c.get(old)
+        assert r.status_code == 301 and r.headers["location"] == new
+
+
+def test_a_browser_sent_to_a_data_file_gets_the_page(tmp_path):
+    """After an update an old tab falls back to /cms/seo/index.txt: show the page, not the raw payload."""
+    from fastapi.testclient import TestClient
+    import server
+    from mas.api import create_app
+    from mas.config import Config
+    from mas.db import Database
+    from mas.host import FixtureHost
+    web = tmp_path / "out" / "cms" / "seo"
     web.mkdir(parents=True)
     (web / "index.html").write_text("<html>page</html>")
     (web / "index.txt").write_text("1:payload")
     app = create_app(FixtureHost(server.build(tmp_path / "srv")), Config(cookie_secure=False), Database(tmp_path / "m.db"),
                      background=False, web_dir=tmp_path / "out")
     c = TestClient(app, follow_redirects=False)
-    r = c.get("/cms/stats/index.txt?app=x&_rsc=1", headers={"Accept": "text/html,*/*"})
-    assert r.status_code == 302 and r.headers["location"] == "/cms/stats/?app=x"
-    rsc = c.get("/cms/stats/index.txt", headers={"RSC": "1", "Accept": "*/*"})
+    r = c.get("/cms/seo/index.txt?app=x&_rsc=1", headers={"Accept": "text/html,*/*"})
+    assert r.status_code == 302 and r.headers["location"] == "/cms/seo/?app=x"
+    rsc = c.get("/cms/seo/index.txt", headers={"RSC": "1", "Accept": "*/*"})
     assert rsc.status_code == 200 and rsc.text == "1:payload" and rsc.headers["cache-control"] == "no-cache"

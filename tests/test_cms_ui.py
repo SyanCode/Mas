@@ -131,7 +131,7 @@ def test_history_shows_changes_and_undo_restores(live):
 
 
 def test_statistics_cookie_banner_preview_compliance_and_media(live):
-    page, errors = open_page(live, "/cms/stats/?app=site")
+    page, errors = open_page(live, "/cms/audience/?app=site")
     page.get_by_role("heading", name="Statistics").wait_for()
     page.get_by_text("Conversion rate").first.wait_for()
     page.get_by_text("Traffic sources").wait_for()

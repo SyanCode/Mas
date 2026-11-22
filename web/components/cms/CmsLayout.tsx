@@ -101,7 +101,7 @@ function Sidebar({ onNavigate }: { onNavigate: () => void }) {
             )}
             <Group title={t("Site")}>
               {may("content") && <NavLink href={`/cms/media/?${q}`} icon={ImageIcon} active={here("/cms/media")}>{t("Media")}</NavLink>}
-              {site.domain && may("stats") && <NavLink href={`/cms/stats/?${q}`} icon={BarChart3} active={here("/cms/stats")}>{t("Statistics")}</NavLink>}
+              {site.domain && may("stats") && <NavLink href={`/cms/audience/?${q}`} icon={BarChart3} active={here("/cms/audience")}>{t("Statistics")}</NavLink>}
               {site.domain && may("stats") && <NavLink href={`/cms/uptime/?${q}`} icon={HeartPulse} active={here("/cms/uptime")}>{t("Availability")}</NavLink>}
               {site.domain && may("seo") && <NavLink href={`/cms/seo/?${q}`} icon={ScanSearch} active={here("/cms/seo")}>{t("Search engines")}</NavLink>}
               {may("privacy") && <NavLink href={`/cms/compliance/?${q}`} icon={ShieldCheck} active={here("/cms/compliance")}>{t("Compliance")}</NavLink>}

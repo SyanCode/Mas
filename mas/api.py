@@ -476,6 +476,11 @@ def create_app(
                 activity["wake"].set()
             activity["at"] = time.monotonic()
         path = request.url.path
+        if path in ("/cms/stats", "/cms/stats/"):
+            # The statistics page moved: privacy blocklists (EasyPrivacy "/cms/stats/*") block every file under
+            # that path, the page's script included, and left a black page. Old bookmarks and e-mails land here.
+            query = request.url.query
+            return RedirectResponse("/cms/audience/" + (f"?{query}" if query else ""), status_code=301)
         if path.endswith("/index.txt") and not request.headers.get("rsc") and "text/html" in request.headers.get("accept", ""):
             # A browser sent to the page's data file (after an update, a tab still running the old build falls back
             # to this address): show the page itself, freshly loaded, instead of the raw payload.
