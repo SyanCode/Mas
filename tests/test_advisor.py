@@ -9,7 +9,7 @@ import pytest
 import server
 from fastapi.testclient import TestClient
 
-from mas import auth
+from mas import ai, auth
 from mas.advisor import Advisor, AdvisorError, fingerprint, parse_proposals
 from mas.ai import AiPool
 from mas.api import create_app
@@ -189,3 +189,32 @@ def test_the_active_run_is_found_again(env):
             break
         time.sleep(0.05)
     assert client.get("/api/robot/active").json() is None
+
+
+def test_monthly_token_cap_counts_every_ai_use_and_stops_it(env):
+    client, csrf, db = env
+    client.post("/api/ai/accounts", headers=csrf, json={"provider": "anthropic", "secret": API, "name": "Pro", "password": PASSWORD})
+    pool = client.app.state.pool
+    pool.opener = lambda req, timeout: Resp(json.dumps({"content": [{"type": "text", "text": GOOD}],
+                                                        "usage": {"input_tokens": 300, "output_tokens": 40}}).encode())
+    assert client.post("/api/advisor/run", headers=csrf).status_code == 200
+    budget = client.get("/api/robot").json()["budget"]
+    assert budget["cap"] == 0 and budget["by_source"]["advisor"]["calls"] == 1 and budget["weighted"] == 340
+    # cache reads count for a tenth
+    pool._record("robot", {"input": 10, "cache_write": 0, "cache_read": 1000, "output": 5})
+    assert pool.month_usage()["weighted"] == budget["weighted"] + 115
+    # a cap under what is spent: nothing more is sent, the robot does not start
+    assert client.put("/api/robot", headers=csrf, json={"monthly_cap": -1}).status_code == 422
+    r = client.put("/api/robot", headers=csrf, json={"monthly_cap": 50})
+    assert r.status_code == 200 and r.json()["budget"]["cap"] == 50
+    refused = client.post("/api/robot/runs", headers=csrf, json={"goal": "seo", "app_id": "", "autonomy": "auto"})
+    assert refused.status_code == 409 and "monthly token cap" in refused.json()["detail"]
+    sent = []
+    pool.opener = lambda req, timeout: sent.append(req) or answer(GOOD)
+    with pytest.raises(ai.BudgetReached):
+        pool.ask("s", [{"role": "user", "content": "x"}])
+    assert sent == []
+    assert client.put("/api/robot", headers=csrf, json={"monthly_cap": 0}).json()["budget"]["cap"] == 0
+    assert client.post("/api/robot/runs", headers=csrf, json={"goal": "seo", "app_id": "", "autonomy": "read"}).status_code == 200
+    assert not auth.api_token_allowed("/api/robot")  # a token never changes the cap
+    assert "robot-settings" in [h["action"] for h in db.history(limit=20)]

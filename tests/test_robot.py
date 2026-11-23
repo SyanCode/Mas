@@ -454,3 +454,20 @@ def test_a_run_records_its_tokens_and_cache_use(env):
     assert db.list_robot_runs(1)[0]["usage"]["calls"] == 2
     month = db.robot_usage(time.time() - 30 * 86400)
     assert month["cache_read"] == 8000 and month["runs"] == 1 and db.robot_usage(time.time() + 10)["runs"] == 0
+
+
+def test_a_question_cannot_change_anything(env):
+    robot, db, pool, gh, mas, uid = env
+    pool.opener = script([tool("deploy_app", app_id="shop")], [{"type": "text", "text": "The site is fine."}])
+
+    async def go():
+        return await finish(robot, robot.start("Is my shop site healthy?", "shop", "read", uid), db)
+    run = asyncio.run(go())
+    first = pool.opener.seen[0]
+    names = {t["name"] for t in first["tools"]}
+    assert "deploy_app" not in names and "repo_edit" not in names and "seo_report" in names
+    assert "This is a QUESTION" in first["messages"][0]["content"][0]["text"]
+    assert "only answers a question" in pool.opener.seen[1]["messages"][2]["content"][0]["content"]
+    assert run["status"] == "done" and run["summary"] == "The site is fine." and ("POST", "/api/apps/shop/deploy") not in mas.calls
+    with pytest.raises(AiError):
+        robot.configure(None, "read")  # never the autonomy of scheduled rounds

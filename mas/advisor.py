@@ -101,7 +101,7 @@ class Advisor:
             raise AdvisorError("an analysis just ran: wait a minute")
         try:
             reply = self.pool.ask(SYSTEM, [{"role": "user", "content": json.dumps(self.snapshot(), ensure_ascii=False)}],
-                                  max_tokens=2000, timeout=90)
+                                  max_tokens=2000, timeout=90, source="advisor")
             proposals = parse_proposals(reply.text)
         except AdvisorError as exc:
             self.db.set_setting(S_ERROR, str(exc))

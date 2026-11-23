@@ -45,6 +45,10 @@ MAX_FILE = 200_000
 DEPLOY_WAIT = 240
 FINAL = {"live", "failed", "superseded"}
 AUTONOMY = ("ask", "auto")
+QUESTION = "read"  # a question asked to the mascot: the robot looks and answers, it has no tool that changes anything
+QUESTION_NOTE = ("\n\nThis is a QUESTION from the administrator, not a task. Answer it with what your tools show "
+                 "(read-only: you cannot change anything in this run). Be short and concrete, in the language of the "
+                 "question. If something should be changed, say what and suggest the goal to give the robot.")
 SCHEDULES = {"off": 0, "daily": 86400, "weekly": 7 * 86400}
 BLOCKED_PARTS = {".git", ".github", "node_modules", ".ssh"}
 BLOCKED_NAME = re.compile(r"(^\.env|\.pem$|\.key$|\.p12$|id_rsa|secrets?\.|credentials)", re.I)
@@ -216,14 +220,17 @@ class Robot:
         goal = PRESETS.get(goal, goal).strip()
         if len(goal) < 5 or len(goal) > 4000:
             raise AiError("describe the goal in a few sentences")
-        if autonomy not in AUTONOMY:
-            raise AiError("autonomy must be ask or auto")
+        if autonomy not in (*AUTONOMY, QUESTION):
+            raise AiError("autonomy must be ask, auto or read")
         if app_id and not self.db.get_app(app_id):
             raise AiError("unknown site")
         if self.active() is not None:
             raise AiError("the robot is already working: wait for it or stop it")
         if not self.pool.configured():
             raise AiError("connect an AI account first (Settings → AI accounts)")
+        spent = self.pool.over_budget()
+        if spent:
+            raise AiError(spent)
         run_id = self.db.create_robot_run(goal, app_id, autonomy)
         state = {"event": asyncio.Event(), "approve": False, "stop": False, "seen": {}}
         state["task"] = asyncio.create_task(self._run(run_id, goal, app_id, autonomy, user_id, state))
@@ -289,16 +296,20 @@ class Robot:
         summary, status = "", "done"
         usage: dict | None = None
         tools = [t for t in TOOLS if not (t.get("server") and app_id)]  # a run on one site never sees the server tools
+        if autonomy == QUESTION:
+            tools = [t for t in tools if not t["gated"]]
         try:
             async with self.client_for(token) as mas:
                 intro = goal + (f"\n\nWork on the site with app id: {app_id}." if app_id else "\n\nChoose the sites that need it (list_sites).")
+                if autonomy == QUESTION:
+                    intro += QUESTION_NOTE
                 messages: list[dict] = [{"role": "user", "content": intro}]
                 deadline = time.monotonic() + RUN_SECONDS
                 for _ in range(MAX_STEPS):
                     if state["stop"] or time.monotonic() > deadline:
                         status, summary = "stopped", "stopped" if state["stop"] else "out of time"
                         break
-                    reply = await asyncio.to_thread(self.pool.ask, SYSTEM, messages, tools, 16000, 300)
+                    reply = await asyncio.to_thread(self.pool.ask, SYSTEM, messages, tools, 16000, 300, "robot")
                     usage = add_usage(usage, reply.usage)
                     self.db.update_robot_run(run_id, usage=usage)
                     if reply.text.strip():
@@ -348,6 +359,8 @@ class Robot:
             return f"this run is limited to the site {scope}"
         if spec.get("server") and scope:
             return f"the server tools are not available in a run limited to the site {scope}"
+        if spec["gated"] and autonomy == QUESTION:
+            return "this run only answers a question: nothing can be changed. Suggest the goal to give the robot instead."
         label = f"{name} {app_id}".strip()
         key = name + json.dumps(args, sort_keys=True, default=str)
         seen = state["seen"]

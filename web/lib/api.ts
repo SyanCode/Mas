@@ -733,6 +733,7 @@ export interface RobotState {
   presets: string[];
   skills?: { name: string; description: string }[];
   usage_30d?: RobotUsage;
+  budget?: { month: string; cap: number; weighted: number; total: RobotUsage; by_source: Record<string, RobotUsage> };
   active: number | null;
   runs: RobotRun[];
 }

@@ -200,7 +200,7 @@ class Autopilot:
                 self.db.update_suggestion(s["id"], status="new", result="stopped", finished_at=None)
                 events.append(f"stopped:{s['id']}")
                 continue
-            if not self.pool.usable():  # cut short by the AI's usage limit: not a failure, back to the queue
+            if not self.pool.usable() or self.pool.over_budget():  # cut short by a usage limit: not a failure, back to the queue
                 self.db.update_suggestion(s["id"], status="new", result="waiting for the AI limit to reset", finished_at=None)
                 events.append(f"limit:{s['id']}")
                 continue
@@ -236,7 +236,7 @@ class Autopilot:
             self.db.set_setting(BATCH, None)
             return events
         if (not (cfg["enabled"] or cfg["batch"]) or cfg["paused"] or user_id is None or self.robot.active() is not None
-                or not self.pool.configured() or not self.pool.usable()
+                or not self.pool.configured() or not self.pool.usable() or self.pool.over_budget()
                 or (cfg["max_per_day"] and cfg["started_today"] >= cfg["max_per_day"])):
             return events
         now = time.time()

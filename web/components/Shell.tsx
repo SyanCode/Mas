@@ -10,6 +10,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { ModePicker, ThemePicker } from "@/components/ThemePicker";
 import { Kbd } from "@/components/ui";
 import { RobotPill } from "@/components/RobotPill";
+import { Mascot } from "@/components/Mascot";
 import { api, rememberSession, type Session } from "@/lib/api";
 import { getUiMode, isEmbedded, setUiMode } from "@/lib/desktop";
 import { LanguagePicker, msg, useT } from "@/lib/i18n";
@@ -218,6 +219,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <aside className="absolute inset-y-0 left-0 w-[min(16rem,85vw)] animate-slide-in shadow-2xl"><SideNav editor={editor} pathname={pathname} version={session.version} /></aside>
           </div>
         )}
+        {session.role === "admin" && !isEmbedded() && <Mascot />}
         <div className="lg:pl-60">
           <header className="mas-header sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-zinc-200/70 px-5 backdrop-blur-xl sm:px-8 dark:border-white/[0.06]">
             <button type="button" onClick={() => setDrawer(true)} aria-label={t("Menu")} className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-900/[0.05] lg:hidden dark:text-zinc-300 dark:hover:bg-white/[0.07]">

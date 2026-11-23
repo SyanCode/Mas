@@ -622,3 +622,30 @@ table {
   input[type="number"]::-webkit-inner-spin-button,
   input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 }
+
+/* -- the robot mascot (components/MascotBot.tsx) ------------------------------------------------- */
+.mascot .mascot-float { animation: mascot-float 3.6s ease-in-out infinite; }
+.mascot .mascot-shadow { transform-origin: 60px 133px; animation: mascot-shadow 3.6s ease-in-out infinite; }
+.mascot .mascot-blink { transform-origin: 60px 53px; animation: mascot-blink 4.8s infinite; }
+.mascot .mascot-look { animation: mascot-look 2.4s ease-in-out infinite; }
+.mascot .mascot-scan { animation: mascot-scan 1.6s linear infinite; }
+.mascot .mascot-halo { transform-origin: 60px 8px; animation: mascot-halo 2.4s ease-in-out infinite; }
+.mascot-working .mascot-halo, .mascot-waiting .mascot-halo { animation-duration: 0.9s; }
+.mascot-sleep .mascot-halo { opacity: 0; animation: none; }
+.mascot-sleep .mascot-float { animation-duration: 6s; }
+.mascot .mascot-wave { transform-origin: 93px 96px; animation: mascot-wave 1.1s ease-in-out 2; }
+.mascot .mascot-z { animation: mascot-z 2.8s ease-in-out infinite; }
+.mascot-waiting .mascot-float { animation: mascot-hop 1.4s ease-in-out infinite; }
+@keyframes mascot-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes mascot-shadow { 0%, 100% { transform: scaleX(1); opacity: 0.16; } 50% { transform: scaleX(0.82); opacity: 0.1; } }
+@keyframes mascot-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+@keyframes mascot-look { 0%, 100% { transform: translateX(-5px); } 50% { transform: translateX(5px); } }
+@keyframes mascot-scan { from { transform: translateX(-16px); } to { transform: translateX(66px); } }
+@keyframes mascot-halo { 0%, 100% { transform: scale(0.7); opacity: 0.5; } 50% { transform: scale(1.15); opacity: 1; } }
+@keyframes mascot-wave { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-35deg); } 65% { transform: rotate(-10deg); } }
+@keyframes mascot-hop { 0%, 100% { transform: translateY(0); } 30% { transform: translateY(-7px); } 55% { transform: translateY(0); } }
+@keyframes mascot-z { 0% { transform: translate(0, 0); opacity: 0; } 30% { opacity: 1; } 100% { transform: translate(6px, -10px); opacity: 0; } }
+.mascot-dock:hover .mascot-arm { transform-origin: 93px 96px; animation: mascot-wave 1.1s ease-in-out 1; }
+@media (prefers-reduced-motion: reduce) {
+  .mascot *, .mascot-dock:hover .mascot-arm { animation: none !important; }
+}

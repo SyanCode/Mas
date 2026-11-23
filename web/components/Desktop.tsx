@@ -1,5 +1,6 @@
 "use client";
 
+import { Mascot } from "@/components/Mascot";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Bell, Bot, Copy, ExternalLink, LayoutPanelLeft, LogOut, Minus, RotateCw, Search, Square, X } from "lucide-react";
 import { Avatar, myAvatarUrl, shownName } from "@/components/Avatar";
@@ -402,6 +403,7 @@ export function Desktop({ session }: { session: Session }) {
         </div>
       </nav>
 
+      {session.role === "admin" && <div className="relative z-[1001]"><Mascot /></div>}
       {!editor && <CommandPalette open={palette} onClose={() => setPalette(false)} onNavigate={(href, label) => open(href, label)} />}
     </div>
   );

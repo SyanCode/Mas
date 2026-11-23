@@ -46,6 +46,11 @@ class FakePool:
     def usable(self):
         return [] if self.limited or not self.ok else [object()]
 
+    spent = ""  # the monthly token cap is reached
+
+    def over_budget(self):
+        return self.spent
+
     accounts_list = [{"name": "Pro", "enabled": True, "error": ""}]
 
     def accounts(self):

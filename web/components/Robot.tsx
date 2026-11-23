@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, Check, CircleSlash, Hammer, Play, ShieldCheck, Square, Wrench, X } from "lucide-react";
-import { Badge, Button, Card, ErrorText, Label, Select, Spinner, Textarea } from "@/components/ui";
+import { Badge, Button, Card, ErrorText, Input, Label, Select, Spinner, Textarea } from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type RobotRun, type RobotState, type RobotStep, type RobotUsage } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
 
@@ -35,6 +35,38 @@ function Usage({ u }: { u?: RobotUsage | null }) {
     <span className="text-xs tabular-nums text-zinc-500" title={detail}>
       {t("{n} tokens", { n: kilo(total) })} · {t("{p}% from cache", { p: cached })}
     </span>
+  );
+}
+
+/** Tokens of the month (robot, advisor, questions) and the cap that stops every AI use when it is spent. */
+function Budget({ state, onSave }: { state: RobotState; onSave: (cap: number) => void }) {
+  const t = useT();
+  const b = state.budget;
+  const [cap, setCap] = useState("");
+  useEffect(() => { setCap(b?.cap ? String(Math.round(b.cap / 1000)) : ""); }, [b?.cap]);
+  if (!b) return null;
+  const share = b.cap ? Math.min(100, Math.round((b.weighted / b.cap) * 100)) : 0;
+  const sources: Record<string, string> = { robot: t("robot"), advisor: t("advisor"), other: t("other") };
+  return (
+    <Card title={t("Monthly token budget")}>
+      <div className="space-y-3 text-sm">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <span><span className="text-lg font-semibold tabular-nums">{kilo(b.weighted)}</span> <span className="text-zinc-500">{b.cap ? t("of {n} tokens this month", { n: kilo(b.cap) }) : t("tokens this month, no cap")}</span></span>
+          <span className="text-xs text-zinc-500">{Object.entries(b.by_source).map(([k, u]) => `${sources[k] ?? k} ${kilo(u.input + u.cache_write + u.output + Math.floor(u.cache_read / 10))}`).join(" · ")}</span>
+        </div>
+        {b.cap > 0 && (
+          <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-white/10" role="progressbar" aria-valuenow={share} aria-valuemin={0} aria-valuemax={100}>
+            <div className={`h-full rounded-full ${share >= 100 ? "bg-rose-500" : share >= 80 ? "bg-amber-500" : "bg-indigo-500"}`} style={{ width: `${share}%` }} />
+          </div>
+        )}
+        <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); onSave(Math.max(0, Math.round(Number(cap || 0) * 1000))); }}>
+          <Label title={t("Cap (thousands of tokens a month)")} hint={t("When it is spent, the robot, the autopilot, the advisor and the questions stop until next month. Cache reads count for a tenth. Empty: no cap.")}>
+            <Input type="number" min={0} step={100} value={cap} onChange={(e) => setCap(e.target.value)} placeholder={t("no cap")} className="w-40" />
+          </Label>
+          <Button type="submit">{t("Save")}</Button>
+        </form>
+      </div>
+    </Card>
   );
 }
 
@@ -93,7 +125,7 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
     setBusy(path); setError("");
     try { await api(`/robot/runs/${run!.id}/${path}`, { method: "POST", body }); setRun(await api<RobotRun>(`/robot/runs/${run!.id}`)); } catch (e) { setError((e as ApiError).detail); } finally { setBusy(""); }
   }
-  async function save(body: { schedule?: string; autonomy?: string }) {
+  async function save(body: { schedule?: string; autonomy?: string; monthly_cap?: number }) {
     try { await api("/robot", { method: "PUT", body }); load(); } catch (e) { setError((e as ApiError).detail); }
   }
 
@@ -162,6 +194,10 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
             <p className="text-xs text-zinc-500">{autonomy === "auto" ? t("In automatic mode the robot commits and deploys alone. Mas still checks nginx, health-checks the new release and rolls back by itself; every commit is in your repository history.") : t("The robot reads and audits freely, but every commit, deployment and fix waits for your click.")}</p>
           </div>
         </Card>
+      )}
+
+      {state && !live && (
+        <Budget state={state} onSave={(cap) => save({ monthly_cap: cap })} />
       )}
 
       {state && !live && (

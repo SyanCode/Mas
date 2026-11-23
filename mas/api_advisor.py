@@ -73,6 +73,7 @@ class DecisionBody(BaseModel):
 class RobotSettings(BaseModel):
     schedule: str | None = Field(default=None, max_length=10)
     autonomy: str | None = Field(default=None, max_length=5)
+    monthly_cap: int | None = Field(default=None, ge=0, le=10_000_000_000)  # tokens a month for every AI use, 0: none
 
 
 def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: Advisor, pool: AiPool, robot: Robot,
@@ -228,7 +229,8 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
     @app.get("/api/robot")
     def robot_overview(_=Depends(current_session)) -> dict:
         return {**robot.settings(), "presets": list(PRESETS), "skills": skills_mod.catalog(), "active": robot.active(),
-                "runs": db.list_robot_runs(15), "usage_30d": db.robot_usage(time.time() - 30 * 86400)}
+                "runs": db.list_robot_runs(15), "usage_30d": db.robot_usage(time.time() - 30 * 86400),
+                "budget": pool.month_usage()}
 
     @app.get("/api/robot/active")
     def robot_active(_=Depends(current_session)) -> dict | None:
@@ -245,9 +247,12 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
     def robot_configure(body: RobotSettings, s=Depends(current_session)) -> dict:
         try:
             out = robot.configure(body.schedule, body.autonomy)
+            if body.monthly_cap is not None:
+                out["budget"] = pool.set_cap(body.monthly_cap)
         except AiError as exc:
             raise bad(exc) from None
-        db.audit(s.username, "robot-settings", True, detail=f"{out['schedule']}, {out['autonomy']}")
+        cap = f", cap {body.monthly_cap}" if body.monthly_cap is not None else ""
+        db.audit(s.username, "robot-settings", True, detail=f"{out['schedule']}, {out['autonomy']}{cap}")
         return out
 
     @app.post("/api/robot/runs")

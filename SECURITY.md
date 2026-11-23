@@ -48,3 +48,10 @@ an app's repository through the GitHub App (the same blocked paths as the robot:
 treats them as data. `install_skills` commits only those skill files, under `.claude/skills/`, and like every other
 commit of the robot waits for a click in *Ask me* mode. The MCP tools `list_skills` and `get_skill` read nothing
 else and need no write access.
+
+## AI budget and questions
+
+A question asked to the robot mascot runs with the read-only tools only: the model is never offered a tool that
+commits, deploys, rolls back or restarts, and such a call is refused if it is attempted. The monthly token cap is
+checked before every request to an AI provider; only an administrator signed in can change it (`/api/robot` refuses
+API tokens).

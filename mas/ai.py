@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -66,6 +67,10 @@ class LimitReached(AiError):
     def __init__(self, message: str, retry_after: float | None = None) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+
+
+class BudgetReached(AiError):  # the monthly token cap set by the administrator is spent
+    pass
 
 
 class Refused(AiError):  # the key is wrong, revoked or not allowed
@@ -130,6 +135,11 @@ def usage_of(input: int = 0, cache_write: int = 0, cache_read: int = 0, output: 
     """Tokens of one request in one shape for every provider: ``input`` is the input read without the cache."""
     return {"input": max(0, int(input or 0)), "cache_write": int(cache_write or 0), "cache_read": int(cache_read or 0),
             "output": int(output or 0)}
+
+
+def weighted(u: dict) -> int:
+    """Tokens counted against the monthly cap: cache reads count for a tenth, as providers bill them."""
+    return sum(int(u.get(k) or 0) for k in ("input", "cache_write", "output")) + int(u.get("cache_read") or 0) // 10
 
 
 def add_usage(total: dict | None, more: dict) -> dict:
@@ -285,6 +295,47 @@ class AiPool:
         self.host, self.config, self.db = host, config, db
         self.opener = urllib.request.urlopen  # replaced in tests
         self.now = time.time  # replaced in tests
+        self._lock = threading.Lock()
+
+    # tokens of the month and the cap
+
+    def _month(self) -> str:
+        return time.strftime("%Y-%m", time.gmtime(self.now()))
+
+    def month_usage(self) -> dict:
+        """Tokens of the calendar month (UTC) by source (robot, advisor…), against the cap (0: no cap)."""
+        month = self._month()
+        try:
+            by = json.loads(self.db.get_setting(f"ai_usage:{month}") or "{}")
+        except ValueError:
+            by = {}
+        total = {k: sum(int(u.get(k) or 0) for u in by.values()) for k in (*USAGE_KEYS, "calls")}
+        return {"month": month, "by_source": by, "total": total, "weighted": weighted(total),
+                "cap": int(self.db.get_setting("ai_monthly_cap") or 0)}
+
+    def set_cap(self, cap: int) -> dict:
+        if not 0 <= int(cap) <= 10_000_000_000:
+            raise AiError("the monthly cap is a number of tokens, 0 for none")
+        self.db.set_setting("ai_monthly_cap", str(int(cap)) if cap else None)
+        return self.month_usage()
+
+    def over_budget(self) -> str:
+        """Why no more request may be sent this month ('' when they may)."""
+        m = self.month_usage()
+        if m["cap"] and m["weighted"] >= m["cap"]:
+            return (f"the monthly token cap is reached ({m['weighted']:,} of {m['cap']:,} tokens in {m['month']}): "
+                    "raise it on the Robot page, or wait for next month")
+        return ""
+
+    def _record(self, source: str, usage: dict) -> None:
+        with self._lock:
+            key = f"ai_usage:{self._month()}"
+            try:
+                by = json.loads(self.db.get_setting(key) or "{}")
+            except ValueError:
+                by = {}
+            by[source] = add_usage(by.get(source), usage)
+            self.db.set_setting(key, json.dumps(by))
 
     # secrets
 
@@ -367,8 +418,12 @@ class AiPool:
         return bool(self.db.list_ai_accounts())
 
     def ask(self, system: str, messages: list[dict], tools: list[dict] | None = None, max_tokens: int = 4000,
-            timeout: float = 120) -> Reply:
-        """Ask the first usable account; when it is at its limit, the next one, and so on."""
+            timeout: float = 120, source: str = "other") -> Reply:
+        """Ask the first usable account; when it is at its limit, the next one, and so on. Refused once the monthly
+        token cap is spent; the tokens of every answer are added to the month, under ``source``."""
+        spent = self.over_budget()
+        if spent:
+            raise BudgetReached(spent)
         tried: list[str] = []
         for acct in self.usable():
             try:
@@ -393,6 +448,7 @@ class AiPool:
             else:
                 self.db.update_ai_account(acct["id"], cooldown_until=None, last_error=None, used=self.now())
                 reply.account = acct["name"]
+                self._record(source, reply.usage)
                 return reply
         if not tried:
             raise AiError("connect an AI account first (Settings → AI accounts)" if not self.configured()

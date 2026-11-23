@@ -201,6 +201,16 @@ no AI: `/mcp` is only a protocol in front of the API.
   back by itself. The robot has no shell and no secret: it works through about twenty tools with a short-lived token of its own
   (deleted when the run ends) that cannot reach accounts, tokens or environment variables, only the repositories of your
   apps, and never `.env`, keys or CI workflows. Audit texts and files are treated as data, never as instructions.
+- **Mascot.** The robot lives on the edge of every page (and of the desktop view) as a small robot whose face and
+  antenna show what it does: ready, working, waiting for your go-ahead, done, failed, asleep when the monthly budget is
+  spent. Drag it up, down or to the other side; hide it to a small tab. Click it to **ask** a question about the server
+  or a site (a read-only run: the robot looks with its tools and answers, it has no tool that changes anything), or
+  **Do it** to hand it a task with your usual autonomy; follow the run, allow or refuse a change and stop it from there.
+
+  ![The robot mascot](docs/mascot.png)
+- **Monthly token budget** (Robot page): the tokens of the month for every AI use (robot, advisor, questions), and an
+  optional cap. When it is spent nothing more is sent: the robot and the autopilot stop until next month (cache reads
+  count for a tenth, as they are billed). Only an administrator signed in changes it, never an API token.
 - **Skills.** The robot does not only change things, it knows how to do them well. Its prompt lists written skills
   (`mas skills`): the **22-point SEO checklist**, **not vibecoded** (the design, copy and code signs of a generated site
   and what to do instead), design craft, copywriting, accessibility, performance (Core Web Vitals), code quality and a
@@ -930,6 +940,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **Robot mascot and token budget**: a robot docked on the side of the screen (drag, other side, hide) shows the robot's state and answers questions read-only or takes a task; a monthly token cap stops every AI use when it is spent, with the month's tokens by source on the Robot page.
 - [x] **Robot skills**: the robot loads written know-how when a goal needs it (22-point SEO checklist, not vibecoded, design craft, copywriting, accessibility, performance, code quality, launch checklist); the SEO audit now checks structured data, breadcrumbs, heading order, broken links, orphan pages, thin and JavaScript-only pages, clean URLs, image sizes and blocking scripts and reports the 22 points; `polish_report` finds the signs of a generated, unfinished project; presets *Not vibecoded* and *Ready to launch*; the skills also go to Claude Code (`mas skills export`, MCP `get_skill`, the robot's `install_skills`).
 - [x] **Desktop view**: the dashboard as an OS (windows, dock, menu bar, live widgets, notifications, snapping, restored session); `/desktop/`, kept per browser.
 
