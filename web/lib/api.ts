@@ -715,14 +715,24 @@ export interface RobotRun {
   steps: RobotStep[] | number;
   pending: { tool: string; app_id: string; detail: string } | null;
   summary: string;
+  usage?: RobotUsage | null;
   created_at: number;
   finished_at: number | null;
+}
+export interface RobotUsage {
+  input: number;
+  cache_write: number;
+  cache_read: number;
+  output: number;
+  calls?: number;
+  runs?: number;
 }
 export interface RobotState {
   schedule: "off" | "daily" | "weekly";
   autonomy: "ask" | "auto";
   presets: string[];
   skills?: { name: string; description: string }[];
+  usage_30d?: RobotUsage;
   active: number | null;
   runs: RobotRun[];
 }

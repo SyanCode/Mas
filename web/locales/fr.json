@@ -2176,5 +2176,9 @@
   "{n} links lead to a missing page": "{n} liens mènent à une page introuvable",
   "Fix or remove these links, or redirect the old address (301).": "Corrigez ou supprimez ces liens, ou redirigez l'ancienne adresse (301).",
   "{n} pages of the sitemap are linked from no page read": "{n} pages du sitemap ne sont liées depuis aucune page lue",
-  "Link every page from at least one other page (menu, footer, related content).": "Liez chaque page depuis au moins une autre (menu, pied de page, contenus liés)."
+  "Link every page from at least one other page (menu, footer, related content).": "Liez chaque page depuis au moins une autre (menu, pied de page, contenus liés).",
+  "{a} input, {b} written to the cache, {c} read from the cache, {d} output": "{a} en entrée, {b} écrits dans le cache, {c} lus depuis le cache, {d} en sortie",
+  "{n} tokens": "{n} tokens",
+  "{p}% from cache": "{p} % depuis le cache",
+  "Last 30 days:": "30 derniers jours :"
 }

@@ -433,3 +433,24 @@ def test_unknown_skill_is_an_error_not_a_crash(env):
     run = asyncio.run(go())
     assert run["status"] == "done"
     assert pool.opener.seen[1]["messages"][2]["content"][0]["content"].startswith("error: unknown skill")
+
+
+def test_a_run_records_its_tokens_and_cache_use(env):
+    robot, db, pool, gh, mas, uid = env
+    turns = [[tool("list_sites")], [{"type": "text", "text": "ok"}]]
+    usages = [{"input_tokens": 3000, "cache_creation_input_tokens": 5000, "output_tokens": 100},
+              {"input_tokens": 200, "cache_read_input_tokens": 8000, "output_tokens": 50}]
+
+    def opener(req, timeout):
+        blocks = turns.pop(0)
+        stop = "tool_use" if blocks[0]["type"] == "tool_use" else "end_turn"
+        return Resp(json.dumps({"content": blocks, "stop_reason": stop, "usage": usages.pop(0)}).encode())
+    pool.opener = opener
+
+    async def go():
+        return await finish(robot, robot.start("seo", "shop", "auto", uid), db)
+    run = asyncio.run(go())
+    assert run["usage"] == {"input": 3200, "cache_write": 5000, "cache_read": 8000, "output": 150, "calls": 2}
+    assert db.list_robot_runs(1)[0]["usage"]["calls"] == 2
+    month = db.robot_usage(time.time() - 30 * 86400)
+    assert month["cache_read"] == 8000 and month["runs"] == 1 and db.robot_usage(time.time() + 10)["runs"] == 0

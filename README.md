@@ -189,7 +189,8 @@ no AI: `/mcp` is only a protocol in front of the API.
   is used again once it resets. A refused key is switched off. Keys are encrypted, never shown again, and adding one asks
   for your password. A ChatGPT subscription cannot be used through a key: Codex needs an OpenAI API key. Claude requests use
   prompt caching (the tools, the instructions and the conversation so far), so each step of the robot costs less and
-  answers sooner.
+  answers sooner. Each robot run records its tokens (input, written to and read from the cache,
+  output): **Previous runs** shows them per run and for the last 30 days.
 - **Advisor.** Every day or week the AI reads a summary of statuses (services, health checks, resource advice, apps,
   compliance and SEO scores: no logs, variables or credentials) and writes proposals, sites first (GDPR, SEO, style,
   mobile), then the server. Each can be marked done, dismissed, or handed to the robot.

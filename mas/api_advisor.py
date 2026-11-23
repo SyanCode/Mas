@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -227,7 +228,7 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
     @app.get("/api/robot")
     def robot_overview(_=Depends(current_session)) -> dict:
         return {**robot.settings(), "presets": list(PRESETS), "skills": skills_mod.catalog(), "active": robot.active(),
-                "runs": db.list_robot_runs(15)}
+                "runs": db.list_robot_runs(15), "usage_30d": db.robot_usage(time.time() - 30 * 86400)}
 
     @app.get("/api/robot/active")
     def robot_active(_=Depends(current_session)) -> dict | None:

@@ -329,6 +329,7 @@ USER_COLS = ("id, username, password_hash, totp_secret, totp_pending, totp_last_
              "display_name, nickname, bio, avatar_v, avatar_type IS NOT NULL AS has_avatar")  # not the picture itself
 
 MIGRATIONS = [
+    ("robot_runs", "usage TEXT"),  # JSON {input, cache_write, cache_read, output, calls}: tokens of the run
     ("site_stats", "countries TEXT"),
     ("site_stats", "sources TEXT"),
     ("site_stats", "devices TEXT"),
@@ -1083,15 +1084,29 @@ class Database:
         d = dict(row)
         d["steps"] = json.loads(d["steps"] or "[]")
         d["pending"] = json.loads(d["pending"]) if d["pending"] else None
+        d["usage"] = json.loads(d["usage"]) if d.get("usage") else None
         if brief:
             d["steps"] = len(d["steps"])
         return d
 
+    def robot_usage(self, since: float) -> dict:
+        """Tokens of every robot run started since ``since`` (the same keys as one run's usage)."""
+        from mas.ai import USAGE_KEYS
+        with self.tx() as c:
+            rows = c.execute("SELECT usage FROM robot_runs WHERE created_at >= ? AND usage IS NOT NULL", (since,)).fetchall()
+        total = {k: 0 for k in (*USAGE_KEYS, "calls")}
+        for (raw,) in rows:
+            for k, v in (json.loads(raw) or {}).items():
+                if k in total:
+                    total[k] += int(v or 0)
+        total["runs"] = len(rows)
+        return total
+
     def update_robot_run(self, run_id: int, **fields: Any) -> None:
-        cols = {"status", "steps", "pending", "summary", "finished_at"}
+        cols = {"status", "steps", "pending", "summary", "finished_at", "usage"}
         if not set(fields) <= cols:
             raise ValueError(f"invalid run fields: {set(fields) - cols}")
-        values = [json.dumps(v) if k in ("steps", "pending") and v is not None else v for k, v in fields.items()]
+        values = [json.dumps(v) if k in ("steps", "pending", "usage") and v is not None else v for k, v in fields.items()]
         with self.tx() as c:
             c.execute(f"UPDATE robot_runs SET {', '.join(f'{k} = ?' for k in fields)} WHERE id = ?", (*values, run_id))
 

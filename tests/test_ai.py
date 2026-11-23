@@ -174,3 +174,19 @@ def test_history_translates_for_openai():
         "type": "function_call_output", "call_id": "1", "output": "done"}
     chat = _chat_messages("sys", history)
     assert chat[2]["tool_calls"][0]["function"]["arguments"] == '{"a": 1}' and chat[3]["role"] == "tool"
+
+
+def test_usage_has_one_shape_for_every_provider(pool):
+    from mas.ai import add_usage, call_compat, call_openai
+
+    acct = {"model": "m", "base_url": "https://llm.example.com/v1"}
+    responses = Resp(json.dumps({"output": [], "usage": {"input_tokens": 100, "output_tokens": 5, "total_tokens": 105,
+                                                         "input_tokens_details": {"cached_tokens": 80}}}).encode())
+    r = call_openai(lambda req, timeout: responses, acct, OPENAI, "s", [{"role": "user", "content": "x"}], [], 10, 5)
+    assert r.usage == {"input": 20, "cache_write": 0, "cache_read": 80, "output": 5} and r.tokens == 105
+    chat = Resp(json.dumps({"choices": [{"message": {"content": "hi"}}], "usage": {
+        "prompt_tokens": 50, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": 10}}}).encode())
+    r = call_compat(lambda req, timeout: chat, acct, OPENAI, "s", [{"role": "user", "content": "x"}], [], 10, 5)
+    assert r.usage == {"input": 40, "cache_write": 0, "cache_read": 10, "output": 2} and r.tokens == 52
+    total = add_usage(add_usage(None, r.usage), {"input": 1, "output": 1})
+    assert total == {"input": 41, "cache_write": 0, "cache_read": 10, "output": 3, "calls": 2}

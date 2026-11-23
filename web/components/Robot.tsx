@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, Check, CircleSlash, Hammer, Play, ShieldCheck, Square, Wrench, X } from "lucide-react";
 import { Badge, Button, Card, ErrorText, Label, Select, Spinner, Textarea } from "@/components/ui";
-import { api, ApiError, timeAgo, type App, type RobotRun, type RobotState, type RobotStep } from "@/lib/api";
+import { api, ApiError, timeAgo, type App, type RobotRun, type RobotState, type RobotStep, type RobotUsage } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
 
 const PRESET_LABEL: Record<string, string> = {
@@ -18,6 +18,26 @@ const PRESET_HINT: Record<string, string> = {
   style: msg("Spacing, typography, contrast, responsive layout, tasteful animations."),
   maintenance: msg("Audit compliance and SEO, fix what is safe, report the rest."),
 };
+function kilo(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+/** Tokens of a run (or of the month) and the share of the input read from the prompt cache. */
+function Usage({ u }: { u?: RobotUsage | null }) {
+  const t = useT();
+  if (!u) return null;
+  const read = u.input + u.cache_write + u.cache_read;
+  const total = read + u.output;
+  if (!total) return null;
+  const cached = read ? Math.round((u.cache_read / read) * 100) : 0;
+  const detail = t("{a} input, {b} written to the cache, {c} read from the cache, {d} output", { a: u.input, b: u.cache_write, c: u.cache_read, d: u.output });
+  return (
+    <span className="text-xs tabular-nums text-zinc-500" title={detail}>
+      {t("{n} tokens", { n: kilo(total) })} · {t("{p}% from cache", { p: cached })}
+    </span>
+  );
+}
+
 const TONE = { running: "sky", waiting: "amber", done: "emerald", failed: "red", stopped: "zinc" } as const;
 
 function Step({ s }: { s: RobotStep }) {
@@ -86,7 +106,7 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
       {run && (
         <Card title={<span className="flex items-center gap-2"><Bot className={`size-4 ${live ? "animate-float text-indigo-400" : ""}`} />{t("Robot")} <Badge tone={TONE[run.status]}>{run.status === "running" ? t("working") : run.status === "waiting" ? t("waiting for you") : run.status === "done" ? t("done") : run.status === "failed" ? t("failed") : t("stopped")}</Badge></span>}
           actions={live ? <Button variant="ghost" disabled={!!busy} onClick={() => act("stop")}><Square className="size-3.5" />{t("Stop")}</Button> : <Button variant="ghost" onClick={() => setRun(null)}>{t("Close")}</Button>}>
-          <p className="mb-3 text-sm text-zinc-500">{run.goal}</p>
+          <p className="mb-3 flex flex-wrap items-baseline justify-between gap-2 text-sm text-zinc-500"><span>{run.goal}</span><Usage u={run.usage} /></p>
           <ul ref={log} className="max-h-[28rem] space-y-2.5 overflow-y-auto pr-1">{steps.map((s, i) => <Step key={i} s={s} />)}{live && run.status === "running" && <li className="flex items-center gap-2 text-xs text-zinc-500"><Spinner />{t("Claude is working…")}</li>}</ul>
           {run.pending && (
             <div className="animate-pop mt-4 space-y-3 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4">
@@ -165,13 +185,15 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
       )}
 
       {state && state.runs.length > 0 && !live && (
-        <Card title={t("Previous runs")} padded={false}>
+        <Card title={t("Previous runs")} padded={false}
+          actions={state.usage_30d && state.usage_30d.calls ? <span className="flex items-center gap-1.5 text-xs text-zinc-500">{t("Last 30 days:")} <Usage u={state.usage_30d} /></span> : undefined}>
           <ul className="divide-y divide-zinc-200/80 dark:divide-white/[0.06]">
             {state.runs.map((r) => (
               <li key={r.id}>
                 <button type="button" onClick={() => api<RobotRun>(`/robot/runs/${r.id}`).then(setRun)} className="flex w-full flex-wrap items-center gap-2 px-4 py-3 text-left text-sm transition hover:bg-zinc-900/[0.03] dark:hover:bg-white/[0.04]">
                   <Badge tone={TONE[r.status]}>{r.status}</Badge>
                   <span className="min-w-0 flex-1 truncate">{r.goal}</span>
+                  <Usage u={r.usage} />
                   <span className="text-xs text-zinc-500">{timeAgo(new Date(r.created_at * 1000).toISOString())}</span>
                 </button>
               </li>

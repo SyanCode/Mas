@@ -51,6 +51,7 @@ class Reply:
     stop: str = "end"  # end | tool_use | length
     account: str = ""
     tokens: int = 0
+    usage: dict = field(default_factory=dict)  # {input, cache_write, cache_read, output}: see ``usage_of``
 
     @property
     def text(self) -> str:
@@ -122,6 +123,19 @@ def _post(opener, url: str, headers: dict, payload: dict, timeout: float) -> dic
 
 
 CACHE = {"type": "ephemeral"}
+USAGE_KEYS = ("input", "cache_write", "cache_read", "output")
+
+
+def usage_of(input: int = 0, cache_write: int = 0, cache_read: int = 0, output: int = 0) -> dict:
+    """Tokens of one request in one shape for every provider: ``input`` is the input read without the cache."""
+    return {"input": max(0, int(input or 0)), "cache_write": int(cache_write or 0), "cache_read": int(cache_read or 0),
+            "output": int(output or 0)}
+
+
+def add_usage(total: dict | None, more: dict) -> dict:
+    out = {k: int((total or {}).get(k) or 0) + int(more.get(k) or 0) for k in USAGE_KEYS}
+    out["calls"] = int((total or {}).get("calls") or 0) + 1
+    return out
 
 
 def _cached(messages: list[dict]) -> list[dict]:
@@ -164,9 +178,9 @@ def call_anthropic(opener, acct: dict, secret: str, system: str, messages: list[
             out.append({"type": "tool_use", "id": b["id"], "name": b["name"], "input": b.get("input") or {}})
     usage = data.get("usage") or {}
     stop = "tool_use" if data.get("stop_reason") == "tool_use" else "length" if data.get("stop_reason") == "max_tokens" else "end"
-    tokens = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
-                                                     "cache_read_input_tokens", "output_tokens"))
-    return Reply(out, stop, tokens=tokens)
+    used = usage_of(usage.get("input_tokens"), usage.get("cache_creation_input_tokens"),
+                    usage.get("cache_read_input_tokens"), usage.get("output_tokens"))
+    return Reply(out, stop, tokens=sum(used.values()), usage=used)
 
 
 def _openai_items(messages: list[dict]) -> list[dict]:
@@ -208,7 +222,9 @@ def call_openai(opener, acct: dict, secret: str, system: str, messages: list[dic
             out.append({"type": "tool_use", "id": item["call_id"], "name": item["name"], "input": args if isinstance(args, dict) else {}})
     usage = data.get("usage") or {}
     stop = "tool_use" if any(b["type"] == "tool_use" for b in out) else "length" if (data.get("incomplete_details") or {}).get("reason") == "max_output_tokens" else "end"
-    return Reply(out, stop, tokens=int(usage.get("total_tokens", 0)))
+    cached = int((usage.get("input_tokens_details") or {}).get("cached_tokens") or 0)
+    used = usage_of(int(usage.get("input_tokens") or 0) - cached, 0, cached, usage.get("output_tokens"))
+    return Reply(out, stop, tokens=int(usage.get("total_tokens") or sum(used.values())), usage=used)
 
 
 def _chat_messages(system: str, messages: list[dict]) -> list[dict]:
@@ -252,7 +268,10 @@ def call_compat(opener, acct: dict, secret: str, system: str, messages: list[dic
             args = {}
         out.append({"type": "tool_use", "id": call["id"], "name": call["function"]["name"], "input": args if isinstance(args, dict) else {}})
     stop = "tool_use" if msg.get("tool_calls") else "length" if choice.get("finish_reason") == "length" else "end"
-    return Reply(out, stop, tokens=int((data.get("usage") or {}).get("total_tokens", 0)))
+    usage = data.get("usage") or {}
+    cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
+    used = usage_of(int(usage.get("prompt_tokens") or 0) - cached, 0, cached, usage.get("completion_tokens"))
+    return Reply(out, stop, tokens=int(usage.get("total_tokens") or sum(used.values())), usage=used)
 
 
 ADAPTERS = {"anthropic": call_anthropic, "openai": call_openai, "openai_compat": call_compat}

@@ -27,7 +27,7 @@ from typing import Any, Callable
 
 from mas import auth, polish
 from mas import skills as skills_mod
-from mas.ai import AiError, AiPool
+from mas.ai import AiError, AiPool, add_usage
 from mas.db import Database
 from mas.mcp_endpoint import MasClient, MasError
 
@@ -287,6 +287,7 @@ class Robot:
         token = auth.new_api_token()
         token_id = self.db.create_api_token("robot", auth.hash_token(token), user_id, "write", time.time() + 3600)
         summary, status = "", "done"
+        usage: dict | None = None
         tools = [t for t in TOOLS if not (t.get("server") and app_id)]  # a run on one site never sees the server tools
         try:
             async with self.client_for(token) as mas:
@@ -298,6 +299,8 @@ class Robot:
                         status, summary = "stopped", "stopped" if state["stop"] else "out of time"
                         break
                     reply = await asyncio.to_thread(self.pool.ask, SYSTEM, messages, tools, 16000, 300)
+                    usage = add_usage(usage, reply.usage)
+                    self.db.update_robot_run(run_id, usage=usage)
                     if reply.text.strip():
                         self._note(run_id, steps, "say", reply.text, account=reply.account)
                     messages.append({"role": "assistant", "content": reply.blocks or [{"type": "text", "text": "(no answer)"}]})
