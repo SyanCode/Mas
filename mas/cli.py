@@ -1073,7 +1073,10 @@ def serve(
     if insecure_cookie:
         env.config.cookie_secure = False
     application = create_app(env.host, env.config, env.db)
-    uvicorn.run(application, host=host, port=port or env.config.port,
+    # No line per request: the dashboard polls every few seconds, and journald would write (and keep) every one of
+    # them. Actions are in Mas's own history; errors still reach the journal.
+    logging.getLogger("httpx2").setLevel(logging.WARNING)  # the robot's and MCP's in-process calls
+    uvicorn.run(application, host=host, port=port or env.config.port, access_log=False,
                 proxy_headers=False, server_header=False, log_level="info")
 
 
@@ -1272,6 +1275,28 @@ def self_update_cmd(
     if colors():
         sys.stdout.write(render(version_from_source(env.config.src_dir) or __version__, subtitle="updated"))
     console.print("[green]✓[/] Mas updated")
+
+
+# -- economy mode ----------------------------------------------------------------
+
+@app.command()
+def economy(
+    ctx: typer.Context,
+    state: Annotated[Optional[str], typer.Argument(help="on or off (nothing: show it).")] = None,
+) -> None:
+    """Economy mode: memory limits and sleep of quiet apps applied by themselves (Resources page)."""
+    from mas.resources import AUTO
+    env: Env = ctx.obj
+    if state is None:
+        on = env.db.get_setting(AUTO) == "1"
+        console.print(f"economy mode: [bold]{'on' if on else 'off'}[/]")
+        return
+    if state not in ("on", "off"):
+        fail("on or off")
+    env.db.set_setting(AUTO, "1" if state == "on" else None)
+    env.db.set_setting(AUTO + "_at", None)
+    env.db.audit(actor(), "resources-auto", True, detail=state)
+    console.print(f"[green]✓[/] economy mode {state}" + (" (first look within a minute)" if state == "on" else ""))
 
 
 # -- skills ----------------------------------------------------------------------

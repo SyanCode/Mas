@@ -557,6 +557,29 @@ def test_nextjs_static_export_is_served_by_nginx(env):
     assert served == [("http://127.0.0.1/", "web.example.com")]
 
 
+def test_nextjs_standalone_build_starts_its_own_small_server(env):
+    host, deployer = env["host"], env["deployer"]
+    ran = []
+
+    def on_stream(argv, cwd, env_vars):
+        ran.append(argv)
+        if argv[-2:] == ["run", "build"]:  # output: "standalone"
+            host.makedirs(f"{cwd}/.next/standalone")
+            host.write_text(f"{cwd}/.next/standalone/server.js", "// next")
+            host.makedirs(f"{cwd}/public")
+
+    host.stream_hooks.append(on_stream)
+    deployer.health_check = lambda url, h, t: (True, "HTTP 200")
+    rid, ok = deploy_once(env, SHA1)
+    log = deployer.log_path("web", rid).read_text()
+    assert ok, log
+    unit = host.read_text("/etc/systemd/system/mas-app-web.service")
+    assert "/srv/mas/apps/web/current/.next/standalone/server.js" in unit and "next start" not in unit
+    assert '"PORT=7100"' in unit and '"HOSTNAME=127.0.0.1"' in unit
+    assert ["cp", "-a", ".next/static", ".next/standalone/.next/"] in [a[-4:] for a in ran]
+    assert ["cp", "-a", "public", ".next/standalone/"] in [a[-4:] for a in ran]
+
+
 def test_node_app_runs_its_start_script_without_npm(env):
     host, db, deployer = env["host"], env["db"], env["deployer"]
     db.update_app("web", type="node")

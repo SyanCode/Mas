@@ -111,3 +111,30 @@ def test_advice(res):
     db.update_app("web", resources=json.dumps({"memory_mb": 320, "sleep_after_min": 30}))
     ids = {a["id"]: a for a in r.advice(db.get_app("web"))}
     assert "memory-high" in ids and "sleep" not in ids
+
+
+def test_economy_mode_applies_the_safe_advice_by_itself(res):
+    r, db, host, _ = res
+    r.started = 0
+    host._commands = {"systemctl show mas-app-web.service -pMemoryCurrent --value": {"output": "314572800\n"},
+                      **host._commands}
+    applied = []
+    assert r.auto_tune(10_000, applied.append) == []  # off by default
+    r.set_auto(True)
+    out = r.auto_tune(10_000, applied.append)
+    # a limit with a wide margin at once, but sleep only after three quiet looks in a row
+    assert json.loads(db.get_app("web")["resources"]) == {"memory_mb": 640} and applied == ["web"]
+    assert out == ["web: memory limit 640 MB (uses 300)"]
+    assert r.auto_tune(10_100, applied.append) == []  # not before two hours
+    r.auto_tune(10_000 + 7200, applied.append)
+    assert "sleep_after_min" not in json.loads(db.get_app("web")["resources"])
+    r.auto_tune(10_000 + 2 * 7200, applied.append)
+    assert json.loads(db.get_app("web")["resources"]) == {"memory_mb": 640, "sleep_after_min": 30}
+    # a visit resets the count; a value set by a person is never lowered
+    db.update_app("web", resources=json.dumps({"memory_mb": 4096}))
+    db.set_setting("resources_auto_quiet:web", "2")
+    visits(host, 10_000 + 3 * 7200, 200)
+    r.auto_tune(10_000 + 3 * 7200, applied.append)
+    assert json.loads(db.get_app("web")["resources"]) == {"memory_mb": 4096}
+    assert db.get_setting("resources_auto_quiet:web") is None
+    assert any(h["action"] == "resources-auto" for h in db.history(limit=10))

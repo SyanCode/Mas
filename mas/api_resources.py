@@ -21,6 +21,10 @@ class AutoscaleBody(BaseModel):
     max: int = Field(ge=1, le=16)
 
 
+class AutoBody(BaseModel):
+    enabled: bool
+
+
 class ResourcesBody(BaseModel):
     memory_mb: int | None = Field(default=None, ge=0, le=65536)
     sleep_after_min: int | None = Field(default=None, ge=0, le=10080)
@@ -35,6 +39,18 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, deployer:
         if target is None:
             raise HTTPException(404, "unknown app")
         return target
+
+    @app.get("/api/resources/auto")
+    def get_auto(_=Depends(current_session)) -> dict:
+        return {"enabled": resources.auto_enabled()}
+
+    @app.put("/api/resources/auto")
+    def put_auto(body: AutoBody, s=Depends(current_session)) -> dict:
+        """Economy mode: the safe advice (memory limits, sleep of quiet apps) applied by itself every two hours."""
+        resources.set_auto(body.enabled)
+        db.set_setting("resources_auto_at", None)  # the first look happens at the next minute
+        db.audit(s.username, "resources-auto", True, detail="on" if body.enabled else "off")
+        return {"enabled": body.enabled}
 
     @app.get("/api/apps/{app_id}/resources")
     async def get_resources(app_id: str, _=Depends(current_session)) -> dict:

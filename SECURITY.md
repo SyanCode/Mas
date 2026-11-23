@@ -55,3 +55,10 @@ A question asked to the robot mascot runs with the read-only tools only: the mod
 commits, deploys, rolls back or restarts, and such a call is refused if it is attempted. The monthly token cap is
 checked before every request to an AI provider; only an administrator signed in can change it (`/api/robot` refuses
 API tokens).
+
+## Economy mode
+
+Economy mode (`/api/resources/auto`, `mas economy`) changes the memory limits and the sleep of every app, so only an
+administrator signed in can turn it on or off: API tokens are refused. It only adds a limit to an app without one,
+raises a limit an app is close to, or adds sleep to an app without visits; it never lowers or removes a value a
+person set.

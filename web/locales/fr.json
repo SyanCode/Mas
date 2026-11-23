@@ -2211,5 +2211,7 @@
   "tokens this month, no cap": "tokens ce mois-ci, sans plafond",
   "Cap (thousands of tokens a month)": "Plafond (milliers de tokens par mois)",
   "When it is spent, the robot, the autopilot, the advisor and the questions stop until next month. Cache reads count for a tenth. Empty: no cap.": "Une fois atteint, le robot, le pilote automatique, le conseiller et les questions s'arrêtent jusqu'au mois suivant. Les lectures du cache comptent pour un dixième. Vide : pas de plafond.",
-  "no cap": "pas de plafond"
+  "no cap": "pas de plafond",
+  "Economy mode": "Mode économie",
+  "Every two hours, apps without a memory limit get one (twice what they use), apps close to their limit get more, and apps without a visit for about six hours sleep after 30 quiet minutes. A value you set is never lowered.": "Toutes les deux heures, les apps sans limite de mémoire en reçoivent une (le double de ce qu'elles utilisent), celles proches de leur limite en reçoivent plus, et celles sans visite depuis environ six heures se mettent en veille après 30 minutes calmes. Une valeur que vous avez fixée n'est jamais baissée."
 }

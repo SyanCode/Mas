@@ -37,6 +37,9 @@ WAKE_EVERY = 5              # seconds: a sleeping app is started at most that of
 MIN_MEMORY_MB, MAX_MEMORY_MB = 64, 65536
 MIN_SLEEP_MIN, MAX_SLEEP_MIN = 5, 7 * 24 * 60
 ASLEEP = "asleep:"          # setting asleep:<app id> = "1" while the app sleeps
+AUTO = "resources_auto"     # "1": economy mode, the advice is applied by itself (see Resources.auto_tune)
+AUTO_EVERY = 2 * 3600       # seconds between two looks of the economy mode
+AUTO_QUIET_LOOKS = 3        # an app goes to sleep after this many looks in a row without traffic (about 6 hours)
 
 
 class ResourceError(Exception):
@@ -79,11 +82,70 @@ class Resources:
     def asleep(self, app_id: str) -> bool:
         return self.db.get_setting(ASLEEP + app_id) == "1"
 
+    # -- economy mode ----------------------------------------------------------------
+
+    def auto_enabled(self) -> bool:
+        return self.db.get_setting(AUTO) == "1"
+
+    def set_auto(self, on: bool) -> bool:
+        self.db.set_setting(AUTO, "1" if on else None)
+        return on
+
+    def auto_tune(self, now: float | None = None, apply=None) -> list[str]:
+        """Economy mode: every two hours, the apps get what the advice says, without anyone clicking.
+
+        Only what is safe: a memory limit with a wide margin (twice what the app uses) for an app that has none, a
+        higher limit for an app close to its own, and sleep after 30 minutes for an app that had no visit at three looks
+        in a row (about six hours). A value set by a person is never lowered or removed; sleeping apps wake up at the
+        first visit (a "starting" page for a few seconds). ``apply``: rewrites the units (the deployer's, in tests a fake)."""
+        now = now or time.time()
+        if not self.auto_enabled() or now - float(self.db.get_setting(AUTO + "_at") or 0) < AUTO_EVERY:
+            return []
+        self.db.set_setting(AUTO + "_at", str(now))
+        apply = apply or (lambda app_id: self.deployer.apply_resources(app_id, self._log(app_id)))
+        done = []
+        for app in self.db.list_apps():
+            if app.get("replica_of"):
+                continue
+            advice = {a["id"]: a for a in self.advice(app, now)}
+            res = dict(app_resources(app))
+            changes = []
+            if "memory-limit" in advice and not res.get("memory_mb"):
+                used = advice["memory-limit"]["params"]["used"]
+                res["memory_mb"] = min(MAX_MEMORY_MB, max(256, int(math.ceil(used * 2 / 64)) * 64))
+                changes.append(f"memory limit {res['memory_mb']} MB (uses {used})")
+            elif "memory-high" in advice:
+                res["memory_mb"] = min(MAX_MEMORY_MB, advice["memory-high"]["set"]["memory_mb"])
+                changes.append(f"memory limit raised to {res['memory_mb']} MB")
+            key = f"{AUTO}_quiet:{app['id']}"
+            quiet = int(self.db.get_setting(key) or 0) + 1 if "sleep" in advice else 0
+            self.db.set_setting(key, str(quiet) if quiet else None)
+            if quiet >= AUTO_QUIET_LOOKS and not res.get("sleep_after_min"):
+                res["sleep_after_min"] = 30
+                if res.get("autoscale"):
+                    res["autoscale"]["min"] = 1
+                changes.append("sleep after 30 min without a visit")
+            if not changes:
+                continue
+            self.db.update_app(app["id"], resources=dumps(res))
+            self.db.audit("resources", "resources-auto", True, service_id=app["id"], detail="; ".join(changes))
+            try:
+                apply(app["id"])
+            except DeployError as exc:
+                self.db.audit("resources", "resources-auto", False, service_id=app["id"], detail=str(exc)[:300])
+            done.append(f"{app['id']}: " + "; ".join(changes))
+        return done
+
     # -- every minute --------------------------------------------------------------
 
     def tick(self, now: float | None = None) -> list[str]:
         now = now or time.time()
         notes = []
+        try:
+            notes += self.auto_tune(now)
+        except Exception:  # noqa: BLE001 - the sleep and autoscale below must go on
+            import logging
+            logging.getLogger(__name__).exception("economy mode failed")
         for app in self.db.list_apps():
             res = app_resources(app)
             if app["mode"] != "managed" or ServiceType(app["type"]) not in PROXY_TYPES or app.get("replica_of"):

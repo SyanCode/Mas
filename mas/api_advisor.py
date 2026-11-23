@@ -235,13 +235,14 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
     @app.get("/api/robot/active")
     def robot_active(_=Depends(current_session)) -> dict | None:
         """The run going on, if any: what the dashboard shows everywhere, and finds again after a refresh."""
-        run_id = robot.active()
+        run_id = robot.active() or robot.active(question=True)  # the task first: it may wait for a click
         run = db.get_robot_run(run_id) if run_id else None
         if not run or run["status"] not in ("running", "waiting"):
             return None
         last = next((x["text"] for x in reversed(run["steps"]) if x["kind"] != "result"), "")
         return {"id": run["id"], "goal": run["goal"][:200], "status": run["status"], "app_id": run["app_id"],
-                "steps": len(run["steps"]), "last": last[:160], "started": run["created_at"]}
+                "steps": len(run["steps"]), "last": last[:160], "started": run["created_at"],
+                "question": run["autonomy"] == "read"}
 
     @app.put("/api/robot")
     def robot_configure(body: RobotSettings, s=Depends(current_session)) -> dict:

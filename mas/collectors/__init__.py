@@ -13,6 +13,7 @@ from mas.config import Config
 from mas.host import Host
 
 log = logging.getLogger("mas.scan")
+_logged: set[str] = set()  # a warning goes to the journal once per process, not at every scan
 
 
 @dataclass
@@ -22,6 +23,8 @@ class ScanContext:
     warnings: list[str] = field(default_factory=list)
 
     def warn(self, message: str) -> None:
-        log.warning(message)
+        if message not in _logged and len(_logged) < 500:
+            _logged.add(message)
+            log.warning(message)
         if message not in self.warnings:
             self.warnings.append(message)

@@ -525,7 +525,37 @@ export function rememberSession(s: Session) {
   csrf = s.csrf;
 }
 
+// While the tab is hidden, reads wait until it is visible again, and the same read is sent only once: the pages that
+// poll every few seconds cost nothing (no request, no work for Mas) in a tab nobody looks at.
+const hiddenReads = new Map<string, Promise<unknown>>();
+
+function whenVisible(): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (document.hidden) return;
+      document.removeEventListener("visibilitychange", check);
+      resolve();
+    };
+    document.addEventListener("visibilitychange", check);
+  });
+}
+
 export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  if ((init.method ?? "GET") === "GET" && typeof document !== "undefined" && document.hidden) {
+    let waiting = hiddenReads.get(path);
+    if (!waiting) {
+      waiting = whenVisible().then(() => {
+        hiddenReads.delete(path);
+        return request<T>(path, init);
+      });
+      hiddenReads.set(path, waiting);
+    }
+    return waiting as Promise<T>;
+  }
+  return request<T>(path, init);
+}
+
+async function request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const method = init.method ?? "GET";
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
@@ -710,7 +740,7 @@ export interface RobotRun {
   id: number;
   goal: string;
   app_id: string;
-  autonomy: "ask" | "auto";
+  autonomy: "ask" | "auto" | "read";
   status: "running" | "waiting" | "done" | "failed" | "stopped";
   steps: RobotStep[] | number;
   pending: { tool: string; app_id: string; detail: string } | null;

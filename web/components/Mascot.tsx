@@ -8,7 +8,7 @@ import { Button, Spinner } from "@/components/ui";
 import { api, ApiError, type App, type RobotRun, type RobotStep } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
 
-interface Active { id: number; status: "running" | "waiting" }
+interface Active { id: number; status: "running" | "waiting"; question?: boolean }
 interface Place { side: "left" | "right"; y: number; hidden: boolean }  // y: share of the window height (top of the robot)
 
 const KEY = "mas-mascot";
@@ -35,6 +35,22 @@ function answerOf(run: RobotRun): string {
  * shows what the robot is doing on its face. A click opens a panel to ask it something (it only looks: nothing is
  * changed) or give it something to do, follow the run and answer its questions.
  */
+/** A change the robot wants to make, waiting for the administrator's click. */
+function Approval({ run, busy, withGoal, onDecide }: { run: RobotRun; busy: boolean; withGoal?: boolean; onDecide: (approve: boolean) => void }) {
+  const t = useT();
+  return (
+    <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-2.5">
+      <div className="text-xs font-medium text-amber-700 dark:text-amber-300">{t("The robot asks your permission")}</div>
+      {withGoal && <div className="mt-0.5 truncate text-[11px] text-zinc-500">{run.goal}</div>}
+      <div className="mt-1 text-xs">{run.pending?.detail}</div>
+      <div className="mt-2 flex gap-2">
+        <Button variant="primary" disabled={busy} onClick={() => onDecide(true)}><Check className="size-3.5" />{t("Allow")}</Button>
+        <Button variant="danger" disabled={busy} onClick={() => onDecide(false)}><X className="size-3.5" />{t("Refuse")}</Button>
+      </div>
+    </div>
+  );
+}
+
 export function Mascot() {
   const t = useT();
   const [place, setPlace] = useState<Place>({ side: "right", y: 0.72, hidden: true });
@@ -50,6 +66,7 @@ export function Mascot() {
   const [error, setError] = useState("");
   const [bubble, setBubble] = useState("");
   const press = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const shown = useRef<number | null>(null);
   const lastStatus = useRef<string>("");
   const log = useRef<HTMLDivElement>(null);
 
@@ -64,19 +81,32 @@ export function Mascot() {
   }, []);
   const save = useCallback((p: Place) => { setPlace(p); try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* private mode */ } }, []);
 
-  // what the robot does: the active run, and the run followed in the panel
-  const runId = active?.id ?? run?.id ?? null;
+  // what the robot does: the task going on (it may wait for a click), and the question asked here, which may run
+  // beside a task since it changes nothing. The panel follows the question asked here (until "New question"), else
+  // the task; a task waiting for a click always gets its Allow / Refuse box on top.
+  const runId = run?.id ?? null;
+  const [waiting, setWaiting] = useState<RobotRun | null>(null);
+  const runRef = useRef<RobotRun | null>(null);
+  useEffect(() => { runRef.current = run; }, [run]);
   useEffect(() => {
     let alive = true;
     const look = async () => {
       const a = await api<Active | null>("/robot/active").catch(() => null);
       if (!alive) return;
       setActive(a);
-      const id = a?.id ?? (Number(sessionStorage.getItem(RUN_KEY)) || null);
+      const mine = Number(sessionStorage.getItem(RUN_KEY)) || null;  // the last question asked here
+      const cur = runRef.current;
+      const keepMine = !!mine && ((a?.question && a.id === mine) || (cur?.id === mine && cur.autonomy === "read"));
+      // a run that just ended stays on screen until another one starts
+      const id = keepMine ? mine : a && !a.question ? a.id : shown.current ?? mine;
+      shown.current = id;
       if (id) {
         const r = await api<RobotRun>(`/robot/runs/${id}`).catch(() => null);
         if (alive && r) setRun(r);
       }
+      const task = a && !a.question && a.status === "waiting" && a.id !== id
+        ? await api<RobotRun>(`/robot/runs/${a.id}`).catch(() => null) : null;
+      if (alive) setWaiting(task && task.status === "waiting" ? task : null);
     };
     look();
     const every = setInterval(look, open || active ? 2500 : 6000);
@@ -108,10 +138,12 @@ export function Mascot() {
     return () => window.removeEventListener("keydown", esc);
   }, [open, sites]);
 
+  const mineLive = !!run && run.autonomy === "read" && (run.status === "running" || run.status === "waiting");
+  const taskBusy = !!active && !active.question;
   const finishedAt = run?.finished_at ?? 0;
   const recent = finishedAt && Date.now() / 1000 - finishedAt < 60;
   const spent = /monthly token cap/i.test(error) || /monthly token cap/i.test(run?.summary ?? "");
-  const mood: Mood = active?.status === "running" ? "working" : active?.status === "waiting" ? "waiting"
+  const mood: Mood = active?.status === "waiting" ? "waiting" : active?.status === "running" || mineLive ? "working"
     : spent ? "sleep" : recent && run?.status === "done" ? "happy" : recent && run?.status === "failed" ? "sad" : "idle";
 
   const start = async (goal: string, question: boolean) => {
@@ -121,23 +153,27 @@ export function Mascot() {
       const body: Record<string, string> = { goal: goal.trim(), app_id: appId };
       if (question) body.autonomy = "read";
       const r = await api<{ id: number }>("/robot/runs", { method: "POST", body });
-      sessionStorage.setItem(RUN_KEY, String(r.id));
-      setActive({ id: r.id, status: "running" });
+      shown.current = r.id;
+      if (question) sessionStorage.setItem(RUN_KEY, String(r.id));
+      else sessionStorage.removeItem(RUN_KEY);
+      if (!question) setActive({ id: r.id, status: "running" });
       setRun(await api<RobotRun>(`/robot/runs/${r.id}`));
       setText("");
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally { setBusy(""); }
   };
-  const act = async (what: "stop" | "decision", body?: object) => {
-    if (!runId) return;
+  const act = async (what: "stop" | "decision", body?: object, target: number | null = runId) => {
+    if (!target) return;
     setBusy(what); setError("");
     try {
-      await api(`/robot/runs/${runId}/${what}`, { method: "POST", body });
-      setRun(await api<RobotRun>(`/robot/runs/${runId}`));
+      await api(`/robot/runs/${target}/${what}`, { method: "POST", body });
+      const after = await api<RobotRun>(`/robot/runs/${target}`);
+      if (target === runId) setRun(after);
+      else setWaiting(after.status === "waiting" ? after : null);
     } catch (e) { setError(e instanceof ApiError ? e.detail : String(e)); } finally { setBusy(""); }
   };
-  const fresh = () => { sessionStorage.removeItem(RUN_KEY); setRun(null); setError(""); };
+  const fresh = () => { sessionStorage.removeItem(RUN_KEY); shown.current = null; setRun(null); setError(""); };
 
   // dragging: up and down along the edge, and across to the other side
   const down = (e: ReactPointerEvent<HTMLButtonElement>) => {
@@ -180,7 +216,9 @@ export function Mascot() {
     ? { left: drag.x - SIZE / 2, top: drag.y - SIZE / 2 }
     : { [right ? "right" : "left"]: 12, top: `${place.y * 100}%` };
   const live = run && (run.status === "running" || run.status === "waiting");
-  const steps = run && Array.isArray(run.steps) ? (run.steps as RobotStep[]).filter((s) => s.kind === "say" || s.kind === "tool" || s.kind === "ask").slice(-8) : [];
+  const steps = run && Array.isArray(run.steps) ? (run.steps as RobotStep[])
+    .filter((s) => (s.kind === "say" && s.text.trim() !== (run.summary || "").trim()) || s.kind === "tool" || s.kind === "ask")
+    .map((s) => (s.kind === "say" ? { ...s, text: s.text.replace(/\n?RESULT:.*$/i, "").trim() } : s)).slice(-8) : [];
   // the panel opens beside the robot, inside the window
   const panelW = Math.min(PANEL_W, view.w - 24);
   const panelH = Math.min(576, view.h - 24);
@@ -205,12 +243,13 @@ export function Mascot() {
           </div>
 
           <div ref={log} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3 text-sm">
+            {waiting?.pending && <Approval run={waiting} busy={!!busy} withGoal onDecide={(approve) => act("decision", { approve }, waiting.id)} />}
             {!run && (
               <>
                 <p className="rounded-xl rounded-tl-sm bg-zinc-100 px-3 py-2 dark:bg-white/[0.06]">{t("Hi! Ask me anything about your server and your sites: I look and answer without changing anything. Or give me something to do.")}</p>
                 <div className="flex flex-wrap gap-1.5">
                   {SUGGESTIONS.map((s) => (
-                    <button key={s} type="button" disabled={!!busy || !!active} onClick={() => start(t(s), true)}
+                    <button key={s} type="button" disabled={!!busy || mineLive} onClick={() => start(t(s), true)}
                       className="rounded-full border border-indigo-400/30 px-2.5 py-1 text-xs text-indigo-600 transition hover:bg-indigo-400/10 disabled:opacity-50 dark:text-indigo-300">{t(s)}</button>
                   ))}
                 </div>
@@ -222,16 +261,7 @@ export function Mascot() {
                 {steps.map((s, i) => (
                   <p key={i} className={`text-xs ${s.kind === "say" ? "whitespace-pre-wrap text-zinc-600 dark:text-zinc-300" : "font-mono text-zinc-500"}`}>{s.kind === "say" ? s.text : `› ${s.text}`}</p>
                 ))}
-                {run.status === "waiting" && run.pending && (
-                  <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-2.5">
-                    <div className="text-xs font-medium text-amber-700 dark:text-amber-300">{t("The robot asks your permission")}</div>
-                    <div className="mt-1 text-xs">{run.pending.detail}</div>
-                    <div className="mt-2 flex gap-2">
-                      <Button variant="primary" disabled={!!busy} onClick={() => act("decision", { approve: true })}><Check className="size-3.5" />{t("Allow")}</Button>
-                      <Button variant="danger" disabled={!!busy} onClick={() => act("decision", { approve: false })}><X className="size-3.5" />{t("Refuse")}</Button>
-                    </div>
-                  </div>
-                )}
+                {run.status === "waiting" && run.pending && <Approval run={run} busy={!!busy} onDecide={(approve) => act("decision", { approve })} />}
                 {run.status === "running" && <p className="flex items-center gap-2 text-xs text-zinc-500"><Spinner />{t("Claude is working…")}</p>}
                 {!live && answerOf(run) && (
                   <p className={`whitespace-pre-wrap rounded-xl rounded-tl-sm px-3 py-2 ${run.status === "failed" ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-zinc-100 dark:bg-white/[0.06]"}`}>{answerOf(run)}</p>
@@ -248,9 +278,9 @@ export function Mascot() {
           </div>
 
           <form className="space-y-2 border-t border-zinc-200/70 p-2.5 dark:border-white/[0.06]" onSubmit={(e) => { e.preventDefault(); start(text, true); }}>
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} maxLength={4000} disabled={!!active}
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} maxLength={4000} disabled={mineLive}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); start(text, true); } }}
-              placeholder={active ? t("The robot is busy: wait for it or stop it") : t("Ask the robot…")}
+              placeholder={mineLive ? t("Claude is working…") : t("Ask the robot…")}
               className="w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 disabled:opacity-60 dark:border-white/10" />
             <div className="flex items-center gap-2">
               <select value={appId} onChange={(e) => setAppId(e.target.value)} aria-label={t("Site")}
@@ -258,11 +288,11 @@ export function Mascot() {
                 <option value="">{t("Any site")}</option>
                 {(sites ?? []).map((a) => <option key={a.id} value={a.id}>{a.domain || a.name}</option>)}
               </select>
-              <button type="button" disabled={!!busy || !!active || text.trim().length < 5} onClick={() => start(text, false)} title={t("Let the robot change things (with your settings: it asks first, or acts alone)")}
+              <button type="button" disabled={!!busy || taskBusy || mineLive || text.trim().length < 5} onClick={() => start(text, false)} title={t("Let the robot change things (with your settings: it asks first, or acts alone)")}
                 className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-900/[0.05] disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-white/[0.07]">
                 {busy === "do" ? <Spinner /> : <Wand2 className="size-3.5" />}{t("Do it")}
               </button>
-              <Button type="submit" variant="primary" disabled={!!busy || !!active || text.trim().length < 5}>{busy === "ask" ? <Spinner /> : <Send className="size-3.5" />}{t("Ask")}</Button>
+              <Button type="submit" variant="primary" disabled={!!busy || mineLive || text.trim().length < 5}>{busy === "ask" ? <Spinner /> : <Send className="size-3.5" />}{t("Ask")}</Button>
             </div>
           </form>
         </div>
@@ -270,10 +300,10 @@ export function Mascot() {
 
       <div className="mascot-dock fixed z-40 select-none" style={style}>
         {bubble && !open && (
-          <button type="button" onClick={() => setOpen(true)}
-            className={`absolute bottom-full mb-1 w-max max-w-[12rem] animate-pop rounded-xl border px-2.5 py-1.5 text-xs shadow-lg ${right ? "right-0" : "left-0"} ${mood === "waiting" ? "border-amber-400/40 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200" : "border-zinc-200 bg-white text-zinc-700 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200"}`}>
+          <div role="status" onClick={() => setOpen(true)}
+            className={`absolute bottom-full cursor-pointer mb-1 w-max max-w-[12rem] animate-pop rounded-xl border px-2.5 py-1.5 text-xs shadow-lg ${right ? "right-0" : "left-0"} ${mood === "waiting" ? "border-amber-400/40 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200" : "border-zinc-200 bg-white text-zinc-700 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200"}`}>
             {bubble}
-          </button>
+          </div>
         )}
         <button type="button" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { press.current = null; setDrag(null); }}
           aria-label={open ? t("Close the robot") : t("Ask the robot")} aria-expanded={open}

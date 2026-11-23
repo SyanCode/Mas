@@ -29,7 +29,7 @@ from mas import auth, polish
 from mas import skills as skills_mod
 from mas.ai import AiError, AiPool, add_usage
 from mas.db import Database
-from mas.mcp_endpoint import MasClient, MasError
+from mas.masclient import MasClient, MasError
 
 log = logging.getLogger(__name__)
 
@@ -213,8 +213,10 @@ class Robot:
 
     # -- runs --------------------------------------------------------------------------------------
 
-    def active(self) -> int | None:
-        return next((i for i, r in self.live.items() if not r["task"].done()), None)
+    def active(self, question: bool = False) -> int | None:
+        """The task run going on (or, with ``question``, the question being answered: a question may run beside a
+        task, since it changes nothing)."""
+        return next((i for i, r in self.live.items() if not r["task"].done() and r.get("question", False) == question), None)
 
     def start(self, goal: str, app_id: str, autonomy: str, user_id: int) -> int:
         goal = PRESETS.get(goal, goal).strip()
@@ -224,15 +226,16 @@ class Robot:
             raise AiError("autonomy must be ask, auto or read")
         if app_id and not self.db.get_app(app_id):
             raise AiError("unknown site")
-        if self.active() is not None:
-            raise AiError("the robot is already working: wait for it or stop it")
+        if self.active(question=autonomy == QUESTION) is not None:
+            raise AiError("the robot is already answering a question: wait a moment" if autonomy == QUESTION
+                          else "the robot is already working: wait for it or stop it")
         if not self.pool.configured():
             raise AiError("connect an AI account first (Settings → AI accounts)")
         spent = self.pool.over_budget()
         if spent:
             raise AiError(spent)
         run_id = self.db.create_robot_run(goal, app_id, autonomy)
-        state = {"event": asyncio.Event(), "approve": False, "stop": False, "seen": {}}
+        state = {"event": asyncio.Event(), "approve": False, "stop": False, "seen": {}, "question": autonomy == QUESTION}
         state["task"] = asyncio.create_task(self._run(run_id, goal, app_id, autonomy, user_id, state))
         self.live[run_id] = state
         return run_id

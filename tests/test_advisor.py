@@ -218,3 +218,12 @@ def test_monthly_token_cap_counts_every_ai_use_and_stops_it(env):
     assert client.post("/api/robot/runs", headers=csrf, json={"goal": "seo", "app_id": "", "autonomy": "read"}).status_code == 200
     assert not auth.api_token_allowed("/api/robot")  # a token never changes the cap
     assert "robot-settings" in [h["action"] for h in db.history(limit=20)]
+
+
+def test_economy_mode_route(env):
+    client, csrf, db = env
+    assert client.get("/api/resources/auto").json() == {"enabled": False}
+    assert client.put("/api/resources/auto", json={"enabled": True}).status_code == 403  # no CSRF token
+    assert client.put("/api/resources/auto", headers=csrf, json={"enabled": True}).json() == {"enabled": True}
+    assert db.get_setting("resources_auto") == "1" and client.app.state.resources.auto_enabled()
+    assert "resources-auto" in [h["action"] for h in db.history(limit=5)]

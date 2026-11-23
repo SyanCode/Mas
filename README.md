@@ -148,6 +148,7 @@ $ sudo mas backup create [-o DIR] [--keep 7]  # database, secret key, config, Gi
 $ sudo mas backup list
 $ sudo mas backup restore <file>  # current files kept as *.before-restore, then restart mas
 
+$ sudo mas economy on|off        # economy mode: memory limits and sleep of quiet apps, applied by themselves
 $ mas skills                    # the robot's skills (SEO checklist, not vibecoded, design, copy…)
 $ mas skills show seo-checklist
 $ mas skills export ~/my-site   # as Claude Code skills: ~/my-site/.claude/skills/*/SKILL.md
@@ -678,6 +679,19 @@ Each Node.js, Next.js or Python app has a **Resources** card (also editable from
   could sleep, instances that could follow the traffic, `output: "standalone"` for Next.js, a
   Minecraft container that reserves all its memory. **Apply** applies one, **Apply all advice**
   every one of them.
+- **Economy mode** (top of the Resources page, or `mas economy on`): every two hours Mas applies the safe advice by
+  itself. An app without a memory limit gets one (twice what it uses), an app close to its limit gets more, and an app
+  that had no visit at three looks in a row (about six hours) sleeps after 30 quiet minutes and wakes up at the next
+  visit. A value set by a person is never lowered or removed; every change is in the history.
+- **Next.js `output: "standalone"`** is started by itself: after the build Mas copies `.next/static` and `public/`
+  next to the standalone server and runs `node .next/standalone/server.js` instead of `next start` (about half the
+  memory, no full `node_modules` loaded).
+
+Mas keeps its own footprint small: the MCP library is loaded only once `/mcp` is turned on and called, the QR-code
+and HTTP-client libraries only when needed, freed memory is given back to the system every ten minutes
+(`malloc_trim`), requests are not written to the journal one by one (the dashboard polls every few seconds), a
+warning of the scan is logged once instead of at every scan, and a dashboard tab in the background sends no
+request until it is visible again.
 
 ### Traffic statistics
 
@@ -940,6 +954,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **Lighter Mas and apps**: economy mode (`mas economy on`), Next.js standalone builds started by themselves, the MCP library loaded on demand (about 20 MB and half the start time saved), freed memory returned to the system, no journal line per request, no polling from background tabs; a question to the mascot runs beside a task (read-only), tested in a real browser.
 - [x] **Robot mascot and token budget**: a robot docked on the side of the screen (drag, other side, hide) shows the robot's state and answers questions read-only or takes a task; a monthly token cap stops every AI use when it is spent, with the month's tokens by source on the Robot page.
 - [x] **Robot skills**: the robot loads written know-how when a goal needs it (22-point SEO checklist, not vibecoded, design craft, copywriting, accessibility, performance, code quality, launch checklist); the SEO audit now checks structured data, breadcrumbs, heading order, broken links, orphan pages, thin and JavaScript-only pages, clean URLs, image sizes and blocking scripts and reports the 22 points; `polish_report` finds the signs of a generated, unfinished project; presets *Not vibecoded* and *Ready to launch*; the skills also go to Claude Code (`mas skills export`, MCP `get_skill`, the robot's `install_skills`).
 - [x] **Desktop view**: the dashboard as an OS (windows, dock, menu bar, live widgets, notifications, snapping, restored session); `/desktop/`, kept per browser.

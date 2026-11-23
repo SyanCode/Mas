@@ -20,7 +20,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from mas import preview as preview_mod
-from mas import __version__, advisor as advisor_mod, ai as ai_mod, claudelogin as claudelogin_mod, api_advisor, robot as robot_mod, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_shares, shares as shares_mod, api_deploy, api_dns, api_stacks, api_supabase, auth, runtime
+from mas import __version__, advisor as advisor_mod, ai as ai_mod, claudelogin as claudelogin_mod, api_advisor, robot as robot_mod, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_shares, shares as shares_mod, api_deploy, api_dns, api_stacks, api_supabase, auth, masclient, runtime
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -68,6 +68,19 @@ VIEW_AS_HEADER = "x-mas-view-as"  # id of the editor an administrator previews t
 IDLE_AFTER = 180   # seconds without a dashboard request: the dashboard is closed
 IDLE_SCAN = 300    # full scan interval meanwhile
 TRUSTED_PROXIES = {"127.0.0.1", "::1"}
+TRIM_EVERY = 600   # seconds between two returns of freed memory to the system
+
+
+def release_memory() -> None:
+    """A full garbage collection, then glibc's malloc_trim: Python keeps freed memory in its arenas otherwise, and a
+    long-running Mas would slowly grow after each scan, audit or build log it read."""
+    import ctypes
+    import gc
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):  # not glibc (musl, macOS): nothing to trim
+        pass
 SECURITY_HEADERS = {
     "X-Frame-Options": "SAMEORIGIN",
     "X-Content-Type-Options": "nosniff",
@@ -211,6 +224,8 @@ def create_app(
     # systemd and nginx). Coming back wakes it up at once.
     activity = {"at": time.monotonic(), "wake": asyncio.Event()}
 
+    trimmed = [time.monotonic()]
+
     async def scan_loop() -> None:
         last_scan = -1e9
         try:  # the per-site log the statistics of the services read
@@ -312,6 +327,9 @@ def create_app(
                 await asyncio.to_thread(stack_backups.auto_backup)
             except Exception:
                 log.exception("service backups failed")
+            if time.monotonic() - trimmed[0] >= TRIM_EVERY:  # give the memory freed since back to the system
+                trimmed[0] = time.monotonic()
+                await asyncio.to_thread(release_memory)
             activity["wake"].clear()
             try:
                 await asyncio.wait_for(activity["wake"].wait(), timeout=max(10, config.scan_interval))
@@ -407,7 +425,7 @@ def create_app(
     pool = ai_mod.AiPool(host, config, db)
     advisor = advisor_mod.Advisor(db, pool, advisor_snapshot)
     claude_login = claudelogin_mod.ClaudeLogin(host, str(Path(db.path).parent / "claude-login"))
-    robot = robot_mod.Robot(db, pool, github_client, lambda token: mcp_endpoint.MasClient(app, token, None))
+    robot = robot_mod.Robot(db, pool, github_client, lambda token: masclient.MasClient(app, token, None))
     autopilot = Autopilot(db, robot, pool)
     usage = Usage(host, config, db, scanner, resources)
     maintenance = Maintenance(host, config, db, deployer)
@@ -436,10 +454,18 @@ def create_app(
             except Exception:  # noqa: BLE001 - the dashboard must start anyway
                 log.exception("could not refresh the Supabase nginx site")
         task = asyncio.create_task(scan_loop()) if background else None
-        async with mcp.session_manager().run():
+        mcp_stop = asyncio.Event()
+        mcp_task = asyncio.create_task(mcp.run(mcp_stop))  # builds the MCP server on its first call only
+        try:
             yield
-        if task:
-            task.cancel()
+        finally:
+            mcp_stop.set()
+            try:
+                await asyncio.wait_for(mcp_task, 10)
+            except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                mcp_task.cancel()
+            if task:
+                task.cancel()
 
     app = FastAPI(title="Mas", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)

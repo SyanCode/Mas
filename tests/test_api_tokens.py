@@ -70,6 +70,7 @@ def test_unknown_expired_and_revoked(env):
     ("post", "/api/account/password"), ("post", "/api/account/totp/disable"), ("get", "/api/users"),
     ("post", "/api/invites"), ("post", "/api/logout"), ("get", "/api/supabase/credentials"),
     ("get", "/api/apps/x/env"), ("put", "/api/apps/x/env"), ("post", "/api/cluster/tokens"),
+    ("put", "/api/resources/auto"),  # the economy mode changes every app: an administrator signed in only
 ])
 def test_token_never_reaches_accounts_or_secrets(env, method, path):
     client, db, uid = env

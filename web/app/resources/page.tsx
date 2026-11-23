@@ -46,6 +46,12 @@ function Resources() {
   const [busy, setBusy] = useState("");
   const [done, setDone] = useState("");
   const [confirmAll, setConfirmAll] = useState(false);
+  const [economy, setEconomy] = useState<boolean | null>(null);
+  useEffect(() => { api<{ enabled: boolean }>("/resources/auto").then((r) => setEconomy(r.enabled)).catch(() => setEconomy(null)); }, []);
+  const toggleEconomy = async () => {
+    try { setEconomy((await api<{ enabled: boolean }>("/resources/auto", { method: "PUT", body: { enabled: !economy } })).enabled); }
+    catch (e) { setError((e as ApiError).detail); }
+  };
   const load = useCallback(() => {
     api<Usage>("/usage").then((d) => { setData(d); setError(""); }).catch((e) => setError((e as ApiError).detail));
   }, []);
@@ -107,6 +113,18 @@ function Resources() {
       <PageHeader eyebrow={t("Server")} title={t("Resources")}
         subtitle={t("What uses the memory and the CPU of this server, everything at once. Refreshed every 10 seconds.")}
         actions={advice.length > 0 ? <Button variant="primary" disabled={busy !== ""} onClick={() => setConfirmAll(true)}>{t("Apply all advice ({n})", { n: advice.length })}</Button> : undefined} />
+
+      {economy !== null && (
+        <Card className="mb-6">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("Economy mode")} <Badge tone={economy ? "emerald" : "zinc"}>{economy ? t("on") : t("off")}</Badge></div>
+              <p className="mt-0.5 text-xs text-zinc-500">{t("Every two hours, apps without a memory limit get one (twice what they use), apps close to their limit get more, and apps without a visit for about six hours sleep after 30 quiet minutes. A value you set is never lowered.")}</p>
+            </div>
+            <Button variant={economy ? "secondary" : "primary"} onClick={toggleEconomy}>{economy ? t("Turn off") : t("Turn on")}</Button>
+          </div>
+        </Card>
+      )}
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="CPU" value={s?.cpu_percent != null ? `${s.cpu_percent} %` : "…"}

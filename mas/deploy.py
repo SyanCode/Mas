@@ -534,6 +534,14 @@ class Deployer:
             self._cmd(rlog, [*install, "--no-audit", "--no-fund"], cwd=workdir, env=env, user=user)
             if "build" in self._package_scripts(workdir):
                 self._cmd(rlog, ["npm", "run", "build"], cwd=workdir, env=env, user=user)
+            if app_type == ServiceType.NEXTJS and self.host.exists(f"{workdir}/.next/standalone/server.js"):
+                # output: "standalone": a small server with only the files it needs. It does not copy the static
+                # files and public/ itself (Next leaves that to a CDN): done here, then it starts instead of next start.
+                rlog.line("standalone build: copying .next/static and public/ next to its server")
+                self._cmd(rlog, ["mkdir", "-p", ".next/standalone/.next"], cwd=workdir, env=env, user=user)
+                self._cmd(rlog, ["cp", "-a", ".next/static", ".next/standalone/.next/"], cwd=workdir, env=env, user=user)
+                if self.host.exists(f"{workdir}/public"):
+                    self._cmd(rlog, ["cp", "-a", "public", ".next/standalone/"], cwd=workdir, env=env, user=user)
         elif app_type == ServiceType.PYTHON:
             self._cmd(rlog, ["python3", "-m", "venv", ".venv"], cwd=workdir, env=env, user=user)
             if "requirements.txt" in files:
@@ -549,6 +557,9 @@ class Deployer:
     def _exec_start(self, app: dict, app_type: ServiceType, current: str, release: str | None = None) -> str:
         if app.get("start_command"):
             return templates.systemd_quote(app["start_command"])
+        if app_type == ServiceType.NEXTJS and self.host.exists(f"{release or current}/.next/standalone/server.js"):
+            # about half the memory of next start: no full node_modules loaded (HOSTNAME and PORT come from the unit)
+            return f"{shutil.which('node') or '/usr/bin/node'} {current}/.next/standalone/server.js"
         if app_type == ServiceType.NEXTJS:
             return f"{current}/node_modules/.bin/next start -H {app.get('bind') or '127.0.0.1'} -p {app['port']}"
         if app_type == ServiceType.NODE:

@@ -12,7 +12,6 @@ from collections import deque
 from dataclasses import dataclass
 
 import pyotp
-import segno
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
@@ -68,10 +67,12 @@ def provisioning_uri(secret: str, username: str) -> str:
 
 
 def qr_svg(uri: str) -> str:
+    import segno  # only when 2FA is set up: no need to keep it in memory
     return segno.make(uri, error="m").svg_inline(scale=5, border=2)
 
 
 def qr_terminal(uri: str) -> None:
+    import segno
     segno.make(uri, error="m").terminal(compact=True)
 
 
@@ -168,7 +169,7 @@ API_TOKEN_FORBIDDEN = (
     "/api/account/", "/api/users", "/api/invites", "/api/logout", "/api/signup",
     "/api/cluster/tokens", "/api/github/manifest", "/api/supabase/credentials", "/api/dns/providers",
     "/api/tokens", "/api/mcp", "/api/host-alerts", "/api/self-backup", "/api/update", "/api/advisor", "/api/ai", "/api/robot",
-    "/api/shares", "/api/dependencies/settings",
+    "/api/shares", "/api/dependencies/settings", "/api/resources/auto",
 )
 API_TOKEN_FORBIDDEN_RE = re.compile(r"^/api/apps/[^/]+/env$")
 

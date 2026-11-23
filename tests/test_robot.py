@@ -471,3 +471,27 @@ def test_a_question_cannot_change_anything(env):
     assert run["status"] == "done" and run["summary"] == "The site is fine." and ("POST", "/api/apps/shop/deploy") not in mas.calls
     with pytest.raises(AiError):
         robot.configure(None, "read")  # never the autonomy of scheduled rounds
+
+
+def test_a_question_can_run_beside_a_task(env):
+    robot, db, pool, gh, mas, uid = env
+    import time as _t
+
+    def slow(req, timeout):
+        _t.sleep(0.3)
+        return Resp(json.dumps({"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn"}).encode())
+    pool.opener = slow
+
+    async def go():
+        task = robot.start("seo", "shop", "auto", uid)
+        question = robot.start("Is the shop site up?", "", "read", uid)
+        assert robot.active() == task and robot.active(question=True) == question
+        with pytest.raises(AiError):
+            robot.start("compliance", "shop", "auto", uid)  # still one task at a time
+        with pytest.raises(AiError):
+            robot.start("And the other site?", "", "read", uid)  # and one question
+        await finish(robot, task, db)
+        await finish(robot, question, db)
+        return db.get_robot_run(task), db.get_robot_run(question)
+    task, question = asyncio.run(go())
+    assert task["status"] == question["status"] == "done"

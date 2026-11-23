@@ -22,6 +22,8 @@ Targets on a mid-range phone: LCP < 2.5 s, CLS < 0.1, INP < 200 ms, page weight 
 - Ship less: remove unused libraries, import only what is used, split by route, load heavy widgets (maps, chats,
   video players) on interaction.
 - Static pages do not need a JavaScript framework at runtime: prefer static export / SSR with little hydration.
+- Next.js on Mas: set `output: "standalone"` in `next.config` (or `output: "export"` for a site without server
+  code): Mas then starts the small standalone server, about half the memory of `next start`.
 - Long tasks: break them up; no heavy work in click handlers.
 
 ## CSS
