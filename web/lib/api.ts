@@ -722,6 +722,7 @@ export interface RobotState {
   schedule: "off" | "daily" | "weekly";
   autonomy: "ask" | "auto";
   presets: string[];
+  skills?: { name: string; description: string }[];
   active: number | null;
   runs: RobotRun[];
 }

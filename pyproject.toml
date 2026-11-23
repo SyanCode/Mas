@@ -34,5 +34,8 @@ mas = "mas.cli:run"
 [tool.setuptools.packages.find]
 include = ["mas*"]
 
+[tool.setuptools.package-data]
+"mas.skills" = ["*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

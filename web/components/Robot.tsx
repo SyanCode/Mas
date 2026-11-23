@@ -7,9 +7,12 @@ import { api, ApiError, timeAgo, type App, type RobotRun, type RobotState, type 
 import { msg, useT } from "@/lib/i18n";
 
 const PRESET_LABEL: Record<string, string> = {
+  polish: msg("Not vibecoded"), launch: msg("Ready to launch"),
   compliance: msg("GDPR compliance"), seo: msg("SEO"), style: msg("Style and mobile"), maintenance: msg("Maintenance round"),
 };
 const PRESET_HINT: Record<string, string> = {
+  polish: msg("Placeholders, template leftovers, generic copy, emoji icons, dead links, favicon and 404 page."),
+  launch: msg("Domain, HTTPS, SEO, compliance and finish: the whole launch checklist, fixed or explained."),
   compliance: msg("Cookie banner, legal pages, consent, accessibility: audit, fix, audit again."),
   seo: msg("robots.txt, sitemap, titles, descriptions, headings, image texts."),
   style: msg("Spacing, typography, contrast, responsive layout, tasteful animations."),
@@ -102,7 +105,7 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
         <Card title={t("What should the robot do?")}>
           <div className="space-y-4 text-sm">
             <div className="stagger grid gap-2 sm:grid-cols-2">
-              {(state?.presets ?? ["compliance", "seo", "style", "maintenance"]).map((p) => (
+              {(state?.presets ?? ["polish", "launch", "compliance", "seo", "style", "maintenance"]).map((p) => (
                 <button key={p} type="button" disabled={!!busy || !state} onClick={() => start(p)}
                   className="glass lift rounded-xl p-3 text-left disabled:opacity-50">
                   <div className="flex items-center gap-2 font-medium"><Play className="size-3.5 text-indigo-400" />{t(PRESET_LABEL[p] ?? p)}</div>
@@ -110,6 +113,12 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
                 </button>
               ))}
             </div>
+            {state?.skills && state.skills.length > 0 && (
+              <div className="text-xs text-zinc-500">
+                <span className="mr-1.5">{t("Skills it loads when the goal needs them:")}</span>
+                {state.skills.map((k) => <span key={k.name} title={k.description} className="mr-1.5 inline-block"><Badge tone="zinc">{k.name}</Badge></span>)}
+              </div>
+            )}
             <Label title={t("Or describe it")}>
               <Textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={t("e.g. Add a FAQ section to the home page and make the buttons rounder")} maxLength={4000} />
             </Label>

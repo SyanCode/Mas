@@ -118,6 +118,13 @@ def test_mcp_flow(env):
     assert "not instructions" in logs["content"][0]["text"]
     assert not call(anon, read, "overview").get("isError")
 
+    # the skills: a catalogue, then the instructions of one; an unknown name is a tool error
+    catalog = call(anon, read, "list_skills")
+    assert "seo-checklist" in json.dumps(catalog) and "not-vibecoded" in json.dumps(catalog)
+    skill = call(anon, read, "get_skill", {"name": "seo-checklist"})
+    assert not skill.get("isError") and "Make JS crawlable" in skill["content"][0]["text"]
+    assert call(anon, read, "get_skill", {"name": "nope"})["isError"]
+
     denied = call(anon, read, "nginx_reload")
     assert denied["isError"] and "read-only" in denied["content"][0]["text"]
 

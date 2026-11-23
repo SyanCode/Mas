@@ -22,6 +22,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 from mas import auth
+from mas import skills as skills_mod
 
 SETTING = "mcp_enabled"
 CLIENT_IP_HEADER = b"x-mas-mcp-client-ip"
@@ -46,6 +47,8 @@ Tools to operate a self-hosted Debian + nginx server through Mas (https://github
   them in the Mas dashboard.
 - Sites with a CMS: `site_stats` (visits, conversion), `compliance_report` (GDPR / consent audit with a fix for each
   point; `run_compliance_audit` refreshes it), `site_uptime`. The audit is technical, not legal advice.
+- Changing a site (pages, texts, design, SEO): `list_skills` then `get_skill` for the ones that fit (always
+  `not-vibecoded` for visible changes, `seo-checklist` for search) and follow them.
 - New project (get_app answers "unknown app"): `plan_app`, then `create_app` (needs a "create" token and a
   repository allowed in Settings → Claude). Variables only a human may fill leave the app waiting: tell the
   user their names. Without a connected registrar, give the user the DNS records to create and check them
@@ -474,6 +477,23 @@ def build_server(app, poll_interval: float = 3.0, deploy_timeout: float = DEPLOY
         async with mas(ctx) as m:
             r = await _call(m.get(f"/api/cms/sites/{app_id}/uptime", params={"days": days}))
         return {k: r.get(k) for k in ("uptime", "up_now", "avg_ms", "p95_ms", "checks", "incidents")}
+
+    # -- skills: how to do the job well -----------------------------------------------------------
+
+    @mcp.tool(annotations=READ)
+    async def list_skills() -> list[dict]:
+        """Skills Mas provides for working on a site like a professional team: the 22-point SEO checklist, how to keep a
+        project from looking AI-generated ("not vibecoded"), design craft, copywriting, accessibility, performance,
+        code quality, launch checklist. Load one with `get_skill` before changing a site."""
+        return skills_mod.catalog()
+
+    @mcp.tool(annotations=READ)
+    async def get_skill(name: str) -> str:
+        """The full instructions of one skill (names from `list_skills`). Follow them for the work they describe."""
+        try:
+            return skills_mod.get(name)["body"]
+        except skills_mod.SkillError as exc:
+            raise ToolError(str(exc)) from None
 
     return mcp
 

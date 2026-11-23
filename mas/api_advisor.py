@@ -12,6 +12,7 @@ from mas.advisor import STATUSES, Advisor, AdvisorError
 from mas.ai import PROVIDERS, AiError, AiPool
 from mas.claudelogin import ClaudeLogin, LoginError
 from mas.db import Database
+from mas import skills as skills_mod
 from mas.robot import PRESETS, Robot
 
 
@@ -225,7 +226,8 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
 
     @app.get("/api/robot")
     def robot_overview(_=Depends(current_session)) -> dict:
-        return {**robot.settings(), "presets": list(PRESETS), "active": robot.active(), "runs": db.list_robot_runs(15)}
+        return {**robot.settings(), "presets": list(PRESETS), "skills": skills_mod.catalog(), "active": robot.active(),
+                "runs": db.list_robot_runs(15)}
 
     @app.get("/api/robot/active")
     def robot_active(_=Depends(current_session)) -> dict | None:

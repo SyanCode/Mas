@@ -39,3 +39,12 @@ deployed branch, so it is built by the usual pipeline as the app's own user; a f
 commit. Only security fixes inside the same major version are made. Changing this mode needs an administrator
 signed in, never an API token. The vhosts Mas writes hide the nginx version and the `X-Powered-By` header,
 but a framework can still print its version in its own files: keeping the packages up to date is the fix.
+
+## The robot's skills
+
+The robot's skills (`mas skills`, `mas/skills/*.md`) are plain text shipped with Mas: loading one reads a file of
+Mas, never of a site, and the name must be one of the listed skills. `polish_report` only reads the text files of
+an app's repository through the GitHub App (the same blocked paths as the robot: no `.env`, keys or `.github`) and
+treats them as data. `install_skills` commits only those skill files, under `.claude/skills/`, and like every other
+commit of the robot waits for a click in *Ask me* mode. The MCP tools `list_skills` and `get_skill` read nothing
+else and need no write access.

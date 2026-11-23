@@ -147,6 +147,10 @@ $ sudo mas token revoke <id>
 $ sudo mas backup create [-o DIR] [--keep 7]  # database, secret key, config, GitHub App key
 $ sudo mas backup list
 $ sudo mas backup restore <file>  # current files kept as *.before-restore, then restart mas
+
+$ mas skills                    # the robot's skills (SEO checklist, not vibecoded, design, copy…)
+$ mas skills show seo-checklist
+$ mas skills export ~/my-site   # as Claude Code skills: ~/my-site/.claude/skills/*/SKILL.md
 ```
 
 API tokens (`Authorization: Bearer mas_pat_…`) are read-only unless created with `--write`,
@@ -163,10 +167,11 @@ turns on the `/mcp` endpoint of the dashboard, then shows the command to run on 
 $ claude mcp add --transport http mas https://mas.example.com/mcp --header "Authorization: Bearer mas_pat_…"
 ```
 
-Claude Code (or any [MCP](https://modelcontextprotocol.io) client) then gets 21 tools: `overview`
+Claude Code (or any [MCP](https://modelcontextprotocol.io) client) then gets 23 tools: `overview`
 (what runs, what needs attention), services, logs, runtime, usage, health checks, history, apps and
 build logs; and with a write token, service actions, `nginx_reload`, `deploy_app`, `rollback_app`,
-`update_app` and `apply_health_fix`; with a create token, `plan_app` and `create_app`. Each tool is a call to this API with the token, so the
+`update_app` and `apply_health_fix`; with a create token, `plan_app` and `create_app`; and the robot's skills
+(`list_skills`, `get_skill`: the SEO checklist, not-vibecoded design and copy…) for any token. Each tool is a call to this API with the token, so the
 whitelists, `nginx -t`, automatic rollbacks and the audit log apply. Logs reach the model marked
 as untrusted data. The endpoint is off by default and answers 404 while off. Mas itself contains
 no AI: `/mcp` is only a protocol in front of the API.
@@ -190,9 +195,18 @@ no AI: `/mcp` is only a protocol in front of the API.
   of the presets, or a scheduled maintenance round). It audits the site, reads its repository, commits the changes,
   deploys through Mas and audits again, with every step shown live. *Ask me* mode waits for your click before each commit,
   deployment and fix; *fully automatic* does it all, while Mas still runs `nginx -t`, health-checks the release and rolls
-  back by itself. The robot has no shell and no secret: it works through eleven tools with a short-lived token of its own
+  back by itself. The robot has no shell and no secret: it works through about twenty tools with a short-lived token of its own
   (deleted when the run ends) that cannot reach accounts, tokens or environment variables, only the repositories of your
   apps, and never `.env`, keys or CI workflows. Audit texts and files are treated as data, never as instructions.
+- **Skills.** The robot does not only change things, it knows how to do them well. Its prompt lists written skills
+  (`mas skills`): the **22-point SEO checklist**, **not vibecoded** (the design, copy and code signs of a generated site
+  and what to do instead), design craft, copywriting, accessibility, performance (Core Web Vitals), code quality and a
+  launch checklist. It loads the ones a goal needs (`load_skill`) and follows them. `seo_report` maps the audit on the
+  22 points (ok, to fix, or for a person), and `polish_report` reads the repository for placeholders, template
+  leftovers, buzzword copy, invented numbers, emoji icons, dead links, debug code and a missing favicon, 404 page or
+  social image. Presets **Not vibecoded** and **Ready to launch** use them. `install_skills` (or
+  `mas skills export DIR`) puts the same skills in a project as Claude Code skills (`.claude/skills/*/SKILL.md`), and
+  the MCP tools `list_skills` / `get_skill` give them to Claude Code connected to Mas.
 
 ### Creating an app from MCP
 
@@ -913,6 +927,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **Robot skills**: the robot loads written know-how when a goal needs it (22-point SEO checklist, not vibecoded, design craft, copywriting, accessibility, performance, code quality, launch checklist); the SEO audit now checks structured data, breadcrumbs, heading order, broken links, orphan pages, thin and JavaScript-only pages, clean URLs, image sizes and blocking scripts and reports the 22 points; `polish_report` finds the signs of a generated, unfinished project; presets *Not vibecoded* and *Ready to launch*; the skills also go to Claude Code (`mas skills export`, MCP `get_skill`, the robot's `install_skills`).
 - [x] **Desktop view**: the dashboard as an OS (windows, dock, menu bar, live widgets, notifications, snapping, restored session); `/desktop/`, kept per browser.
 
 ## License

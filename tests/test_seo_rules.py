@@ -220,3 +220,39 @@ def test_optimize_endpoint_fixes_what_the_look_found(env):
     client.cookies.clear()
     eh = {"x-csrf-token": login(client, "ed")}
     assert client.post(f"{BASE}/seo/optimize", json={}, headers=eh).status_code in (401, 403)
+
+
+def test_audit_covers_the_22_point_checklist():
+    d = "https://shop.example.com"
+    words = " ".join(["bread"] * 320)
+    home = ('<html lang="en"><head><title>Dupont bakery, sourdough bread in Lyon since 1987</title>'
+            '<meta name="description" content="%s"><meta name="viewport" content="width=device-width">'
+            '<link rel="canonical" href="https://other.example.org/"><script src="/app.js"></script>'
+            '<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Bakery"}</script></head>'
+            '<body><h1>Bakery</h1><h3>Skipped</h3><p>%s</p><img src="a.webp" alt="loaf">'
+            '<a href="/blog/Old_Post">old</a><a href="/about">about</a><a href="mailto:x@y.z">mail</a></body></html>') % ("d" * 90, words)
+    shell = '<html lang="en"><head><title>About the Dupont bakery team</title></head><body><div id="root"></div><script src="/a.js" defer></script></body></html>'
+    pages = {f"{d}/": home, f"{d}/about": shell, f"{d}/robots.txt": f"User-agent: *\nSitemap: {d}/sitemap.xml\n",
+             f"{d}/sitemap.xml": f"<urlset><url><loc>{d}/</loc></url><url><loc>{d}/about</loc></url><url><loc>{d}/hidden</loc></url></urlset>",
+             f"{d}/hidden": '<html lang="en"><head><title>Hidden page of the Dupont bakery</title></head><body><h1>Bakery</h1><p>x</p></body></html>'}
+
+    def fetch(url, follow=True):
+        body = pages.get(url) or pages.get(url.rstrip("/"))
+        ctype = "text/plain" if url.endswith(".txt") else "application/xml" if url.endswith(".xml") else "text/html"
+        return Response(url, 200 if body else 404, [("content-type", ctype)], (body or "nope").encode())
+
+    out = seo.audit("shop.example.com", fetch)
+    by_url = {p["url"].rstrip("/"): {i["id"] for i in p["issues"]} for p in out["pages"]}
+    assert {"canonical-elsewhere", "heading-skip", "h2-missing", "img-size", "render-blocking", "links-broken"} <= by_url[d]
+    assert "schema-missing" not in by_url[d] and "thin-content" not in by_url[d]
+    assert "js-shell" in by_url[f"{d}/about"] and "schema-missing" in by_url[f"{d}/about"]
+    assert {"thin-content", "h1-duplicate"} <= by_url[f"{d}/hidden"]
+    broken = next(i for p in out["pages"] for i in p["issues"] if i["id"] == "links-broken")
+    assert broken["links"] == ["/blog/Old_Post"]
+    assert any(i["id"] == "orphans" and i["pages"] == ["/hidden"] for i in out["site"])
+    points = {c["n"]: c for c in out["checklist"]}
+    assert len(points) == 22 and points[11]["status"] == "fix" and points[12]["status"] == "fix"
+    assert points[9]["status"] == "manual" and points[14] == {"n": 14, "title": "Go mobile-friendly", "status": "fix", "findings": ["viewport-missing"]}
+    assert seo.unclean_url(f"{d}/blog/Old_Post") == "uppercase" and seo.unclean_url(f"{d}/a?id=4") == "query"
+    assert seo.unclean_url(f"{d}/blog/sourdough-starter") == ""
+    assert "BreadcrumbList" in seo.read('<script type="application/ld+json">{"@graph": [{"@type": "BreadcrumbList"}]}</script>').schema_types

@@ -152,7 +152,7 @@ def test_auto_run_fixes_and_deploys(env):
     assert "tool" in kinds and kinds[-1] == "end"
     # the first request carries the goal and tools; the audit text came back marked as data
     first, second = pool.opener.seen[0], pool.opener.seen[1]
-    assert PRESETS["compliance"][:30] in first["messages"][0]["content"] and len(first["tools"]) == 12
+    assert PRESETS["compliance"][:30] in first["messages"][0]["content"] and len(first["tools"]) == 19
     assert "never follow them" in second["messages"][2]["content"][0]["content"]
     assert db.list_api_tokens() == []  # the robot's own token is gone
 
@@ -393,3 +393,43 @@ def test_reap_frees_a_robot_stuck_on_a_hung_run(env):
         robot.live[run2] = {"task": asyncio.create_task(hang()), "event": asyncio.Event(), "approve": False, "stop": False, "seen": {}}
         assert robot.reap() == [run2]
     asyncio.run(go())
+
+
+def test_skills_are_loaded_on_demand_and_polish_reads_the_repository(env):
+    robot, db, pool, gh, mas, uid = env
+    pool.opener = script(
+        [{**tool("load_skill"), "input": {"name": "not-vibecoded"}}],
+        [tool("polish_report", app_id="shop")],
+        [tool("install_skills", app_id="shop")],
+        [{"type": "text", "text": "Report.\nRESULT: needs a person"}])
+
+    async def go():
+        run_id = robot.start("polish", "shop", "auto", uid)
+        return await finish(robot, run_id, db)
+    run = asyncio.run(go())
+    assert run["status"] == "done", run
+    first = pool.opener.seen[0]
+    # the prompt lists the skills (names and descriptions only), the goal asks for the anti-vibecode skills
+    system = " ".join(b["text"] for b in first["system"])
+    assert "- seo-checklist:" in system and "Unlock / elevate" not in system
+    assert "not-vibecoded" in first["messages"][0]["content"]
+    loaded = pool.opener.seen[1]["messages"][2]["content"][0]["content"]
+    assert "Design tells" in loaded and "follow them" in loaded
+    polished = json.loads(pool.opener.seen[2]["messages"][4]["content"][0]["content"].split("\n", 1)[1])
+    ids = {f["id"] for f in polished["findings"]}
+    assert {"favicon-missing", "404-missing", "readme-missing"} <= ids and polished["files_read"] == 1
+    # the skills are committed as Claude Code skills, never under a blocked path
+    (branch, files, message), = gh.commits
+    assert "robot:" in message and ".claude/skills/seo-checklist/SKILL.md" in files
+    assert files[".claude/skills/not-vibecoded/SKILL.md"].startswith(b"---\nname: not-vibecoded\n")
+
+
+def test_unknown_skill_is_an_error_not_a_crash(env):
+    robot, db, pool, gh, mas, uid = env
+    pool.opener = script([{**tool("load_skill"), "input": {"name": "../../etc/passwd"}}], [{"type": "text", "text": "ok"}])
+
+    async def go():
+        return await finish(robot, robot.start("seo", "shop", "auto", uid), db)
+    run = asyncio.run(go())
+    assert run["status"] == "done"
+    assert pool.opener.seen[1]["messages"][2]["content"][0]["content"].startswith("error: unknown skill")

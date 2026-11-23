@@ -85,7 +85,7 @@ def actor() -> str:
     return f"cli:{os.environ.get('SUDO_USER') or getpass.getuser()}"
 
 
-NO_UPDATE_CHECK = {"self-update", "serve"}
+NO_UPDATE_CHECK = {"self-update", "serve", "skills"}
 
 
 def notify_update(config: Config) -> None:
@@ -1272,6 +1272,46 @@ def self_update_cmd(
     if colors():
         sys.stdout.write(render(version_from_source(env.config.src_dir) or __version__, subtitle="updated"))
     console.print("[green]✓[/] Mas updated")
+
+
+# -- skills ----------------------------------------------------------------------
+
+skills_app = typer.Typer(help="Skills of the robot (SEO checklist, not-vibecoded design and copy…), also for Claude Code.",
+                         invoke_without_command=True)
+app.add_typer(skills_app, name="skills")
+
+
+@skills_app.callback()
+def skills_list(ctx: typer.Context) -> None:
+    """List the skills."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from mas import skills
+    table = Table("Skill", "When it is used", box=None)
+    for s in skills.catalog():
+        table.add_row(f"[bold]{s['name']}[/]", s["description"])
+    console.print(table)
+    console.print("[dim]mas skills show NAME · mas skills export DIR (writes DIR/.claude/skills/*/SKILL.md for Claude Code)[/]")
+
+
+@skills_app.command("show")
+def skills_show(name: Annotated[str, typer.Argument(help="Name from `mas skills`.")]) -> None:
+    """Print a skill."""
+    from mas import skills
+    try:
+        sys.stdout.write(skills.get(name)["text"])
+    except skills.SkillError as exc:
+        fail(str(exc))
+
+
+@skills_app.command("export")
+def skills_export(dest: Annotated[Path, typer.Argument(help="A project folder (its .claude/skills is written).")] = Path(".")) -> None:
+    """Write the skills into a project as Claude Code skills (.claude/skills/<name>/SKILL.md)."""
+    from mas import skills
+    if not dest.is_dir():
+        fail(f"{dest} is not a folder")
+    written = skills.export(dest)
+    console.print(f"[green]✓[/] {len(written)} skills written under {dest / '.claude' / 'skills'}")
 
 
 def is_root() -> bool:
