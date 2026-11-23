@@ -122,6 +122,30 @@ def test_anthropic_request_shape(pool):
     assert seen[0].get_header("Anthropic-beta") == "oauth-2025-04-20"
 
 
+def test_anthropic_requests_use_the_prompt_cache(pool):
+    pool.add("Key", "anthropic", API)
+    seen = []
+    pool.opener = lambda req, timeout: seen.append(json.loads(req.data)) or Resp(json.dumps({
+        "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+        "usage": {"input_tokens": 5, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 900, "output_tokens": 7}}).encode())
+    messages = [{"role": "user", "content": "goal"},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "x", "input": {}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "r1"},
+                                             {"type": "tool_result", "tool_use_id": "t2", "content": "r2"}]}]
+    reply = pool.ask("sys", messages, [])
+    body = seen[0]
+    # the system prompt (with the tools before it) and the conversation so far are cache breakpoints
+    assert body["system"][-1] == {"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}
+    last = body["messages"][-1]["content"]
+    assert last[-1]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in last[0]
+    assert sum("cache_control" in json.dumps(m) for m in body["messages"]) == 1
+    assert "cache_control" not in json.dumps(messages)  # the caller's history is not changed
+    assert reply.tokens == 1012
+    # a first turn whose content is a plain string becomes one cached text block
+    pool.ask("sys", [{"role": "user", "content": "go"}], [])
+    assert seen[1]["messages"] == [{"role": "user", "content": [{"type": "text", "text": "go", "cache_control": {"type": "ephemeral"}}]}]
+
+
 def test_openai_responses_and_compatible_adapters(pool):
     pool.add("Codex", "openai", OPENAI)
     seen = []

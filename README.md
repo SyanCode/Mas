@@ -187,7 +187,9 @@ no AI: `/mcp` is only a protocol in front of the API.
   OpenRouter, DeepSeek, a local Ollama: give its base URL). The list is **ordered**: Mas uses the first account, and when
   it reaches its limit (rate or usage limit, no credit) the next one takes over, even in the middle of a task; the first one
   is used again once it resets. A refused key is switched off. Keys are encrypted, never shown again, and adding one asks
-  for your password. A ChatGPT subscription cannot be used through a key: Codex needs an OpenAI API key.
+  for your password. A ChatGPT subscription cannot be used through a key: Codex needs an OpenAI API key. Claude requests use
+  prompt caching (the tools, the instructions and the conversation so far), so each step of the robot costs less and
+  answers sooner.
 - **Advisor.** Every day or week the AI reads a summary of statuses (services, health checks, resource advice, apps,
   compliance and SEO scores: no logs, variables or credentials) and writes proposals, sites first (GDPR, SEO, style,
   mobile), then the server. Each can be marked done, dismissed, or handed to the robot.

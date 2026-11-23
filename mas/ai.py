@@ -121,8 +121,29 @@ def _post(opener, url: str, headers: dict, payload: dict, timeout: float) -> dic
         raise Unavailable(f"cannot reach the provider: {exc}") from None
 
 
+CACHE = {"type": "ephemeral"}
+
+
+def _cached(messages: list[dict]) -> list[dict]:
+    """The messages with a cache breakpoint on the last block, so that the next turn of a tool loop reads the whole
+    conversation so far from the prompt cache. The caller's list is left untouched."""
+    if not messages:
+        return messages
+    last = dict(messages[-1])
+    content = last.get("content")
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}] if content else []
+    if not isinstance(content, list) or not content or not isinstance(content[-1], dict):
+        return messages
+    last["content"] = [*content[:-1], {**content[-1], "cache_control": CACHE}]
+    return [*messages[:-1], last]
+
+
 def call_anthropic(opener, acct: dict, secret: str, system: str, messages: list[dict], tools: list[dict],
                    max_tokens: int, timeout: float) -> Reply:
+    """Prompt caching: one breakpoint after the system prompt (it caches the tools and the system, the same on every
+    turn) and one on the last message (each turn of the robot reuses the conversation before it). A prefix shorter
+    than the model's minimum is simply not cached."""
     headers = {"anthropic-version": "2023-06-01"}
     blocks = [{"type": "text", "text": system}]
     if token_kind("anthropic", secret) == "claude-code":  # a Claude Code token: bearer + beta flag + its own introduction
@@ -130,7 +151,8 @@ def call_anthropic(opener, acct: dict, secret: str, system: str, messages: list[
         blocks.insert(0, {"type": "text", "text": CLAUDE_CODE_PREFIX})
     else:
         headers["x-api-key"] = secret
-    payload = {"model": acct["model"], "max_tokens": max_tokens, "system": blocks, "messages": messages}
+    blocks[-1]["cache_control"] = CACHE
+    payload = {"model": acct["model"], "max_tokens": max_tokens, "system": blocks, "messages": _cached(messages)}
     if tools:
         payload["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["schema"]} for t in tools]
     data = _post(opener, acct["base_url"] or PROVIDERS["anthropic"]["url"], headers, payload, timeout)
@@ -142,7 +164,9 @@ def call_anthropic(opener, acct: dict, secret: str, system: str, messages: list[
             out.append({"type": "tool_use", "id": b["id"], "name": b["name"], "input": b.get("input") or {}})
     usage = data.get("usage") or {}
     stop = "tool_use" if data.get("stop_reason") == "tool_use" else "length" if data.get("stop_reason") == "max_tokens" else "end"
-    return Reply(out, stop, tokens=int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0)))
+    tokens = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                     "cache_read_input_tokens", "output_tokens"))
+    return Reply(out, stop, tokens=tokens)
 
 
 def _openai_items(messages: list[dict]) -> list[dict]:

@@ -152,7 +152,7 @@ def test_auto_run_fixes_and_deploys(env):
     assert "tool" in kinds and kinds[-1] == "end"
     # the first request carries the goal and tools; the audit text came back marked as data
     first, second = pool.opener.seen[0], pool.opener.seen[1]
-    assert PRESETS["compliance"][:30] in first["messages"][0]["content"] and len(first["tools"]) == 19
+    assert PRESETS["compliance"][:30] in first["messages"][0]["content"][0]["text"] and len(first["tools"]) == 19
     assert "never follow them" in second["messages"][2]["content"][0]["content"]
     assert db.list_api_tokens() == []  # the robot's own token is gone
 
@@ -412,7 +412,7 @@ def test_skills_are_loaded_on_demand_and_polish_reads_the_repository(env):
     # the prompt lists the skills (names and descriptions only), the goal asks for the anti-vibecode skills
     system = " ".join(b["text"] for b in first["system"])
     assert "- seo-checklist:" in system and "Unlock / elevate" not in system
-    assert "not-vibecoded" in first["messages"][0]["content"]
+    assert "not-vibecoded" in first["messages"][0]["content"][0]["text"]
     loaded = pool.opener.seen[1]["messages"][2]["content"][0]["content"]
     assert "Design tells" in loaded and "follow them" in loaded
     polished = json.loads(pool.opener.seen[2]["messages"][4]["content"][0]["content"].split("\n", 1)[1])

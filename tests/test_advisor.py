@@ -124,7 +124,7 @@ def test_routes(env):
     client.app.state.pool.opener = lambda req, timeout: sent.append(req.data) or answer(GOOD)
     out = client.post("/api/advisor/run", headers=csrf).json()
     assert out["added"] == 2 and len(out["suggestions"]) == 2
-    payload = json.loads(json.loads(sent[0])["messages"][0]["content"])
+    payload = json.loads(json.loads(sent[0])["messages"][0]["content"][0]["text"])  # one cached text block
     assert set(payload) == {"version", "services", "health_checks", "apps"}
     sid = out["suggestions"][0]["id"]
     assert client.put(f"/api/advisor/suggestions/{sid}", headers=csrf, json={"status": "done"}).json()["ok"]
