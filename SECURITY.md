@@ -96,3 +96,8 @@ On SELinux systems the installer turns on `httpd_can_network_connect` (nginx may
 and labels `/srv/mas` as web content; on firewalld systems it opens the `http` and `https` services. Apache and
 Caddy configurations are only read; their reload runs their own configuration test first (`apachectl configtest`,
 `caddy validate`) and nothing is reloaded if it fails.
+
+Behind Caddy or Apache (`mas front`), nginx listens on 127.0.0.1 only and trusts `X-Forwarded-For` (the visitor's
+address) and `X-Forwarded-Proto` only from 127.0.0.1 and ::1, the front server. `mas.service` may write in
+`/etc/caddy`, `/etc/apache2` and `/etc/httpd` for that (its own files only); switching is a root command.
+`/api/front` refuses API tokens.

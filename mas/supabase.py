@@ -565,9 +565,9 @@ class SupabaseManager:
         self.deployer._ensure_pages()
         available, enabled = vhost_paths(INSTANCE_ID)
         allow = LOCAL_NETWORKS + self.studio_access(self.get())
-        content = templates.vhost(INSTANCE_ID, domain, templates.supabase_body(port, self.config.pages_dir, allow),
-                                  self.deployer._has_cert(domain))
+        content = self.deployer.site_content(INSTANCE_ID, domain, templates.supabase_body(port, self.config.pages_dir, allow))
         self.deployer._nginx_apply(rlog, available, content, enabled)
+        self.deployer.front_site(INSTANCE_ID, [domain], rlog)
 
     # -- footprint -----------------------------------------------------------------
 

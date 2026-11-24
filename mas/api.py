@@ -361,6 +361,8 @@ def create_app(
 
     deployer = Deployer(host, config, db, github_client, find_service=scanner.get,
                         on_change=lambda: scanner.refresh())
+    from mas.front import Front
+    deployer.front = Front(host, db)  # nginx behind Caddy or Apache, when set (mas front)
     supabase = SupabaseManager(host, config, db, deployer)
     appdb = AppDatabases(host, config, db, supabase, deployer, github_client)
     stacks = StackManager(host, config, db, deployer)
@@ -1226,6 +1228,16 @@ def create_app(
     app.state.gitlab_backup = gitlab_backup
     deployer.gitlab = robot.gitlab = gitlab_ref[0]
     app.state.mirror = mirror
+    app.state.supabase_manager = supabase
+
+    @app.get("/api/front")
+    def front_status(_=Depends(current_session)) -> dict:
+        """Which web server holds ports 80/443: nginx (default), or Caddy / Apache in front of it."""
+        from mas.front import blocking_sites
+        cfg = deployer.front.get()
+        return {"front": cfg, "available": {"caddy": host.exists("/etc/caddy/Caddyfile"),
+                                            "apache": bool(deployer.front._apache_dir())},
+                "blocking": [] if cfg else blocking_sites(host)}
     app.state.resources = resources
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups

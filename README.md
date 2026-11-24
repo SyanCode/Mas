@@ -152,6 +152,7 @@ $ sudo mas backup create [-o DIR] [--keep 7]  # database, secret key, config, Gi
 $ sudo mas backup list
 $ sudo mas backup restore <file>  # current files kept as *.before-restore, then restart mas
 
+$ sudo mas front caddy|apache|off  # nginx behind Caddy or Apache, which keep ports 80/443 and HTTPS
 $ sudo mas economy on|off [--shrink]  # economy mode: memory limits and sleep of quiet apps, applied by themselves
 $ mas skills                    # the robot's skills (SEO checklist, not vibecoded, design, copy…)
 $ mas skills show seo-checklist
@@ -675,6 +676,22 @@ connects it, nothing to copy.
   so their size does not matter.
 - **Vulnerable dependencies** of apps deployed from GitLab are upgraded like GitHub ones (commit or merge request).
 
+### Behind Caddy or Apache
+
+On a server where Caddy or Apache already holds ports 80 and 443, `sudo mas front caddy` (or `sudo mas front apache`,
+`--port 8088` by default) keeps them there:
+
+- every site of Mas (apps, services of the catalog, previews, Supabase) gets a small site on the front server sending
+  its names to nginx, which now listens on `127.0.0.1:8088` only, without TLS; the dashboard goes straight to Mas;
+- HTTPS is the front server's: Caddy gets its certificates by itself, Apache through certbot's apache plugin;
+- everything Mas does in nginx keeps working (maintenance, redirects, sitemaps, sleep and wake-up, statistics with the
+  real visitor address from `X-Forwarded-For`), and the apps get the visitor's scheme in `X-Forwarded-Proto`;
+- Mas writes only its own files (`/etc/caddy/mas/*.caddy`, imported once from the Caddyfile, or `mas-*.conf` in
+  Apache's sites folder), each checked by `caddy validate` / `apachectl configtest` before the reload and put back
+  if refused; a name already served by a site of the front server that is not Mas's is refused;
+- it refuses while nginx still serves other sites on 80/443 (move them first). `sudo mas front off` gives nginx the
+  web ports back (stop the front server, or move its own sites, so nginx can listen there).
+
 ### Redeploy all
 
 **Apps → Redeploy all** queues a deployment of the latest commit of every app from GitHub; they run
@@ -961,9 +978,10 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
 
 ## Beta: known limitations
 
-- Mas deploys its apps behind nginx. Sites served by **Apache** or **Caddy** are detected (domains, the app behind a
-  `ProxyPass` / `reverse_proxy`, PHP-FPM, files, certificates and logs) and can be reloaded after their configuration
-  test, but Mas does not write their configuration; Health warns when they hold ports 80/443 that nginx needs.
+- Mas deploys its apps through nginx. Sites served by **Apache** or **Caddy** are detected (domains, the app behind a
+  `ProxyPass` / `reverse_proxy`, PHP-FPM, files, certificates and logs) and reloaded after their configuration test.
+  When one of them must keep ports 80/443, `sudo mas front caddy` (or `apache`) puts nginx behind it: see
+  *Behind Caddy or Apache*.
 - Distributions other than Debian/Ubuntu are installed by the same script but tested less; systemd is required
   (Alpine/OpenRC is not supported).
 - Administrator accounts are created on the server; no 2FA recovery codes yet (`sudo mas user 2fa-reset`).
@@ -1017,6 +1035,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **nginx behind Caddy or Apache** (`mas front`): the front server keeps 80/443 and HTTPS, every site of Mas gets its own small site there, checked and reverted on refusal.
 - [x] **More distributions, Apache and Caddy**: Fedora, RHEL/Rocky/Alma, Arch and openSUSE besides Debian/Ubuntu (packages, Python, nginx `conf.d` layout, PHP-FPM sockets, SELinux, firewalld); sites of Apache and Caddy detected and reloaded safely; Health warns when they hold the web ports.
 - [x] **Sleep that works, lighter Mas**: the uptime checks no longer keep sleeping apps awake (they never fell asleep before), database connections reused per thread, fewer threads, advice cached.
 - [x] **GitLab Runner, backups and moving apps**: a runner from the catalog registered by itself, nightly GitLab backups (catalog or package) sent off the server in parts, vulnerable dependencies of GitLab apps upgraded, and an app moved from GitHub to GitLab without a rebuild.

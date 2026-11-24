@@ -403,6 +403,7 @@ class Deployer:
         self.after_release: list[Callable[[dict, dict, bool], None]] = []
         self.github = github
         self.gitlab: Callable[[], Any] = lambda: None  # mas.gitlab.GitLab once one is connected
+        self.front = None  # mas.front.Front: nginx behind Caddy or Apache when one is set
         self.find_service = find_service
         self.health_check = health_check
         self.on_change = on_change
@@ -848,6 +849,31 @@ class Deployer:
             rlog.close()
         return True
 
+    def behind(self) -> int | None:
+        """The local port nginx listens on behind Caddy / Apache (None: nginx holds 80 and 443 itself)."""
+        return self.front.port() if self.front is not None else None
+
+    def site_content(self, site_id: str, domain: str, body: str, upstream: str = "", aliases: list[str] = ()) -> str:
+        """The nginx site of an app (or Supabase): HTTPS on 443 by itself, or plain on a local port behind the front."""
+        port = self.behind()
+        if port:
+            from mas.front import behind
+            return behind(templates.vhost(site_id, domain, body, False, upstream, list(aliases)), port)
+        return templates.vhost(site_id, domain, body, self._has_cert(domain), upstream, list(aliases))
+
+    def front_site(self, site_id: str, names: list[str], rlog: ReleaseLog | None = None) -> None:
+        """Its site on the front server (Caddy, Apache), pointing to nginx; nothing without a front."""
+        if not self.behind() or not names:
+            return
+        from mas.front import FrontError
+        cert = f"/etc/letsencrypt/live/{names[0]}" if self._has_cert(names[0]) else None
+        try:
+            path = self.front.site(site_id, names, cert)
+        except FrontError as exc:
+            raise DeployError(str(exc)) from None
+        if rlog is not None and path:
+            rlog.line(f"{self.front.get()['server']}: {path}")
+
     def _has_cert(self, domain: str) -> bool:
         return self.host.exists(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
 
@@ -861,6 +887,8 @@ class Deployer:
         available, enabled = vhost_paths(app["id"])
         for name in app_names(app):
             conflict = domain_conflict(self.host, name, {available, enabled})
+            if not conflict and self.behind():
+                conflict = self.front.conflict(name)
             if conflict:
                 raise DeployError(f"{name} is already served by {conflict}")
         if app_type in PROXY_TYPES and self.host.read_text(UPGRADE_MAP_PATH) != templates.UPGRADE_MAP:
@@ -870,9 +898,9 @@ class Deployer:
         servers = self._upstream_servers(app)
         upstream = templates.upstream_block(app["id"], servers) \
             if app_type in PROXY_TYPES and page is None and len(servers) > 1 else ""
-        content = templates.vhost(app["id"], app["domain"], body, self._has_cert(app["domain"]), upstream,
-                                  app_aliases(app))
+        content = self.site_content(app["id"], app["domain"], body, upstream, app_aliases(app))
         self._nginx_apply(rlog, available, content, enabled)
+        self.front_site(app["id"], app_names(app), rlog)
 
     # -- replacing a detected site ---------------------------------------------------
     # The app takes the names of a site nginx already serves. Nothing changes for visitors until the new
@@ -984,6 +1012,17 @@ class Deployer:
             if not covered or set(names) <= set(covered):  # unreadable: keep it, as before
                 return False
         self._wait_dns(domain, rlog)
+        if self.behind():  # Caddy gets its own; Apache through certbot's apache plugin
+            if self.front.get()["server"] == "caddy":
+                return False
+            rlog.step(f"Requesting a certificate for {', '.join(names)} (Apache)")
+            got = self.front.certificate(names, self.config.letsencrypt_email, lambda argv: self._cmd(
+                rlog, ["systemd-run", "--quiet", "--wait", "--pipe", "--collect", "--unit",
+                       f"mas-certbot-{int(time.time())}", *argv]
+                if self.host.run(["systemctl", "is-system-running"]) is not None else argv, timeout=300, check=False))
+            if not got:
+                rlog.line(f"warning: no certificate for {domain} yet; the next deploy will retry")
+            return got
         rlog.step(f"Requesting a certificate for {', '.join(names)}")
         contact = ["-m", self.config.letsencrypt_email] if self.config.letsencrypt_email else \
             ["--register-unsafely-without-email"]
@@ -1016,7 +1055,8 @@ class Deployer:
         if port:
             ok, detail = self.health_check(f"http://{app.get('bind') or '127.0.0.1'}:{port}/", None, timeout)
         elif app.get("domain"):
-            ok, detail = self.health_check("http://127.0.0.1/", app["domain"], timeout)
+            ok, detail = self.health_check(f"http://127.0.0.1:{self.behind()}/" if self.behind() else "http://127.0.0.1/",
+                                           app["domain"], timeout)
         else:
             files = set(self.host.listdir(workdir))
             ok, detail = bool(files & {"index.html", "index.php"}), "index file"
@@ -1309,6 +1349,12 @@ class Deployer:
                 test = self.host.run(["nginx", "-t"])
                 if test is not None and test.ok:
                     self.host.run(["systemctl", "reload", "nginx"])
+            if self.behind():
+                try:
+                    self.front.remove(app_id)
+                    done.append(f"removed its {self.front.get()['server']} site")
+                except Exception as exc:  # noqa: BLE001 - the app is gone anyway: said, not fatal
+                    done.append(f"warning: its front site stays: {exc}")
                 done.append(f"removed {available}")
         if app["mode"] == "managed":
             self.host.remove(env_file(app_id))

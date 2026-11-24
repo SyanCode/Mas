@@ -85,7 +85,7 @@ def actor() -> str:
     return f"cli:{os.environ.get('SUDO_USER') or getpass.getuser()}"
 
 
-NO_UPDATE_CHECK = {"self-update", "serve", "skills"}
+NO_UPDATE_CHECK = {"self-update", "serve", "skills", "front"}
 
 
 def notify_update(config: Config) -> None:
@@ -1275,6 +1275,38 @@ def self_update_cmd(
     if colors():
         sys.stdout.write(render(version_from_source(env.config.src_dir) or __version__, subtitle="updated"))
     console.print("[green]✓[/] Mas updated")
+
+
+# -- web server in front ------------------------------------------------------------
+
+@app.command()
+def front(
+    ctx: typer.Context,
+    server: Annotated[Optional[str], typer.Argument(help="caddy, apache or off (nothing: show it).")] = None,
+    port: Annotated[int, typer.Option(help="Local port of nginx behind the front server.")] = 8088,
+) -> None:
+    """Put nginx behind Caddy or Apache (they keep ports 80/443 and HTTPS), or give it the web ports back."""
+    from mas.front import Front, FrontError, switch
+    env: Env = ctx.obj
+    current = Front(env.host, env.db).get()
+    if server is None:
+        console.print("nginx holds ports 80 and 443" if not current else
+                      f"nginx is behind [bold]{current['server']}[/], on 127.0.0.1:{current['port']}")
+        return
+    if server not in ("caddy", "apache", "off"):
+        fail("caddy, apache or off")
+    if env.host.euid != 0:
+        fail(f"Mas needs administrator rights for this. Run: [bold]{sudo_hint(sys.argv[1:])}[/]")
+    from mas.api import create_app
+    application = create_app(env.host, env.config, env.db, background=False)
+    deployer = application.state.deployer
+    try:
+        done = switch(deployer.front, deployer, application.state.supabase_manager, None if server == "off" else server,
+                      port, env.config.port, log=console.print)
+    except FrontError as exc:
+        fail(str(exc))
+    for line in done:
+        console.print(f"  [green]✓[/] {line}")
 
 
 # -- economy mode ----------------------------------------------------------------

@@ -171,6 +171,7 @@ API_TOKEN_FORBIDDEN = (
     "/api/tokens", "/api/mcp", "/api/host-alerts", "/api/self-backup", "/api/update", "/api/advisor", "/api/ai", "/api/robot",
     "/api/shares", "/api/dependencies/settings", "/api/resources/auto",
     "/api/gitlab",  # the GitLab token and settings; its webhook carries no API token anyway
+    "/api/front",
 )
 API_TOKEN_FORBIDDEN_RE = re.compile(r"^/api/apps/[^/]+/env$")
 

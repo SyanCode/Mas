@@ -160,7 +160,7 @@ def check_certificates(host: Host, sites: list[NginxSite], lineages: list[Lineag
     return checks
 
 
-def check_nginx(host: Host, sites: list[NginxSite], sockets: list[ListeningSocket]) -> list[Check]:
+def check_nginx(host: Host, sites: list[NginxSite], sockets: list[ListeningSocket], front: dict | None = None) -> list[Check]:
     checks: list[Check] = []
     for site in sites:
         if site.ssl_certificate and "$" not in site.ssl_certificate and not host.exists(site.ssl_certificate):
@@ -185,7 +185,12 @@ def check_nginx(host: Host, sites: list[NginxSite], sockets: list[ListeningSocke
     # cannot answer on 80/443 next to them.
     others = {"apache2": "Apache", "httpd": "Apache", "caddy": "Caddy"}
     held = sorted({(s.port, others[s.process]) for s in sockets if s.port in (80, 443) and s.process in others})
-    if held and not any(s.port in (80, 443) and s.process == "nginx" for s in sockets):
+    if front:  # nginx behind Caddy / Apache on purpose (mas front): it must listen on its local port
+        if sockets and not any(s.port == front["port"] and s.process == "nginx" for s in sockets):
+            checks.append(Check("error", "nginx", f"nginx does not listen on 127.0.0.1:{front['port']}",
+                                f"{front['server'].capitalize()} sends the sites of Mas there: they answer 502 until "
+                                "nginx listens again (systemctl reload nginx, or see nginx -t)."))
+    elif held and not any(s.port in (80, 443) and s.process == "nginx" for s in sockets):
         names = sorted({n for _, n in held})
         checks.append(Check(
             "warning", "nginx", f"{' and '.join(names)} hold{'s' if len(names) == 1 else ''} the web ports",
@@ -314,7 +319,11 @@ def run_checks(host: Host, config: Config | None = None, dns: bool = True, publi
     sites = nginx_collector.collect(ctx)
     sockets = ports_collector.collect(ctx)
     lineages = load_lineages(host)
-    checks = check_nginx(host, sites, sockets) + check_certificates(host, sites, lineages) + check_memory(host)
+    front = None
+    if db is not None:
+        from mas.front import Front
+        front = Front(host, db).get()
+    checks = check_nginx(host, sites, sockets, front) + check_certificates(host, sites, lineages) + check_memory(host)
     if db is not None:
         from mas.depaudit import checks_from
         checks += check_backups(db) + checks_from(db)
