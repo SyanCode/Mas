@@ -19,6 +19,8 @@ class ServiceType(str, Enum):
 
 class Manager(str, Enum):
     NGINX_STATIC = "nginx-static"
+    APACHE = "apache"  # a site Apache serves by itself (its files, or a redirect)
+    CADDY = "caddy"  # the same for Caddy
     PHP_FPM = "php-fpm"
     SYSTEMD = "systemd"
     PM2 = "pm2"

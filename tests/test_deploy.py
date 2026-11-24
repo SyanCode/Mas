@@ -798,3 +798,35 @@ def test_backup_check(tmp_path):
     os.utime(fresh, (old, old))
     (c,) = check_backups(db, now=old + 5 * 86400, directory=str(folder))
     assert c.level == "warning" and c.category == "backup" and "5 days old" in c.title
+
+
+def test_a_server_without_sites_enabled_gets_its_sites_in_conf_d(env):
+    """Fedora, RHEL and its rebuilds, Arch, openSUSE: no sites-available / sites-enabled."""
+    from mas import deploy as deploy_mod
+    host, deployer = env["host"], env["deployer"]
+    host.remove("/etc/nginx/sites-enabled")
+    host.remove("/etc/nginx/sites-available")
+    host.makedirs("/etc/nginx/conf.d")
+    try:
+        assert deploy_mod.detect_layout(host) == "conf.d"
+        assert deploy_mod.vhost_paths("web") == ("/etc/nginx/conf.d/mas-app-web.conf",) * 2
+        deployer.health_check = lambda url, h, t: (True, "HTTP 200")
+        rid, ok = deploy_once(env, SHA1)
+        assert ok, deployer.log_path("web", rid).read_text()
+        assert "server_name web.example.com" in host.read_text("/etc/nginx/conf.d/mas-app-web.conf")
+        assert not host.is_symlink("/etc/nginx/conf.d/mas-app-web.conf") and not host.exists("/etc/nginx/sites-enabled")
+        assert deployer.remove_app("web") and not host.exists("/etc/nginx/conf.d/mas-app-web.conf")
+    finally:
+        deploy_mod.LAYOUT["debian"] = True
+
+
+def test_php_fpm_sockets_of_every_distribution(env):
+    host, deployer = env["host"], env["deployer"]
+    for d in ("/run/php", "/run/php-fpm"):
+        host.remove(d)
+    host.makedirs("/run/php-fpm")
+    host.write_text("/run/php-fpm/www.sock", "")  # Fedora / RHEL
+    assert deployer._fpm_socket() == "/run/php-fpm/www.sock"
+    host.makedirs("/run/php")
+    host.write_text("/run/php/php8.3-fpm.sock", "")  # Debian / Ubuntu first
+    assert deployer._fpm_socket() == "/run/php/php8.3-fpm.sock"

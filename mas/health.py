@@ -181,6 +181,19 @@ def check_nginx(host: Host, sites: list[NginxSite], sockets: list[ListeningSocke
                 "nginx-systemd", "nginx",
             ))
 
+    # Apache or Caddy holding the web ports: their sites keep working, but nginx (and so every app Mas deploys)
+    # cannot answer on 80/443 next to them.
+    others = {"apache2": "Apache", "httpd": "Apache", "caddy": "Caddy"}
+    held = sorted({(s.port, others[s.process]) for s in sockets if s.port in (80, 443) and s.process in others})
+    if held and not any(s.port in (80, 443) and s.process == "nginx" for s in sockets):
+        names = sorted({n for _, n in held})
+        checks.append(Check(
+            "warning", "nginx", f"{' and '.join(names)} hold{'s' if len(names) == 1 else ''} the web ports",
+            f"{', '.join(f'{n} listens on {p}' for p, n in held)}. Mas shows and reloads their sites, but the apps it "
+            "deploys are served by nginx, which cannot listen there at the same time. Move those sites to apps of "
+            "Mas, or put nginx on other ports behind them.",
+        ))
+
     test = host.run(["nginx", "-t"])
     if test is not None and not test.ok:
         checks.append(Check("error", "nginx", "nginx configuration test fails",

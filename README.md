@@ -81,7 +81,11 @@ and the Docker socket. No AI model is involved in discovery, which needs no exte
 
 ## Installation
 
-On the server (Debian 12+, as root):
+On the server, as root: Debian 12+ / Ubuntu 22.04+, Fedora, RHEL / Rocky / AlmaLinux 9+, Arch or openSUSE, with
+systemd. The installer finds the distribution and uses its package manager (apt, dnf with EPEL on RHEL, pacman,
+zypper), a Python 3.11+ (installed when the system one is older), and its nginx layout: `sites-available` /
+`sites-enabled` on Debian and Ubuntu, `conf.d` elsewhere (added to `nginx.conf` when it is not included, as on Arch).
+With SELinux (Fedora, RHEL) it lets nginx reach the apps and read `/srv/mas`; with firewalld it opens HTTP and HTTPS.
 
 ```console
 $ git clone https://github.com/SyanCode/Mas.git /opt/mas-install
@@ -957,7 +961,11 @@ hide_os_daemons = true  # hide units with no port and only system paths in their
 
 ## Beta: known limitations
 
-- Debian (and derivatives) with nginx only; Apache/Caddy servers are not detected.
+- Mas deploys its apps behind nginx. Sites served by **Apache** or **Caddy** are detected (domains, the app behind a
+  `ProxyPass` / `reverse_proxy`, PHP-FPM, files, certificates and logs) and can be reloaded after their configuration
+  test, but Mas does not write their configuration; Health warns when they hold ports 80/443 that nginx needs.
+- Distributions other than Debian/Ubuntu are installed by the same script but tested less; systemd is required
+  (Alpine/OpenRC is not supported).
 - Administrator accounts are created on the server; no 2FA recovery codes yet (`sudo mas user 2fa-reset`).
 - No pull-request preview deployments yet; one production branch per app.
 - DNS providers other than OVH and Cloudflare are implemented from their API documentation and
@@ -1009,6 +1017,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **More distributions, Apache and Caddy**: Fedora, RHEL/Rocky/Alma, Arch and openSUSE besides Debian/Ubuntu (packages, Python, nginx `conf.d` layout, PHP-FPM sockets, SELinux, firewalld); sites of Apache and Caddy detected and reloaded safely; Health warns when they hold the web ports.
 - [x] **Sleep that works, lighter Mas**: the uptime checks no longer keep sleeping apps awake (they never fell asleep before), database connections reused per thread, fewer threads, advice cached.
 - [x] **GitLab Runner, backups and moving apps**: a runner from the catalog registered by itself, nightly GitLab backups (catalog or package) sent off the server in parts, vulnerable dependencies of GitLab apps upgraded, and an app moved from GitHub to GitLab without a rebuild.
 - [x] **GitLab CMS and deploy statuses**: the CMS edits sites deployed from GitLab; each release reports *Mas deploy* (live address or the error) on its commit, in GitLab merge requests and GitHub checks.

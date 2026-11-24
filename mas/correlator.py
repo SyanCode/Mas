@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 
 from mas.collectors import ScanContext
-from mas.collectors import docker, nginx, pm2, ports, processes, systemd
+from mas.collectors import docker, nginx, pm2, ports, processes, systemd, webservers
 from mas.collectors.docker import Container
 from mas.collectors.nginx import NginxSite, Target
 from mas.collectors.pm2 import Pm2App
@@ -95,6 +95,11 @@ class Correlator:
         self.nginx_running: bool | None = (
             any(s.process == "nginx" for s in sockets) if sockets else None
         )
+        self.server_running: dict[str, bool | None] = {
+            "nginx": self.nginx_running,
+            "apache": any(s.process in ("apache2", "httpd") for s in sockets) if sockets else None,
+            "caddy": any(s.process == "caddy" for s in sockets) if sockets else None,
+        }
 
         self.services: dict[str, Service] = {}
         self.claimed: dict[str, str] = {}  # backend key -> service id
@@ -232,7 +237,7 @@ class Correlator:
 
     def add_site(self, site: NginxSite) -> None:
         label = site.primary_name or "(default)"
-        name = site.primary_name or f"nginx default ({PurePosixPath(site.files[0]).name})"
+        name = site.primary_name or f"{site.server} default ({PurePosixPath(site.files[0]).name})"
 
         if site.proxy:
             primary = next((r for r in site.proxy if r.location == "/"), site.proxy[0])
@@ -281,9 +286,15 @@ class Correlator:
             self._add(svc)
             return
 
+        running = self.server_running.get(site.server)
+        manager, unit = {
+            "apache": (Manager.APACHE, "apache2.service" if self.host.is_dir("/etc/apache2") else "httpd.service"),
+            "caddy": (Manager.CADDY, "caddy.service"),
+        }.get(site.server, (Manager.NGINX_STATIC, "nginx.service"))
         svc = Service(
-            id=self._site_id(site), name=name, manager=Manager.NGINX_STATIC, path=site.root,
-            status=self._nginx_status(), upstream=site.redirect_to, unit="nginx.service",
+            id=self._site_id(site), name=name, manager=manager, path=site.root,
+            status=Status.UNKNOWN if running is None else Status.RUNNING if running else Status.STOPPED,
+            upstream=site.redirect_to, unit=unit,
             log_paths=list(site.log_paths), **self._site_common(site),
         )
         svc.type = (
@@ -371,7 +382,8 @@ def scan(
     correlator = Correlator(
         ctx,
         users,
-        sites=safe("nginx", nginx.collect),
+        sites=safe("nginx", nginx.collect) + safe("apache", webservers.collect_apache)
+        + safe("caddy", webservers.collect_caddy),
         sockets=safe("ports", ports.collect),
         unix_sockets=safe("ports", ports.collect_unix),
         units=safe("systemd", systemd.collect),

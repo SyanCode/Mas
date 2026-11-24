@@ -83,7 +83,8 @@ def build_web(src: Path, log=print) -> None:
     _run([npm, "run", "build"], cwd=web, log=log)
 
 
-DASHBOARD_VHOST = Path("/etc/nginx/sites-available/mas.conf")
+DASHBOARD_VHOSTS = (Path("/etc/nginx/sites-available/mas.conf"), Path("/etc/nginx/conf.d/mas.conf"))
+DASHBOARD_VHOST = next((p for p in DASHBOARD_VHOSTS if p.is_file()), DASHBOARD_VHOSTS[0])  # Debian, or the others
 
 
 def refresh_dashboard_vhost(src: Path, log=print) -> None:

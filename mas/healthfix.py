@@ -66,7 +66,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._*-]{0,252}$")
 RETIRED_DIR = "/root/letsencrypt-retired"
 # Folders searched for programs that still use a certificate (docker compose files, other servers…).
 SEARCH_DIRS = ("/etc", "/opt", "/srv")
-DISABLED_VHOSTS = "/etc/nginx/sites-available/"
+DISABLED_VHOSTS = "/etc/nginx/sites-available/"  # Debian; elsewhere a disabled site is a *.conf.disabled file
 
 
 class FixError(Exception):
@@ -115,7 +115,7 @@ class HealthFixer:
 
     def _cert_delete(self, name: str) -> dict:
         refs = self.references(name)
-        blocking = [f for f in refs if not f.startswith(DISABLED_VHOSTS)]
+        blocking = [f for f in refs if not f.startswith(DISABLED_VHOSTS) and not f.endswith(".disabled")]
         if blocking:
             raise FixError(f"still used by: {', '.join(blocking[:10])}. Remove it there first.")
         members = [m for m in (f"live/{name}", f"archive/{name}", f"renewal/{name}.conf")

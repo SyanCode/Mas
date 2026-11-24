@@ -84,7 +84,7 @@ def get_logs(host: Host, svc: Service, lines: int = 200) -> list[LogSource]:
             return [LogSource("docker logs", error=str(exc))]
         return [LogSource(f"docker logs {svc.unit or svc.container_id[:12]}", demux_docker(data)[-lines:])]
 
-    if svc.manager == Manager.NGINX_STATIC:
+    if svc.manager in (Manager.NGINX_STATIC, Manager.APACHE, Manager.CADDY):
         return _files(host, svc.log_paths, lines)
 
     return [LogSource("logs", error="no log source for an unmanaged process")]

@@ -89,3 +89,10 @@ its own, which means the pipelines of the projects it serves can start container
 on a GitLab whose projects you trust (your own), keep job containers unprivileged (the default), and use a separate
 server for untrusted code. The nightly archive of a GitLab installed with the package holds `gitlab-secrets.json`: it
 is written readable by root only and sent only to the remote storage you configured for Mas's backups.
+
+## Other distributions and web servers
+
+On SELinux systems the installer turns on `httpd_can_network_connect` (nginx may connect to local ports, the apps)
+and labels `/srv/mas` as web content; on firewalld systems it opens the `http` and `https` services. Apache and
+Caddy configurations are only read; their reload runs their own configuration test first (`apachectl configtest`,
+`caddy validate`) and nothing is reloaded if it fails.

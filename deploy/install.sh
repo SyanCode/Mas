@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install or upgrade Mas on Debian (idempotent).
+# Install or upgrade Mas (idempotent) on Debian/Ubuntu, Fedora, RHEL/Rocky/AlmaLinux 9+, Arch or openSUSE,
+# with systemd and nginx.
 #
 #   sudo ./deploy/install.sh                       # asks for the dashboard domain
 #   sudo ./deploy/install.sh --domain mas.example.com --email you@example.com
@@ -14,7 +15,7 @@ SRC=$MAS_HOME/src
 VENV=$MAS_HOME/venv
 ETC=/etc/mas
 DATA=/var/lib/mas
-NGINX_CONF=/etc/nginx/sites-available/mas.conf
+NGINX_CONF=/etc/nginx/sites-available/mas.conf   # Debian layout; set again below for the other distributions
 NGINX_LINK=/etc/nginx/sites-enabled/mas.conf
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 STAMP=$(date +%Y%m%d%H%M%S)
@@ -44,21 +45,88 @@ if [ -n "$EMAIL" ] && ! [[ "$EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-
     die "invalid email: $EMAIL"
 fi
 [ "$(id -u)" -eq 0 ] || die "run as root: sudo $0"
-[ -f /etc/debian_version ] || die "Mas supports Debian (and derivatives) only"
 [ -f "$REPO/pyproject.toml" ] && [ -d "$REPO/mas" ] || die "run this script from the Mas source tree"
-command -v python3 >/dev/null || die "python3 is missing"
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' \
-    || die "Python 3.11+ required (found $(python3 -V 2>&1)); Debian 12 or newer"
+[ -d /run/systemd/system ] || die "Mas needs systemd (Alpine/OpenRC, WSL without systemd… are not supported)"
+
+# -- distribution ---------------------------------------------------------------
+# shellcheck disable=SC1091
+. /etc/os-release
+FAMILY=""
+for id in $ID ${ID_LIKE:-}; do
+    case "$id" in
+        debian|ubuntu) FAMILY=debian; break ;;
+        fedora|rhel|centos|rocky|almalinux|ol) FAMILY=rhel; break ;;
+        arch|manjaro|endeavouros) FAMILY=arch; break ;;
+        opensuse*|suse|sles) FAMILY=suse; break ;;
+    esac
+done
+[ -n "$FAMILY" ] || die "unsupported distribution: ${PRETTY_NAME:-$ID} (Debian/Ubuntu, Fedora, RHEL/Rocky/Alma, Arch or openSUSE)"
+log "Distribution: ${PRETTY_NAME:-$ID} ($FAMILY)"
 
 # -- packages -----------------------------------------------------------------
 log "Installing system packages"
-PKGS="python3-venv git certbot python3-certbot-nginx"
-command -v npm >/dev/null || PKGS="$PKGS nodejs npm"
-command -v nginx >/dev/null || PKGS="$PKGS nginx"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-# shellcheck disable=SC2086
-apt-get install -y -qq --no-install-recommends $PKGS >/dev/null
+NEED=""
+command -v npm >/dev/null || NEED="$NEED nodejs npm"
+command -v nginx >/dev/null || NEED="$NEED nginx"
+case "$FAMILY" in
+    debian)
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        # shellcheck disable=SC2086
+        apt-get install -y -qq --no-install-recommends python3-venv git certbot python3-certbot-nginx $NEED >/dev/null ;;
+    rhel)
+        if [ "$ID" != fedora ]; then  # certbot comes from EPEL on RHEL and its rebuilds
+            dnf install -y -q epel-release >/dev/null 2>&1 || dnf install -y -q \
+                "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${VERSION_ID%%.*}.noarch.rpm" >/dev/null
+        fi
+        # shellcheck disable=SC2086
+        dnf install -y -q git certbot python3-certbot-nginx tar $NEED >/dev/null
+        python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null || dnf install -y -q python3.12 >/dev/null \
+            || dnf install -y -q python3.11 >/dev/null ;;
+    arch)
+        # shellcheck disable=SC2086
+        pacman -Sy --needed --noconfirm python git certbot certbot-nginx $NEED >/dev/null ;;
+    suse)
+        # shellcheck disable=SC2086
+        zypper --non-interactive --quiet install -y python3 git certbot python3-certbot-nginx $NEED >/dev/null
+        python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null || zypper --non-interactive --quiet \
+            install -y python312 >/dev/null || zypper --non-interactive --quiet install -y python311 >/dev/null ;;
+esac
+PYTHON=""
+for candidate in python3.13 python3.12 python3.11 python3; do
+    if command -v "$candidate" >/dev/null && "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+        PYTHON=$(command -v "$candidate"); break
+    fi
+done
+[ -n "$PYTHON" ] || die "Python 3.11+ required and none could be installed (found $(python3 -V 2>&1))"
+
+# -- nginx layout -----------------------------------------------------------------
+# Debian/Ubuntu: sites-available + sites-enabled. Elsewhere: conf.d, included from the http block of nginx.conf
+# (Arch does not include it by default). Mas writes its sites the same way (mas.deploy.detect_layout).
+if [ ! -d /etc/nginx/sites-enabled ]; then
+    install -d -m 755 /etc/nginx/conf.d
+    NGINX_CONF=/etc/nginx/conf.d/mas.conf
+    NGINX_LINK=""
+    if ! grep -Eq '^[[:space:]]*include[[:space:]]+(/etc/nginx/)?conf\.d/\*\.conf' /etc/nginx/nginx.conf; then
+        log "Including /etc/nginx/conf.d/*.conf in nginx.conf"
+        cp /etc/nginx/nginx.conf "/etc/nginx/nginx.conf.mas-bak-$STAMP"
+        sed -i '0,/^[[:space:]]*http[[:space:]]*{/s//&\n    include \/etc\/nginx\/conf.d\/*.conf;/' /etc/nginx/nginx.conf
+    fi
+fi
+systemctl enable --now --quiet nginx 2>/dev/null || true
+
+# SELinux (Fedora, RHEL…): nginx may then talk to the apps on 127.0.0.1 and serve the files under /srv/mas.
+if command -v selinuxenabled >/dev/null && selinuxenabled; then
+    log "SELinux: allowing nginx to reach the apps and read /srv/mas"
+    setsebool -P httpd_can_network_connect 1 || warn "setsebool failed: nginx may not reach the apps"
+    if command -v semanage >/dev/null; then
+        semanage fcontext -a -t httpd_sys_content_t '/srv/mas(/.*)?' 2>/dev/null || true
+    fi
+fi
+# firewalld (Fedora, RHEL, openSUSE): open HTTP and HTTPS.
+if command -v firewall-cmd >/dev/null && systemctl is-active --quiet firewalld; then
+    firewall-cmd --quiet --permanent --add-service=http --add-service=https && firewall-cmd --quiet --reload || true
+fi
 
 # -- source -------------------------------------------------------------------
 if [ -f "$MAS_HOME/pyvenv.cfg" ]; then
@@ -81,7 +149,7 @@ if [ "$REPO" != "$SRC" ]; then
 fi
 
 log "Installing Python package in $VENV"
-[ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
+[ -x "$VENV/bin/python" ] || "$PYTHON" -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
 "$VENV/bin/pip" install --quiet --upgrade "$SRC"
 ln -sf "$VENV/bin/mas" /usr/local/bin/mas
@@ -92,6 +160,9 @@ log "Building the dashboard"
 # -- config & data ------------------------------------------------------------
 install -d -m 700 "$ETC" "$DATA"
 install -d -m 755 /srv/mas
+if command -v restorecon >/dev/null && command -v selinuxenabled >/dev/null && selinuxenabled; then
+    restorecon -R /srv/mas 2>/dev/null || true
+fi
 if [ ! -f "$ETC/config.toml" ]; then
     log "Writing $ETC/config.toml"
     install -m 600 /dev/null "$ETC/config.toml"
@@ -183,11 +254,11 @@ if [ "$WITH_NGINX" -eq 1 ] && [ -n "$DOMAIN" ]; then
     fi
     sed "s/__DOMAIN__/$DOMAIN/g" "$SRC/deploy/nginx-mas.conf" > "$NGINX_CONF.tmp"
     mv "$NGINX_CONF.tmp" "$NGINX_CONF"
-    ln -sf "$NGINX_CONF" "$NGINX_LINK"
+    [ -z "$NGINX_LINK" ] || ln -sf "$NGINX_CONF" "$NGINX_LINK"
 
     if ! nginx -t 2>/tmp/mas-nginx-test.log; then
         cat /tmp/mas-nginx-test.log >&2
-        if [ -n "$BACKUP" ]; then mv "$BACKUP" "$NGINX_CONF"; else rm -f "$NGINX_CONF" "$NGINX_LINK"; fi
+        if [ -n "$BACKUP" ]; then mv "$BACKUP" "$NGINX_CONF"; else rm -f "$NGINX_CONF" ${NGINX_LINK:+"$NGINX_LINK"}; fi
         die "nginx -t failed, previous configuration restored, nginx NOT reloaded"
     fi
     systemctl reload nginx

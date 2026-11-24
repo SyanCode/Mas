@@ -22,7 +22,8 @@ from cryptography import x509
 from mas.collectors import ScanContext
 
 NGINX_DIR = "/etc/nginx"
-SITE_GLOBS = [f"{NGINX_DIR}/sites-enabled/*", f"{NGINX_DIR}/conf.d/*.conf"]
+SITE_GLOBS = [f"{NGINX_DIR}/sites-enabled/*", f"{NGINX_DIR}/conf.d/*.conf", f"{NGINX_DIR}/vhosts.d/*.conf",
+              f"{NGINX_DIR}/http.d/*.conf"]  # Debian, Fedora/RHEL/Arch, openSUSE, Alpine (when nginx.conf is missing)
 MAX_INCLUDE_DEPTH = 8
 REDIRECT_CODES = {"301", "302", "303", "307", "308"}
 LOCAL_HOSTS = {"localhost", "0.0.0.0", "::1", "::", "*"}
@@ -279,6 +280,7 @@ class NginxSite:
     ssl_expires: datetime | None = None
     redirect_to: str | None = None
     log_paths: list[str] = field(default_factory=list)
+    server: str = "nginx"  # nginx | apache | caddy (mas.collectors.webservers)
 
     @property
     def primary_name(self) -> str | None:

@@ -25,7 +25,13 @@ ALLOWED: dict[Manager, tuple[str, ...]] = {
     Manager.DOCKER: ("start", "stop", "restart"),
     Manager.PHP_FPM: ("reload", "restart"),
     Manager.NGINX_STATIC: ("reload",),
+    Manager.APACHE: ("reload",),  # the whole web server: only a reload, after its configuration test
+    Manager.CADDY: ("reload",),
 }
+
+# The configuration test run before reloading Apache or Caddy (nothing is reloaded if it fails).
+CONFIG_TESTS = {Manager.APACHE: (["apachectl", "configtest"], ["apache2ctl", "configtest"]),
+                Manager.CADDY: (["caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"],)}
 
 UNIT_RE = re.compile(r"^[A-Za-z0-9@._:-]+\.service$")
 PM2_NAME_RE = re.compile(r"^[A-Za-z0-9._@-]+$")
@@ -105,6 +111,20 @@ def run_action(host: Host, svc: Service, action: str) -> ActionResult:
         result = nginx_reload(host)
         result.service_id = svc.id
         return result
+
+    if svc.manager in CONFIG_TESTS:
+        unit = _check(UNIT_RE, svc.unit, "systemd unit")
+        test = next((r for r in (host.run(argv, timeout=ACTION_TIMEOUT) for argv in CONFIG_TESTS[svc.manager])
+                     if r is not None), None)
+        if test is None or not test.ok:
+            detail = (test.stderr + test.stdout).strip() if test else "configuration test tool not found"
+            return ActionResult(False, action, svc.id, CONFIG_TESTS[svc.manager][0],
+                                f"configuration test failed, NOT reloaded:\n{detail}")
+        argv = ["systemctl", "reload", unit]
+        res = host.run(argv, timeout=ACTION_TIMEOUT)
+        if res is None:
+            return ActionResult(False, action, svc.id, argv, "systemctl not found")
+        return ActionResult(res.ok, action, svc.id, argv, (res.stdout + res.stderr).strip())
 
     if svc.manager == Manager.DOCKER:
         cid = _check(CONTAINER_RE, svc.container_id, "container id")

@@ -136,7 +136,23 @@ def unit_path(app_id: str) -> str:
     return f"/etc/systemd/system/{unit_name(app_id)}"
 
 
+# Where nginx sites live. Debian and Ubuntu: a file in sites-available, enabled by a link in sites-enabled. The other
+# distributions (Fedora, RHEL and its rebuilds, Arch, openSUSE) have no such folders: one file in conf.d, which the
+# installer makes sure nginx.conf includes. Set from the server by ``detect_layout`` (the Deployer does it).
+LAYOUT = {"debian": True}
+
+
+def detect_layout(host: Host) -> str:
+    debian = host.is_dir("/etc/nginx/sites-enabled") or not host.is_dir("/etc/nginx/conf.d")
+    LAYOUT["debian"] = debian
+    return "sites-enabled" if debian else "conf.d"
+
+
 def vhost_paths(app_id: str) -> tuple[str, str]:
+    """(file, enabled path) of a site of Mas: the same path twice on a conf.d layout (nothing to link)."""
+    if not LAYOUT["debian"]:
+        path = f"/etc/nginx/conf.d/mas-app-{app_id}.conf"
+        return path, path
     return (f"/etc/nginx/sites-available/mas-app-{app_id}.conf", f"/etc/nginx/sites-enabled/mas-app-{app_id}.conf")
 
 
@@ -369,6 +385,7 @@ class Deployer:
         resolver: Callable[[str], list[str]] = _resolve,
     ) -> None:
         self.host, self.config, self.db = host, config, db
+        detect_layout(host)
         self.resolver = resolver
         # Run after the clone, before the build, with (app, release dir, log): database migrations.
         self.before_build: list[Callable[[dict, str, "ReleaseLog"], None]] = []
@@ -746,13 +763,15 @@ class Deployer:
             return len(after)
 
     def _fpm_socket(self) -> str:
-        sockets = sorted(self.host.glob("/run/php/php*-fpm.sock"))
+        # Debian/Ubuntu: /run/php/php8.2-fpm.sock; Fedora/RHEL: /run/php-fpm/www.sock; openSUSE, Arch: php-fpm.sock
+        sockets = sorted(self.host.glob("/run/php/php*-fpm.sock")) or sorted(
+            self.host.glob("/run/php-fpm/*.sock") + self.host.glob("/run/php-fpm.sock") + self.host.glob("/run/php*-fpm/*.sock"))
         if not sockets:
-            raise DeployError("no PHP-FPM socket found in /run/php (apt install php-fpm)")
+            raise DeployError("no PHP-FPM socket found (install php-fpm and start it)")
         return sockets[-1]
 
     def _ensure_pages(self) -> None:
-        """Status pages served by nginx (deploying / unavailable); readable by www-data."""
+        """Status pages served by nginx (deploying / unavailable); readable by its user (www-data, nginx, http…)."""
         self._mkdir_public(self.config.pages_dir)
         for name in templates.STATUS_PAGES:
             path = f"{self.config.pages_dir}/{name}.html"
