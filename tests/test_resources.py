@@ -157,3 +157,24 @@ def test_a_limit_far_too_wide_is_lowered_only_with_consent(res):
     assert json.loads(db.get_app("web")["resources"])["memory_mb"] == 1408
     db.update_app("web", resources=json.dumps({"memory_mb": 2048}))  # under four times the peak: left alone
     assert "memory-oversized" not in {a["id"] for a in r.advice(db.get_app("web"))}
+
+
+def test_the_uptime_checks_of_mas_do_not_keep_an_app_awake(res):
+    from mas.uptime import Uptime
+    r, db, host, _ = res
+    db.update_app("web", resources=json.dumps({"sleep_after_min": 30}))
+    site(host, wake=True)
+    r.started = 1000.0
+    up = Uptime(db, fetch=lambda url, follow=True: __import__("mas.compliance", fromlist=["Response"]).Response(url, 200))
+    r.uptime = up
+    # a check every minute for half an hour: each one leaves a line in the upstream log, like a visitor would
+    for minute in range(1, 32):
+        at = 1000.0 + minute * 60
+        up.windows["web"] = [*up.windows.get("web", [])[-39:], (at - 0.2, at + 0.1)]
+        visits(host, at, 1)
+        r.tick(now=at + 1)
+    assert r.asleep("web")  # those were not visits
+    # asleep: the checks stop opening it (which would wake it up), a real visitor still does
+    calls = []
+    up.fetch = lambda url, follow=True: calls.append(url)
+    assert up.check(db.get_app("web")) == {"ok": True, "skipped": "asleep"} and calls == []

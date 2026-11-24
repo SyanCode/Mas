@@ -741,7 +741,12 @@ Mas keeps its own footprint small: the MCP library is loaded only once `/mcp` is
 and HTTP-client libraries only when needed, freed memory is given back to the system every ten minutes
 (`malloc_trim`), requests are not written to the journal one by one (the dashboard polls every few seconds), a
 warning of the scan is logged once instead of at every scan, and a dashboard tab in the background sends no
-request until it is visible again.
+request until it is visible again. Each thread keeps its database connection (a query costs about nine times less
+CPU than opening SQLite every time), with a small page cache and at most 12 background threads, and the advice of
+an app (which runs `systemctl`) is computed at most once a minute however often a page asks for it.
+
+The uptime checks of Mas are not visits: they no longer keep an app set to sleep awake, and an app asleep on purpose
+is not opened (that would wake it up).
 
 ### Traffic statistics
 
@@ -1004,6 +1009,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **Sleep that works, lighter Mas**: the uptime checks no longer keep sleeping apps awake (they never fell asleep before), database connections reused per thread, fewer threads, advice cached.
 - [x] **GitLab Runner, backups and moving apps**: a runner from the catalog registered by itself, nightly GitLab backups (catalog or package) sent off the server in parts, vulnerable dependencies of GitLab apps upgraded, and an app moved from GitHub to GitLab without a rebuild.
 - [x] **GitLab CMS and deploy statuses**: the CMS edits sites deployed from GitLab; each release reports *Mas deploy* (live address or the error) on its commit, in GitLab merge requests and GitHub checks.
 - [x] **GitLab**: a GitLab of the server or the cluster found by itself, or one created from the catalog and connected in one click; apps deployed from GitLab (push webhook, robot, cluster copies), merge request previews, and GitHub repositories mirrored into GitLab.

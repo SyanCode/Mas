@@ -415,6 +415,7 @@ def create_app(
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \
         Cluster(host, config, db, deployer)
     resources = Resources(host, config, db, deployer, cluster)
+    resources.uptime = uptime  # its checks are not visits: apps set to sleep do fall asleep
     restart_all = RestartAll(host, config, db, deployer, scanner)
 
     def advisor_snapshot() -> dict:
@@ -466,6 +467,9 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # 12 threads for the background work (asyncio would allow up to 32): each one keeps a database connection
+        from concurrent.futures import ThreadPoolExecutor
+        asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=12, thread_name_prefix="mas"))
         with db.tx() as c:  # a restart interrupts running deployments
             c.execute("UPDATE releases SET status = 'failed', error = 'interrupted (Mas restarted)' "
                       "WHERE status IN ('queued', 'building')")

@@ -78,6 +78,15 @@ class Resources:
         self.quiet_since: dict[str, float] = {}    # app id → since when fewer instances would do
         self.cpu: dict[str, tuple[float, int]] = {}  # unit → (time, CPUUsageNSec) at the previous tick
         self.containers = None  # () → advice of the containers (set by the API from mas.usage)
+        self.uptime = None  # mas.uptime.Uptime: its checks are not visits
+        self._advice: dict[str, tuple[float, str, list]] = {}  # app id → (time, settings, advice), a minute
+
+    def _visits(self, app: dict, now: float) -> list:
+        """The requests of the last 15 minutes that came from visitors: the uptime checks of Mas left out."""
+        entries = [e for e in self.cluster._follow(app["id"], now) if e[1].startswith("127.0.0.1:")]
+        if self.uptime is None:
+            return entries
+        return [e for e in entries if not self.uptime.is_check(app["id"], e[0])]
 
     def _log(self, app_id: str) -> ReleaseLog:
         return ReleaseLog(Path(self.db.path).parent / "logs" / "resources" / f"{app_id}.log")
@@ -115,7 +124,7 @@ class Resources:
         for app in self.db.list_apps():
             if app.get("replica_of"):
                 continue
-            advice = {a["id"]: a for a in self.advice(app, now)}
+            advice = {a["id"]: a for a in self.advice(app, now, fresh=True)}
             res = dict(app_resources(app))
             changes = []
             if "memory-limit" in advice and not res.get("memory_mb"):
@@ -181,7 +190,7 @@ class Resources:
                 continue
             if not (res.get("sleep_after_min") or res.get("autoscale")):
                 continue
-            entries = [e for e in self.cluster._follow(app["id"], now) if e[1].startswith("127.0.0.1:")]
+            entries = self._visits(app, now)
             if entries:
                 self.last_seen[app["id"]] = max(self.last_seen.get(app["id"], 0), max(e[0] for e in entries))
             if self.asleep(app["id"]):
@@ -308,7 +317,18 @@ class Resources:
                 peak = max(peak or 0, int(text))
         return round(peak / 1048576, 1) if peak else None
 
-    def advice(self, app: dict, now: float | None = None) -> list[dict]:
+    def advice(self, app: dict, now: float | None = None, fresh: bool = False) -> list[dict]:
+        """The advice of an app, computed at most once a minute (pages poll it; each look runs systemctl)."""
+        now = now or time.time()
+        key = json.dumps([app.get("resources"), app.get("extra_ports"), app.get("domain"), app.get("mode")])
+        hit = self._advice.get(app["id"])
+        if not fresh and hit and hit[1] == key and now - hit[0] < 60:
+            return hit[2]
+        out = self._compute_advice(app, now)
+        self._advice[app["id"]] = (now, key, out)
+        return out
+
+    def _compute_advice(self, app: dict, now: float | None = None) -> list[dict]:
         """What would make the app lighter or steadier, from what it uses now: {id, level, params, set}
         (``set``: the resources the dashboard applies in one click; the texts are in the dashboard)."""
         now = now or time.time()
@@ -318,7 +338,7 @@ class Resources:
         out: list[dict] = []
         instances = len(app_instances(app))
         memory = self.memory_mb(app)
-        entries = [e for e in self.cluster._follow(app["id"], now) if e[1].startswith("127.0.0.1:")]
+        entries = self._visits(app, now)
         rpm = round(len(entries) / 15, 1)
         if memory is not None:
             per = round(memory / max(1, instances))

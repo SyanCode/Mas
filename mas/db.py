@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
@@ -395,6 +396,7 @@ def _now() -> str:
 class Database:
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
+        self._local = threading.local()  # one connection per thread, see tx()
         parent = Path(self.path).parent
         parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self.tx() as conn:
@@ -411,11 +413,39 @@ class Database:
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
-        with closing(sqlite3.connect(self.path, timeout=10)) as conn:
+        """One transaction on this thread's connection, kept open between calls: opening SQLite (the file, the
+        schema) cost more than most queries, and the background loop makes hundreds a minute. A ``tx`` inside
+        another one joins it: committed (or rolled back) once, by the outermost."""
+        local = self._local
+        conn = getattr(local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.path, timeout=10, check_same_thread=True)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys = ON")
-            with conn:
+            conn.execute("PRAGMA cache_size = -512")  # 512 KB per connection: the database of Mas is small
+            local.conn = conn
+        depth = getattr(local, "depth", 0)
+        local.depth = depth + 1
+        try:
+            if depth:
                 yield conn
+            else:
+                with conn:
+                    yield conn
+        except sqlite3.DatabaseError:
+            if not depth:  # a broken connection is not reused
+                local.conn = None
+                conn.close()
+            raise
+        finally:
+            local.depth = depth
+
+    def close(self) -> None:
+        """Close this thread's connection (the others close with their threads)."""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            self._local.conn = None
+            conn.close()
 
     # -- users -----------------------------------------------------------
 

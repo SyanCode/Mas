@@ -31,12 +31,22 @@ class Uptime:
     def __init__(self, db: Database, fetch=http_fetch, notifier=None) -> None:
         self.db, self.fetch, self.notifier = db, fetch, notifier
         self._pruned = 0.0
+        # app id → [(start, end)] of the latest checks: their requests are not visits (mas.resources ignores them,
+        # or an app set to sleep after N quiet minutes would never fall asleep)
+        self.windows: dict[str, list[tuple[float, float]]] = {}
+
+    def is_check(self, app_id: str, at: float) -> bool:
+        """Was the request logged at ``at`` (epoch seconds) one of these checks?"""
+        return any(start - 1 <= at <= end + 1 for start, end in self.windows.get(app_id, ()))
 
     def check(self, app: dict, now: float | None = None) -> dict:
         now = now or time.time()
-        started = time.monotonic()
+        if self.db.get_setting(f"asleep:{app['id']}") == "1":
+            return {"ok": True, "skipped": "asleep"}  # asleep on purpose: opening it would wake it up
+        started, wall = time.monotonic(), time.time()
         resp: Response = self.fetch(f"https://{app['domain']}/", follow=True)
         ms = int((time.monotonic() - started) * 1000)
+        self.windows[app["id"]] = [*self.windows.get(app["id"], [])[-39:], (wall, time.time())]  # 40 checks: more than the 15 minutes of requests kept
         ok = resp.status != 0 and resp.status < 500
         self.db.add_uptime_check(app["id"], _iso(now), ok, resp.status, ms)
         self._transition(app, ok, resp, now)
