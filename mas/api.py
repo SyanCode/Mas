@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from mas import preview as preview_mod
 from mas import __version__, advisor as advisor_mod, ai as ai_mod, claudelogin as claudelogin_mod, api_advisor, robot as robot_mod, agent_apps, api_cluster, cms_backup, mcp_endpoint, api_cms, api_maintenance, api_projects, api_resources, api_shares, shares as shares_mod, api_deploy, api_dns, api_stacks, api_supabase, auth, masclient, runtime
+from mas import api_gitlab, gitlab as gitlab_mod
 from mas.actions import CONFIRM_ACTIONS, ActionError, available_actions, nginx_reload, run_action
 from mas.appdb import AppDatabases
 from mas.cluster import Cluster
@@ -284,6 +285,10 @@ def create_app(
                 await asyncio.to_thread(app.state.previews.sweep)
             except Exception:
                 log.exception("preview sweep failed")
+            try:  # GitLab copies of GitHub repositories, every half hour (and after each push)
+                await asyncio.to_thread(app.state.mirror.tick)
+            except Exception:
+                log.exception("GitLab mirror failed")
             try:  # shared files that expired or reached their download limit
                 await asyncio.to_thread(shares_mod.sweep, db)
             except Exception:
@@ -1183,6 +1188,14 @@ def create_app(
     api_advisor.register(app, db=db, current_session=current_session, advisor=advisor, pool=pool, robot=robot,
                          require_password=require_password, claude_login=claude_login, autopilot=autopilot)
     api_maintenance.register(app, db=db, current_session=current_session, maintenance=maintenance, client_ip=client_ip)
+    # GitLab: a second code host (deploys, merge request previews) and the mirror of GitHub repositories into it
+    gitlab_ref: list = [lambda: None]
+    mirror = gitlab_mod.Mirror(host, db, Path(db.path).parent, github_client, lambda: gitlab_ref[0]())
+    gitlab_ref[0] = api_gitlab.register(app, host=host, config=config, db=db, current_session=current_session,
+                                        require_password=require_password, deployer=deployer, scanner=scanner,
+                                        cluster=cluster, mirror=mirror)
+    deployer.gitlab = robot.gitlab = gitlab_ref[0]
+    app.state.mirror = mirror
     app.state.resources = resources
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups

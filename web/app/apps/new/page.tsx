@@ -71,7 +71,16 @@ function NewApp() {
   const [replacement, setReplacement] = useState<Replacement | null>(null);
 
   useEffect(() => {
-    api<Repo[]>("/github/repos").then(setRepos).catch((e: ApiError) => setError(e.detail));
+    // GitHub (the GitHub App) and, when one is connected, GitLab: one list, the GitLab ones grouped under "GitLab · group"
+    Promise.allSettled([
+      api<Repo[]>("/github/repos"),
+      api<{ connected: boolean }>("/gitlab").then((g) => (g.connected ? api<Repo[]>("/gitlab/repos") : [])),
+    ]).then(([gh, gl]) => {
+      const fromGitLab = gl.status === "fulfilled" ? gl.value.map((r) => ({ ...r, source: "gitlab" as const, owner: `GitLab · ${r.owner}` })) : [];
+      const fromGitHub = gh.status === "fulfilled" ? gh.value : [];
+      if (gh.status === "rejected" && !fromGitLab.length) setError((gh.reason as ApiError).detail);
+      setRepos([...fromGitHub, ...fromGitLab]);
+    });
     const sid = new URLSearchParams(window.location.search).get("replace");
     if (sid) {
       setReplaceId(sid);
@@ -90,19 +99,21 @@ function NewApp() {
     if (!repo) return;
     setId(slug(replacement ? replacement.domain.split(".")[0] : repo.full_name.split("/")[1]));
     setBranch(repo.default_branch);
-    api<string[]>(`/github/branches?repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}`)
+    api<string[]>(repo.source === "gitlab" ? `/gitlab/branches?repo=${encodeURIComponent(repo.full_name)}`
+      : `/github/branches?repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}`)
       .then(setBranches).catch(() => setBranches([repo.default_branch]));
   }, [repo]);
 
   useEffect(() => {
     if (!repo || !branch) return;
     setDetecting(true);
-    api<{ type: string; start_command: string | null; env_file: string | null; env: EnvVarDef[] }>(
-      `/github/detect?repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}&ref=${encodeURIComponent(branch)}`,
+    api<{ type: string; start_command?: string | null; env_file?: string | null; env?: EnvVarDef[] }>(repo.source === "gitlab"
+      ? `/gitlab/detect?repo=${encodeURIComponent(repo.full_name)}&ref=${encodeURIComponent(branch)}`
+      : `/github/detect?repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}&ref=${encodeURIComponent(branch)}`,
     ).then((d) => {
       setType(d.type === "unknown" ? (replacement && replacement.type !== "unknown" ? replacement.type : "") : d.type);
       if (d.start_command) setStartCommand(d.start_command);
-      setEnvFile(d.env_file);
+      setEnvFile(d.env_file ?? null);
       setEnvVars(d.env ?? []);
       setEnvValues(Object.fromEntries((d.env ?? []).map((v) => [v.key, v.value])));
     }).catch(() => {}).finally(() => setDetecting(false));
@@ -116,7 +127,7 @@ function NewApp() {
 
   // Badge "Mas compatible" on the repositories shown (a valid mas.cms.json on their default branch).
   useEffect(() => {
-    const missing = shown.filter((r) => !(r.full_name in compat));
+    const missing = shown.filter((r) => r.source !== "gitlab" && !(r.full_name in compat));
     if (!missing.length) return;
     const timer = setTimeout(() => {
       api<Record<string, CmsCompat>>("/cms/compatibility", {
@@ -130,7 +141,7 @@ function NewApp() {
   // Does the repository use Supabase? (libraries, .env.example, supabase/migrations)
   useEffect(() => {
     setDb(null);
-    if (!repo || !branch) return;
+    if (!repo || !branch || repo.source === "gitlab") return;
     const timer = setTimeout(() => {
       const q = `repo=${encodeURIComponent(repo.full_name)}&installation_id=${repo.installation_id}&ref=${encodeURIComponent(branch)}&root_dir=${encodeURIComponent(rootDir)}`;
       api<RepoDatabase>(`/github/database?${q}`).then(setDb).catch(() => {});
@@ -174,7 +185,8 @@ function NewApp() {
       const created = await api<App & { release_id: number }>("/apps", {
         method: "POST",
         body: {
-          id, repo: repo.full_name, branch, installation_id: repo.installation_id, domain: choice?.domain ?? null, type, env: fullEnv,
+          id, repo: repo.full_name, branch, installation_id: repo.installation_id, source: repo.source ?? "github",
+          domain: choice?.domain ?? null, type, env: fullEnv,
           required_env: envVars.filter((v) => v.required).map((v) => v.key),
           build_command: buildCommand || null, start_command: startCommand || null, root_dir: rootDir, auto_deploy: autoDeploy,
           supabase: canConnect && connectDb, supabase_seed: seedDb, replace_service: replacement ? replaceId : null,

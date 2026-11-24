@@ -85,7 +85,7 @@ def test_data_lives_in_the_data_folder():
     for t in TEMPLATES.values():
         options = {f["key"]: f.get("default") for f in t.fields}
         options.update({"eula": True, "mail_domain": "e2e.test", "image": "nginx", "volume": "/data"})
-        c = Ctx("x", options, {"admin_token": "t", "mailbox_password": "p"}, "/srv/mas/stacks/x/data",
+        c = Ctx("x", options, {"admin_token": "t", "mailbox_password": "p", "root_password": "r"}, "/srv/mas/stacks/x/data",
                 "/srv/mas/stacks/x/data", 7100, {p.name: p.container for p in t.ports}, "x.example.com")
         for service in t.compose(c)["services"].values():
             for volume in service.get("volumes", []):

@@ -310,6 +310,8 @@ export interface Release {
 
 export interface App {
   id: string;
+  source?: "github" | "gitlab";
+  repo_url?: string | null;
   environment?: string;
   name: string;
   repo: string;
@@ -457,6 +459,7 @@ export interface Repo {
   language: string | null;
   pushed_at: string | null;
   archived: boolean;
+  source?: "github" | "gitlab";
 }
 
 export interface ProviderField {

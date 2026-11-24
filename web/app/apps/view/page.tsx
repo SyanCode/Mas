@@ -1,5 +1,6 @@
 "use client";
 
+import { MirrorCard } from "@/components/GitLab";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -959,7 +960,8 @@ function AppView() {
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
               {app.mode === "stack"
                 ? <><span>{t(app.name)}</span><span>·</span><Badge tone="emerald">{t("service")}</Badge></>
-                : <><a href={`https://github.com/${app.repo}`} target="_blank" rel="noreferrer" className="hover:text-zinc-900 dark:hover:text-white">{app.repo}</a>
+                : <><a href={app.repo_url ?? `https://github.com/${app.repo}`} target="_blank" rel="noreferrer" className="hover:text-zinc-900 dark:hover:text-white">{app.repo}</a>
+                  {app.source === "gitlab" && <Badge tone="amber">GitLab</Badge>}
                   <span>·</span>
                   <Badge tone="sky">{app.type}</Badge></>}
               {app.mode === "adopted" && <Badge tone="violet">{t("adopted")} · {app.path}</Badge>}
@@ -1082,7 +1084,8 @@ function AppView() {
           {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && <ResourcesCard app={app} />}
           {app.mode === "managed" && <DatabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
           {app.installation_id && <CmsCard appId={app.id} />}
-          {app.mode === "managed" && app.domain && app.installation_id && app.environment !== "preview" && <PreviewsCard app={app} />}
+          {app.mode === "managed" && app.domain && (app.installation_id || app.source === "gitlab") && app.environment !== "preview" && <PreviewsCard app={app} />}
+          {app.mode === "managed" && app.source !== "gitlab" && app.installation_id && app.environment !== "preview" && <MirrorCard appId={app.id} repo={app.repo} />}
           {app.mode === "managed" && <EnvCard appId={app.id} onSaved={load} />}
         </div>
       </div>

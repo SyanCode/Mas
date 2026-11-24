@@ -210,6 +210,7 @@ class Robot:
         self.db, self.pool, self.github, self.client_for = db, pool, github, client
         self.live: dict[int, dict] = {}  # run id → {"task", "event", "approve", "stop"}
         self.poll = 3.0  # seconds between two looks at a deployment (tests make it short)
+        self.gitlab: Callable[[], Any] = lambda: None  # the GitLab of the apps deployed from it
 
     # -- runs --------------------------------------------------------------------------------------
 
@@ -431,11 +432,11 @@ class Robot:
 
     def _repo(self, app_id: str) -> tuple[Any, dict]:
         app = self.db.get_app(app_id)
-        if not app or not app.get("repo") or not app.get("installation_id"):
+        if not app or not app.get("repo") or not (app.get("installation_id") or app.get("source") == "gitlab"):
             raise ValueError("unknown site, or not linked to a GitHub repository")
-        gh = self.github()
+        gh = self.gitlab() if (app.get("source") or "github") == "gitlab" else self.github()
         if gh is None:
-            raise ValueError("GitHub is not connected")
+            raise ValueError("GitLab is not connected" if app.get("source") == "gitlab" else "GitHub is not connected")
         return gh, app
 
     async def _execute(self, name: str, args: dict, app_id: str, mas: MasClient) -> str:

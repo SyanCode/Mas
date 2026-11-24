@@ -41,6 +41,7 @@ class CopySpec(BaseModel):
     start_command: str | None = Field(default=None, max_length=1000)
     root_dir: str | None = Field(default="", max_length=200)
     env: dict[str, str] = Field(default_factory=dict)
+    git_host: str | None = Field(default=None, max_length=300)  # the GitLab the code comes from (None: GitHub)
 
 
 class CopyBody(BaseModel):

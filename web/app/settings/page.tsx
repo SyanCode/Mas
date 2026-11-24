@@ -10,6 +10,7 @@ import { useT } from "@/lib/i18n";
 import { AiAccountsList } from "@/components/AiAccounts";
 import { SitePermsPicker, usePermSummary, type SiteAccess } from "@/components/SitePermsPicker";
 import Link from "next/link";
+import { GitLabCard } from "@/components/GitLab";
 import { AppearanceCard, PasswordForm, ProfileCard, TwoFactor } from "@/components/AccountCards";
 function GitHubCard() {
   const t = useT();
@@ -882,6 +883,7 @@ function Settings() {
       <UpdateCard />
       <DomainsCard />
       <GitHubCard />
+      <GitLabCard />
       <PeopleCard />
       <AdvisorCard />
       <HostAlertsCard />

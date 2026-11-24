@@ -64,6 +64,12 @@ class Previews:
                  github_client: Callable[[], object | None]) -> None:
         self.db, self.deployer, self.register, self.github_client = db, deployer, register, github_client
 
+    def client_for(self, app: dict):
+        """GitHub, or the GitLab of the apps deployed from it (merge requests are handled like pull requests)."""
+        if (app.get("source") or "github") == "gitlab":
+            return self.deployer.gitlab()
+        return self.github_client()
+
     # -- settings ---------------------------------------------------------------------------------------
 
     def settings(self, app_id: str) -> dict:
@@ -105,7 +111,7 @@ class Previews:
 
     # -- the pull_request webhook ------------------------------------------------------------------------------
 
-    def handle(self, payload: dict, actor: str) -> dict:
+    def handle(self, payload: dict, actor: str, source: str = "github") -> dict:
         action = payload.get("action", "")
         pr = payload.get("pull_request") or {}
         repo = (payload.get("repository") or {}).get("full_name", "")
@@ -113,7 +119,7 @@ class Previews:
         if not repo or not isinstance(number, int):
             return {"ok": True, "ignored": "pull_request"}
         if action == "closed":
-            return {"ok": True, "removed": self.close(repo, number)}
+            return {"ok": True, "removed": self.close(repo, number, source)}
         if action not in OPENING and action != "synchronize":
             return {"ok": True, "ignored": f"pull_request {action}"}
         head = pr.get("head") or {}
@@ -123,7 +129,7 @@ class Previews:
             return {"ok": True, "ignored": "draft"}
         branch, sha, base = head.get("ref", ""), head.get("sha", ""), (pr.get("base") or {}).get("ref", "")
         out = []
-        for parent in self.db.apps_for_push(repo, base, frozen=True):
+        for parent in self.db.apps_for_push(repo, base, frozen=True, source=source):
             if parent["mode"] != "managed" or parent.get("environment") == "preview" or not parent.get("domain"):
                 continue
             if not self.settings(parent["id"])["enabled"]:
@@ -135,22 +141,23 @@ class Previews:
 
     def ensure(self, parent: dict, number: int, branch: str, sha: str, action: str, actor: str, pr: dict) -> str | None:
         settings = self.settings(parent["id"])
+        who = f"{parent.get('source') or 'github'}:{actor}"
         pid = preview_id(parent["id"], number)
         existing = self.db.get_app(pid)
         if existing:
             meta = self.meta(pid)
             if existing.get("environment") != "preview" or not meta or meta["parent"] != parent["id"]:
-                self.db.audit(f"github:{actor}", "preview-create", False, service_id=parent["id"],
+                self.db.audit(who, "preview-create", False, service_id=parent["id"],
                               detail=f"PR #{number}: the id {pid} is taken by another app")
                 return None  # never deploy over an app that is not this preview
             if action in OPENING:  # a reopened pull request: the push events cover the later commits
                 try:
-                    self.deployer.enqueue(pid, "push", f"github:{actor}", sha or None)
+                    self.deployer.enqueue(pid, "push", who, sha or None)
                 except DeployError as exc:
                     log.warning("preview %s: %s", pid, exc)
             return pid
         if len(self.of_parent(parent["id"])) >= settings["max"]:
-            self.db.audit(f"github:{actor}", "preview-skipped", False, service_id=parent["id"],
+            self.db.audit(who, "preview-skipped", False, service_id=parent["id"],
                           detail=f"PR #{number}: {settings['max']} previews already live")
             return None
         domain = preview_domain(parent["domain"], number)
@@ -160,16 +167,18 @@ class Previews:
                           build_command=parent.get("build_command"), start_command=parent.get("start_command"),
                           root_dir=parent.get("root_dir") or "", auto_deploy=True, aliases=[])
         except (DeployError, ValueError) as exc:
-            self.db.audit(f"github:{actor}", "preview-create", False, service_id=parent["id"], detail=f"PR #{number}: {exc}")
+            self.db.audit(who, "preview-create", False, service_id=parent["id"], detail=f"PR #{number}: {exc}")
             return None
-        fields = {"environment": "preview", "name": f"{parent.get('name') or parent['id']} · PR #{number}"}
+        label = "MR !" if parent.get("source") == "gitlab" else "PR #"
+        fields = {"environment": "preview", "name": f"{parent.get('name') or parent['id']} · {label}{number}",
+                  "source": parent.get("source")}
         if settings["env"] and parent.get("env"):
             fields["env"] = parent["env"]  # same key, same encrypted token: asked for by the owner
         self.db.update_app(pid, **fields)
         self.db.set_setting(f"preview:{pid}", json.dumps({"parent": parent["id"], "pr": number, "repo": parent["repo"]}))
-        self.db.audit(f"github:{actor}", "preview-create", True, service_id=pid, detail=f"PR #{number} → {domain}")
+        self.db.audit(who, "preview-create", True, service_id=pid, detail=f"PR #{number} → {domain}")
         try:
-            self.deployer.enqueue(pid, "create", f"github:{actor}", sha or None)
+            self.deployer.enqueue(pid, "create", who, sha or None)
         except DeployError as exc:
             log.warning("preview %s: %s", pid, exc)
         self._comment(parent, number, f"Preview of this pull request: https://{domain} (deploying, it updates at every push; "
@@ -183,7 +192,6 @@ class Previews:
         if not force and now - float(self.db.get_setting("previews:swept") or 0) < SWEEP_EVERY:
             return []
         self.db.set_setting("previews:swept", str(now))
-        gh = self.github_client()
         removed = []
         for a in self.db.list_apps():
             meta = self.meta(a["id"]) if a.get("environment") == "preview" else None
@@ -194,7 +202,8 @@ class Previews:
                 self.remove(a["id"])
                 removed.append(a["id"])
                 continue
-            if gh is None or not parent.get("installation_id"):
+            gh = self.client_for(parent)
+            if gh is None or not (parent.get("installation_id") or parent.get("source") == "gitlab"):
                 continue
             try:
                 state = gh.pull_state(parent["installation_id"], meta["repo"], meta["pr"])
@@ -206,11 +215,12 @@ class Previews:
                 removed.append(a["id"])
         return removed
 
-    def close(self, repo: str, number: int) -> list[str]:
+    def close(self, repo: str, number: int, source: str = "github") -> list[str]:
         removed = []
         for a in self.db.list_apps():
             m = self.meta(a["id"]) if a.get("environment") == "preview" else None
-            if m and m["pr"] == number and m["repo"].lower() == repo.lower():
+            if (m and m["pr"] == number and m["repo"].lower() == repo.lower()
+                    and (a.get("source") or "github") == source):
                 self.remove(a["id"])
                 removed.append(a["id"])
         return removed
@@ -231,8 +241,8 @@ class Previews:
         return gone
 
     def _comment(self, parent: dict, number: int, text: str) -> None:
-        gh = self.github_client()
-        if gh is None or not parent.get("installation_id"):
+        gh = self.client_for(parent)
+        if gh is None or not (parent.get("installation_id") or parent.get("source") == "gitlab"):
             return
         try:
             gh.comment(parent["installation_id"], parent["repo"], number, text)

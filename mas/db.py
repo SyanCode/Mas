@@ -329,6 +329,7 @@ USER_COLS = ("id, username, password_hash, totp_secret, totp_pending, totp_last_
              "display_name, nickname, bio, avatar_v, avatar_type IS NOT NULL AS has_avatar")  # not the picture itself
 
 MIGRATIONS = [
+    ("apps", "source TEXT"),  # where the code is: NULL / "github" (the GitHub App) or "gitlab" (mas.gitlab)
     ("robot_runs", "usage TEXT"),  # JSON {input, cache_write, cache_read, output, calls}: tokens of the run
     ("site_stats", "countries TEXT"),
     ("site_stats", "sources TEXT"),
@@ -378,7 +379,8 @@ FOLDER_KINDS = ("app", "service")
 APP_FIELDS = {"name", "repo", "branch", "installation_id", "domain", "type", "port", "mode", "service_id",
               "path", "root_dir", "build_command", "start_command", "env", "auto_deploy", "environment",
               "current_release", "extra_ports", "backends", "stack", "aliases", "replaces", "cluster",
-              "cluster_backends", "bind", "replica_of", "resources", "project", "pending", "pending_env"}
+              "cluster_backends", "bind", "replica_of", "resources", "project", "pending", "pending_env",
+              "source"}
 RELEASE_FIELDS = {"sha", "message", "author", "status", "path", "log_path", "error", "finished_at"}
 
 
@@ -1171,12 +1173,13 @@ class Database:
         with self.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM apps ORDER BY id")]
 
-    def apps_for_push(self, repo: str, branch: str, frozen: bool = False) -> list[dict]:
-        """Apps following ``repo``@``branch``: those deploying on push, or (``frozen``) every one of them."""
+    def apps_for_push(self, repo: str, branch: str, frozen: bool = False, source: str = "github") -> list[dict]:
+        """Apps following ``repo``@``branch`` on ``source`` (github or gitlab): those deploying on push, or
+        (``frozen``) every one of them."""
         with self.tx() as c:
             rows = c.execute(
-                "SELECT * FROM apps WHERE lower(repo) = lower(?) AND branch = ?"
-                + ("" if frozen else " AND auto_deploy = 1"), (repo, branch)).fetchall()
+                "SELECT * FROM apps WHERE lower(repo) = lower(?) AND branch = ? AND coalesce(source, 'github') = ?"
+                + ("" if frozen else " AND auto_deploy = 1"), (repo, branch, source)).fetchall()
         return [dict(r) for r in rows]
 
     def update_app(self, app_id: str, **fields: Any) -> None:

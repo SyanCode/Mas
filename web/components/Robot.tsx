@@ -98,7 +98,7 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const log = useRef<HTMLUListElement>(null);
-  const sites = apps.filter((a) => a.repo && a.installation_id);
+  const sites = apps.filter((a) => a.repo && (a.installation_id || a.source === "gitlab"));
 
   const load = useCallback(() => {
     api<RobotState>("/robot").then((r) => { setState(r); setAutonomy((cur) => (state ? cur : r.autonomy)); }).catch((e: ApiError) => setError(e.detail));

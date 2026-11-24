@@ -634,6 +634,25 @@ the old nginx files leave and the app's vhost arrives in the same reload. If the
 fails, the old site stays as it was. The service page offers **Replace with a Mas app**; removing
 the app later puts the old site back.
 
+### GitLab
+
+**Settings → GitLab** connects a GitLab (your own or gitlab.com) next to GitHub. Mas finds by itself a GitLab running
+on this server (the Omnibus package or a `gitlab/gitlab-ce|ee` container, with its address) or on another server of
+the cluster; **Use it** fills the form, and an access token with the `api` scope connects it (kept encrypted, your
+password is asked). No GitLab yet: **GitLab** in the service catalog runs one (about 3 GB of memory: Puma in single
+mode, a small Sidekiq, no bundled Prometheus), and its **Connect Mas to this GitLab** action creates the token and
+connects it, nothing to copy.
+
+- **Deploy from GitLab**: *New app* lists the GitLab projects next to the GitHub repositories (`group/subgroup/project`
+  works). Mas adds the webhook to the project; each push deploys like a GitHub push, and the robot, the previews and
+  the copies on the other servers of the cluster work the same.
+- **Merge request previews**: with previews on, each merge request gets its own copy at `pr<N>.<domain>`, updated at
+  each push, commented on the merge request and removed when it is merged or closed. Merge requests from a fork are
+  ignored: their code never runs here.
+- **Mirror**: on an app deployed from GitHub, **GitLab mirror** copies every branch and tag of its repository into a
+  GitLab project (created private if missing) after each push and every half hour: GitLab CI and reviews work on it,
+  and the code also lives outside GitHub.
+
 ### Redeploy all
 
 **Apps → Redeploy all** queues a deployment of the latest commit of every app from GitHub; they run
@@ -967,6 +986,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **GitLab**: a GitLab of the server or the cluster found by itself, or one created from the catalog and connected in one click; apps deployed from GitLab (push webhook, robot, cluster copies), merge request previews, and GitHub repositories mirrored into GitLab.
 - [x] **Auto-prompting and container advice**: a vague request gets questions and becomes a precise goal before the robot starts; limits far too wide and heavy containers without a limit get advice, applied by the economy mode once you agree (`--shrink`); ClamAV in a mail server is pointed at.
 - [x] **Lighter Mas and apps**: economy mode (`mas economy on`), Next.js standalone builds started by themselves, the MCP library loaded on demand (about 20 MB and half the start time saved), freed memory returned to the system, no journal line per request, no polling from background tabs; a question to the mascot runs beside a task (read-only), tested in a real browser.
 - [x] **Robot mascot and token budget**: a robot docked on the side of the screen (drag, other side, hide) shows the robot's state and answers questions read-only or takes a task; a monthly token cap stops every AI use when it is spent, with the month's tokens by source on the Robot page.

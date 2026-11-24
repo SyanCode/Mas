@@ -109,6 +109,16 @@ class GitHubApp:
         self.opener = opener
         self._tokens: dict[int, tuple[str, float]] = {}
 
+    source = "github"
+
+    @staticmethod
+    def clone_url(repo: str) -> str:
+        return f"https://github.com/{repo}.git"
+
+    @staticmethod
+    def auth_env(token: str) -> dict[str, str]:
+        return git_auth_env(token)
+
     def _as_app(self, method: str, path: str, body: dict | None = None) -> Any:
         return _request(self.opener, method, path, f"Bearer {app_jwt(self.app_id, self.private_key_pem)}", body)
 

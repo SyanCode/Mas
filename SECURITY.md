@@ -72,3 +72,14 @@ Lowering a limit set by a person, or capping containers, happens only after an a
 Improving a request sends the request, the answers to its questions and the list of the sites (id, domain, type,
 repository name) to the AI account: no file, log, variable or secret. Its answer is read as JSON, cut to size, and only
 shown: nothing starts until the administrator clicks. `/api/robot/refine` refuses API tokens.
+
+## GitLab
+
+The GitLab access token is kept encrypted with the key of the app variables, sent only to that GitLab's API, and to
+git through `GIT_CONFIG_*` environment variables for that address only (never in a command line or a log). A GitLab
+on the internet must be reached over https; plain http is accepted only for this machine or a private network.
+Connecting asks the administrator's password; `/api/gitlab` refuses API tokens. The webhook checks GitLab's secret
+token (constant-time compare) and refuses a replayed delivery. Merge requests from a fork never get a preview.
+The copies of a GitLab app on other servers of the cluster receive this token for their clone, as copies of a GitHub
+app receive a clone token: a cluster server is trusted like this one. Prefer a token limited to the projects Mas
+deploys (a group access token) over a personal one.

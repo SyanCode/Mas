@@ -49,6 +49,15 @@ from mas.domains import check_app, describe
 from mas.envcrypt import EnvError, decrypt_env, load_fernet, systemd_env_file
 from mas.health import _resolve
 from mas.github import GitHubApp, GitHubError, git_auth_env
+
+
+def clone_url(client, repo: str) -> str:
+    """Where git fetches an app's code: its client says (GitHub, GitLab); a copy's source is on GitHub."""
+    return client.clone_url(repo) if hasattr(client, "clone_url") else f"https://github.com/{repo}.git"
+
+
+def clone_env(client, token: str) -> dict[str, str]:
+    return client.auth_env(token) if hasattr(client, "auth_env") else git_auth_env(token)
 from mas.host import Host
 from mas.models import Service, ServiceType
 
@@ -56,7 +65,7 @@ log = logging.getLogger(__name__)
 
 APP_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$")
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
-REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+REPO_RE = re.compile(r"[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+){1,10}")  # owner/name, or a GitLab group/subgroup/name
 BRANCH_RE = re.compile(r"^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$")
 PROXY_TYPES = {ServiceType.NEXTJS, ServiceType.NODE, ServiceType.PYTHON}
 BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -192,6 +201,8 @@ def validate_app(app_id: str, repo: str, branch: str, domain: str | None, app_ty
         raise DeployError("app id: 1-24 chars, lowercase letters, digits and dashes")
     if not REPO_RE.fullmatch(repo):
         raise DeployError("repository must look like owner/name")
+    if ".." in repo:
+        raise DeployError("invalid repository")
     if not BRANCH_RE.fullmatch(branch):
         raise DeployError("invalid branch name")
     if domain and not DOMAIN_RE.fullmatch(domain):
@@ -372,6 +383,7 @@ class Deployer:
         self.mode_handlers: dict[str, Callable[[dict, dict, "ReleaseLog"], None]] = {}
         self.remove_handlers: dict[str, Callable[[dict, bool], list[str]]] = {}
         self.github = github
+        self.gitlab: Callable[[], Any] = lambda: None  # mas.gitlab.GitLab once one is connected
         self.find_service = find_service
         self.health_check = health_check
         self.on_change = on_change
@@ -1010,10 +1022,17 @@ class Deployer:
 
     # -- managed apps ------------------------------------------------------------
 
+    def client_for(self, app: dict):
+        """The code host of an app: its GitLab when ``source`` is gitlab, else the GitHub App."""
+        if (app.get("source") or "github") == "gitlab":
+            return self.gitlab()
+        return self.github()
+
     def _managed(self, app: dict, release: dict, rlog: ReleaseLog) -> None:
-        gh = self.sources.pop(release["id"], None) or self.github()
+        gh = self.sources.pop(release["id"], None) or self.client_for(app)
         if gh is None:
-            raise DeployError("GitHub App not configured (Settings → GitHub)")
+            raise DeployError("GitLab not connected (Settings → GitLab)" if app.get("source") == "gitlab"
+                              else "GitHub App not configured (Settings → GitHub)")
         app_type = ServiceType(app["type"])
         paths = app_paths(self.config, app["id"])
         user = app_user(app["id"])
@@ -1060,8 +1079,8 @@ class Deployer:
         tmp = f"{paths.releases}/.tmp-{release['id']}"
         self.host.remove(tmp)
         self._cmd(rlog, ["git", "clone", "--depth", "1", "--single-branch", "--branch", app["branch"],
-                         f"https://github.com/{app['repo']}.git", self._r(tmp)],
-                  env=git_auth_env(gh.token(installation)), timeout=600)
+                         clone_url(gh, app["repo"]), self._r(tmp)],
+                  env=clone_env(gh, gh.token(installation)), timeout=600)
         head = self.host.run(["git", "-C", self._r(tmp), "rev-parse", "HEAD"])
         sha = head.stdout.strip() if head is not None and head.ok and head.stdout.strip() else commit["sha"]
         if sha != commit["sha"]:
@@ -1188,7 +1207,7 @@ class Deployer:
         if reset_to:
             git("reset", "--hard", reset_to)
         else:
-            gh = self.github()
+            gh = self.client_for(app)
             if gh is None:
                 raise DeployError("GitHub App not configured (Settings → GitHub)")
             installation = app["installation_id"] or gh.installation_for(app["repo"])
@@ -1196,8 +1215,8 @@ class Deployer:
             self.db.update_release(release["id"], sha=commit["sha"], message=commit["message"],
                                    author=commit["author"])
             rlog.line(f"commit {commit['sha'][:7]} {commit['message']}")
-            git("fetch", "--depth", "50", f"https://github.com/{app['repo']}.git", app["branch"],
-                env=git_auth_env(gh.token(installation)))
+            git("fetch", "--depth", "50", clone_url(gh, app["repo"]), app["branch"],
+                env=clone_env(gh, gh.token(installation)))
             git("reset", "--hard", "FETCH_HEAD")
         head = self.host.run(["git", "-C", self._r(path), "rev-parse", "HEAD"])
         sha = head.stdout.strip() if head is not None and head.ok else release["sha"]

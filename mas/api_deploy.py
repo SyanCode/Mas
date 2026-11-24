@@ -7,7 +7,10 @@ else is read.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import asyncio
+import threading
 import json
 import logging
 import secrets
@@ -59,7 +62,8 @@ class CreateApp(BaseModel):
     id: str = Field(max_length=24)
     repo: str = Field(max_length=200)
     branch: str = Field(max_length=200)
-    installation_id: int
+    installation_id: int = 0
+    source: Literal["github", "gitlab"] = "github"
     domain: str | None = Field(default=None, max_length=253)
     type: ServiceType
     env: str = Field(default="", max_length=65536)
@@ -127,10 +131,18 @@ def register_managed_app(host: Host, config: Config, db: Database, *, app_id: st
                          installation_id: int | None, domain: str | None, app_type: ServiceType, env: str = "",
                          build_command: str | None = None, start_command: str | None = None, root_dir: str = "",
                          auto_deploy: bool = True, aliases: list[str] | None = None, replaces: str | None = None,
-                         project: str | None = None) -> None:
+                         project: str | None = None, source: str = "github") -> None:
     """Validate and record an app Mas builds from GitHub (DeployError / EnvError when refused)."""
     root_dir = root_dir.strip("/")
+    if source not in ("github", "gitlab"):
+        raise DeployError("the code is on github or gitlab")
     validate_app(app_id, repo, branch, domain, app_type.value)
+    if source == "gitlab":
+        from mas.gitlab import GitLabError, check_repo
+        try:
+            repo = check_repo(repo)
+        except GitLabError as exc:
+            raise DeployError(str(exc)) from None
     validate_commands(build_command, start_command, root_dir)
     variables = parse_env(env)
     if db.get_app(app_id):
@@ -146,7 +158,8 @@ def register_managed_app(host: Host, config: Config, db: Database, *, app_id: st
                   build_command=(build_command or "").strip() or None,
                   start_command=(start_command or "").strip() or None,
                   env=token, auto_deploy=int(auto_deploy),
-                  aliases=json.dumps(aliases) if aliases else None, replaces=replaces, project=project)
+                  aliases=json.dumps(aliases) if aliases else None, replaces=replaces, project=project,
+                  source=None if source == "github" else source)
 
 
 def app_payload(app: dict, db: Database) -> dict:
@@ -164,6 +177,9 @@ def app_payload(app: dict, db: Database) -> dict:
     data["replaces"] = json.loads(app["replaces"]) if app.get("replaces") else None
     data.pop("extra_ports", None)
     data["stack"] = json.loads(app["stack"]) if app.get("stack") else None  # template and options, no secret
+    data["source"] = app.get("source") or "github"
+    host_url = (db.get_setting("gitlab:url") or "") if data["source"] == "gitlab" else "https://github.com"
+    data["repo_url"] = f"{host_url}/{app['repo']}" if host_url and app.get("repo") else None
     releases = db.list_releases(app["id"], 1)
     data["last_release"] = releases[0] if releases else None
     data["current"] = db.get_release(app["current_release"]) if app["current_release"] else None
@@ -379,40 +395,50 @@ def register(
             actor = (payload.get("pusher") or {}).get("name") or "github"
             head = payload.get("head_commit") or {}
             commits = payload.get("commits") if isinstance(payload.get("commits"), list) else []
-            deployed, waiting = [], []
-            frozen_all = deploys_frozen(db)
-            for target in db.apps_for_push(repo, branch, frozen=True):
-                if target["mode"] == "stack":
-                    continue
-                if pending_env(target):  # waits for its variables: the push is built once they are filled
-                    db.audit(f"github:{actor}", "webhook-push", True, service_id=target["id"],
-                             detail=f"{target['id']}: not built, waiting for variables")
-                    continue
-                if target["auto_deploy"] and not frozen_all:
-                    deployer.enqueue(target["id"], "push", f"github:{actor}", sha)
-                    deployed.append(target["id"])
-                    continue
-                # Frozen: nothing is built; the dashboard shows what waits and deploys it on demand.
-                before = json.loads(target["pending"]) if target.get("pending") else {}
-                message = (head.get("message") or "").splitlines()
-                db.update_app(target["id"], pending=json.dumps({
-                    "sha": sha, "message": message[0][:200] if message else "",
-                    "author": ((head.get("author") or {}).get("name") or actor)[:100],
-                    "commits": int(before.get("commits", 0)) + max(len(commits), 1),
-                    "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
-                waiting.append(target["id"])
-            synced = projects.on_push(repo, branch, payload) if projects is not None else []
-            detail = f"{repo}@{branch} {sha[:7]} → {', '.join(deployed) or 'no app'}"
-            if waiting:
-                detail += f"; frozen: {', '.join(waiting)}"
-            if synced:
-                detail += f"; project updated: {', '.join(synced)}"
-            db.audit(f"github:{actor}", "webhook-push", True, detail=detail)
-            return {"ok": True, "deployed": deployed, "frozen": waiting}
+            mirror = getattr(request.app.state, "mirror", None)
+            if mirror is not None:  # the GitLab copy follows, in the background
+                threading.Thread(target=mirror.on_push, args=(repo,), daemon=True, name="mas-mirror").start()
+            return handle_push("github", repo, branch, sha, actor, head, commits, payload)
         if event == "pull_request":
             actor = ((payload.get("pull_request") or {}).get("user") or {}).get("login") or "github"
             return await asyncio.to_thread(previews.handle, payload, actor)
         return {"ok": True, "ignored": event}
+
+    def handle_push(source: str, repo: str, branch: str, sha: str, actor: str, head: dict, commits: list,
+                    payload: dict) -> dict:
+        """A push to ``repo``@``branch`` on GitHub or GitLab: deploy the apps following it (or keep it pending)."""
+        deployed, waiting = [], []
+        frozen_all = deploys_frozen(db)
+        for target in db.apps_for_push(repo, branch, frozen=True, source=source):
+            if target["mode"] == "stack":
+                continue
+            if pending_env(target):  # waits for its variables: the push is built once they are filled
+                db.audit(f"{source}:{actor}", "webhook-push", True, service_id=target["id"],
+                         detail=f"{target['id']}: not built, waiting for variables")
+                continue
+            if target["auto_deploy"] and not frozen_all:
+                deployer.enqueue(target["id"], "push", f"{source}:{actor}", sha)
+                deployed.append(target["id"])
+                continue
+            # Frozen: nothing is built; the dashboard shows what waits and deploys it on demand.
+            before = json.loads(target["pending"]) if target.get("pending") else {}
+            message = (head.get("message") or "").splitlines()
+            db.update_app(target["id"], pending=json.dumps({
+                "sha": sha, "message": message[0][:200] if message else "",
+                "author": ((head.get("author") or {}).get("name") or actor)[:100],
+                "commits": int(before.get("commits", 0)) + max(len(commits), 1),
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
+            waiting.append(target["id"])
+        synced = projects.on_push(repo, branch, payload) if projects is not None and source == "github" else []
+        detail = f"{repo}@{branch} {sha[:7]} → {', '.join(deployed) or 'no app'}"
+        if waiting:
+            detail += f"; frozen: {', '.join(waiting)}"
+        if synced:
+            detail += f"; project updated: {', '.join(synced)}"
+        db.audit(f"{source}:{actor}", "webhook-push", True, detail=detail)
+        return {"ok": True, "deployed": deployed, "frozen": waiting}
+
+    app.state.handle_push = handle_push
 
     # -- apps --------------------------------------------------------------
 
@@ -438,7 +464,7 @@ def register(
                 "branch": svc.git_branch, "type": svc.type.value, "path": svc.path}
 
     @app.post("/api/apps")
-    async def create_app(body: CreateApp, s=Depends(current_session)) -> dict:
+    async def create_app(body: CreateApp, request: Request, s=Depends(current_session)) -> dict:
         try:
             given = parse_env(body.env)
         except EnvError as exc:
@@ -459,7 +485,7 @@ def register(
                                  installation_id=body.installation_id, domain=domain, app_type=body.type,
                                  env=body.env, build_command=body.build_command, start_command=body.start_command,
                                  root_dir=body.root_dir, auto_deploy=body.auto_deploy, aliases=aliases,
-                                 replaces=replaces)
+                                 replaces=replaces, source=body.source)
         except (DeployError, EnvError) as exc:
             raise HTTPException(400, str(exc)) from None
         db.audit(s.username, "app-create", True, detail=f"{body.id}: {body.repo}@{body.branch} → {domain}"
@@ -473,8 +499,12 @@ def register(
                     appdb.queue([body.id], seed=body.supabase_seed)
             except AppDbError as exc:  # the app is created anyway: connect it from its page
                 db.audit(s.username, "supabase-connect", False, service_id=body.id, detail=str(exc)[:300])
+        hook = None
+        if body.source == "gitlab":  # pushes and merge requests reach Mas by themselves
+            hook_fn = getattr(request.app.state, "gitlab_hook", None)
+            hook = await asyncio.to_thread(hook_fn, db.get_app(body.id)["repo"], public_base(request)) if hook_fn else None
         rid = deployer.enqueue(body.id, "create", s.username)
-        return app_payload(db.get_app(body.id), db) | {"release_id": rid}
+        return app_payload(db.get_app(body.id), db) | {"release_id": rid, **({"webhook": hook} if hook else {})}
 
     async def adoption_plan(body: AdoptService) -> dict:
         svc = scanner.get(body.service_id)

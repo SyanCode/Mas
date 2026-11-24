@@ -365,6 +365,49 @@ def _gitea(ctx: Ctx) -> dict:
                                            volumes=[f"{ctx.data}:/data"])}}
 
 
+def _gitlab(ctx: Ctx) -> dict:
+    """GitLab CE behind Mas's nginx (TLS there), tuned to run in about 2.5 GB: Puma in single mode, a small Sidekiq,
+    no bundled Prometheus, Grafana or registry. Git over SSH on the port chosen for it."""
+    ssh = ctx.ports.get("ssh", 2222)
+    config = "; ".join([
+        f"external_url 'https://{ctx.domain}'",
+        "nginx['listen_port'] = 80", "nginx['listen_https'] = false",
+        "nginx['proxy_set_headers'] = {'X-Forwarded-Proto' => 'https', 'X-Forwarded-Ssl' => 'on'}",
+        "letsencrypt['enable'] = false", f"gitlab_rails['gitlab_shell_ssh_port'] = {ssh}",
+        f"gitlab_rails['initial_root_password'] = '{ctx.secrets['root_password']}'",
+        f"gitlab_rails['gitlab_signup_enabled'] = {'true' if ctx.options.get('signups') else 'false'}",
+        "puma['worker_processes'] = 0", "sidekiq['concurrency'] = 5",
+        "prometheus_monitoring['enable'] = false", "gitlab_rails['usage_ping_enabled'] = false",
+        "registry['enable'] = false", "gitlab_kas['enable'] = false",
+        "gitlab_rails['env'] = {'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000'}",
+        "gitaly['env'] = {'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000'}",
+    ])
+    d = ctx.data
+    return {"services": {"gitlab": _service(
+        "gitlab/gitlab-ce:latest", ctx, 80, hostname=ctx.domain, shm_size="256m", stop_grace_period="2m",
+        environment={"GITLAB_OMNIBUS_CONFIG": config}, ports=[f"{ssh}:22"],
+        volumes=[f"{d}/config:/etc/gitlab", f"{d}/logs:/var/log/gitlab", f"{d}/opt:/var/opt/gitlab"])}}
+
+
+GITLAB_TOKEN_RE = re.compile(r"glpat-[A-Za-z0-9_-]{20,}")
+
+
+def _gitlab_connect(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
+    """Create an access token for Mas on this GitLab (as root, api scope, one year) and connect Mas with it."""
+    from mas import gitlab as gitlab_mod
+    from mas.envcrypt import load_fernet
+    token = "glpat-" + secrets.token_urlsafe(24).replace("-", "a").replace("_", "b")[:24]
+    ruby = ("u = User.find_by_username('root'); "
+            "t = u.personal_access_tokens.create!(scopes: ['api'], name: 'mas', expires_at: 365.days.from_now); "
+            f"t.set_token('{token}'); t.save!; puts 'ok'")
+    out = mgr.exec(app, "gitlab", ["gitlab-rails", "runner", ruby], retries=3)
+    if "ok" not in out:
+        raise StackError("GitLab did not create the token: is it started? (the first start takes a few minutes)")
+    gitlab_mod.save(mgr.db, load_fernet(mgr.host, mgr.config.secret_key_path), f"https://{ctx.domain}", token)
+    mgr.db.audit("stacks", "gitlab-connect", True, service_id=app["id"], detail=f"https://{ctx.domain}")
+    return f"Mas is connected to https://{ctx.domain}: its projects can be deployed and mirrored (Settings → GitLab)."
+
+
 def _web_info(rows: Callable[[Ctx], list[dict]] | None = None):
     def info(ctx: Ctx, host: Host, ip: str | None) -> dict:
         return {"rows": [{"label": "Address", "value": f"https://{ctx.domain}", "link": True},
@@ -489,6 +532,16 @@ TEMPLATES: dict[str, Template] = {t.id: t for t in (
     Template("gitea", "Gitea", "web", "Your own GitHub: Git repositories, issues and pull requests.",
              _gitea, image="gitea/gitea", web=3000, needs_domain=True, fields=[SIGNUPS], ram=lambda o: 250,
              info=_web_info()),
+    Template("gitlab", "GitLab", "web",
+             "Your own GitLab: repositories, merge requests, CI. Mas deploys its projects, previews each merge "
+             "request and can mirror your GitHub repositories into it. Needs about 3 GB of memory.",
+             _gitlab, image="gitlab/gitlab-ce", web=80, needs_domain=True, fields=[SIGNUPS],
+             ports=[Port("ssh", 22, "tcp", "Git over SSH")], secrets=("root_password",), ram=lambda o: 3072,
+             info=_web_info(lambda c: [{"label": "User", "value": "root", "copy": True},
+                                       {"label": "Password", "value": c.secrets.get("root_password", ""), "secret": True},
+                                       {"label": "Git over SSH", "value": f"ssh://git@{c.domain}:{c.ports.get('ssh', 22)}",
+                                        "copy": True}]),
+             actions={"connect": {"label": "Connect Mas to this GitLab", "run": _gitlab_connect, "fields": []}}),
     Template("custom", "Any Docker image", "other",
              "Run an image from Docker Hub or another registry: its web port served on a domain and/or ports "
              "published as they are.",

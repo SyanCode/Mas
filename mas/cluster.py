@@ -164,7 +164,15 @@ class Cluster:
         return {"name": self.name(), "version": __version__, "address": self.address(), "role": self.config.cluster_role,
                 "cpus": os.cpu_count(), "load": [float(x) for x in load],
                 "memory": {"total_mb": mem.get("MemTotal"), "available_mb": mem.get("MemAvailable")},
-                "disk": disk_info, "uptime_s": int(float(uptime)), "apps": apps}
+                "disk": disk_info, "uptime_s": int(float(uptime)), "apps": apps, "gitlab": self._gitlab()}
+
+    def _gitlab(self) -> list[dict]:
+        """A GitLab running on this server, for the primary's GitLab settings (see mas.gitlab.detect)."""
+        try:
+            from mas.gitlab import detect
+            return detect(self.host)
+        except Exception:  # noqa: BLE001 - never break the probe
+            return []
 
     # -- join tokens (this server is driven) -------------------------------------------
 
@@ -563,7 +571,7 @@ class Cluster:
         """Ask every chosen server to build ``sha``; the returned function waits for the copies."""
         servers = [s for s in self.db.list_cluster_servers() if s["id"] in json.loads(app.get("cluster") or "[]")]
         try:  # the copies must never stop the deploy of this server
-            gh = self.deployer.github()
+            gh = self.deployer.client_for(app)
             installation = app["installation_id"] or gh.installation_for(app["repo"])
             token, commit = gh.token(installation), gh.commit(installation, app["repo"], sha)
             env = decrypt_env(self._fernet(), app["env"])
@@ -572,7 +580,8 @@ class Cluster:
             return lambda: []
         spec = {"name": app["name"], "repo": app["repo"], "branch": app["branch"], "type": app["type"],
                 "build_command": app["build_command"], "start_command": app["start_command"],
-                "root_dir": app["root_dir"], "env": env}
+                "root_dir": app["root_dir"], "env": env,
+                "git_host": gh.url if getattr(gh, "source", "github") == "gitlab" else None}
         rlog.step(f"Building the copies on {', '.join(s['name'] for s in servers)}")
         results: dict[int, Any] = {}
 
@@ -619,7 +628,8 @@ class Cluster:
         if not address:
             raise ClusterError("this server has no private address: set it on its Servers page")
         spec = body.get("spec") or {}
-        source = _GivenSource(body.get("sha"), body.get("message"), body.get("author"), body.get("git_token"))
+        source = _GivenSource(body.get("sha"), body.get("message"), body.get("author"), body.get("git_token"),
+                              spec.get("git_host"))
         app = self.db.get_app(app_id)
         if app and not app.get("replica_of"):
             raise ClusterError(f"an app {app_id} of this server already exists")
@@ -675,10 +685,26 @@ def _answers(address: str) -> bool:
 class _GivenSource:
     """Stands for the GitHub App when another Mas provides the commit and a clone token."""
 
-    def __init__(self, sha: str | None, message: str | None, author: str | None, token: str | None) -> None:
+    def __init__(self, sha: str | None, message: str | None, author: str | None, token: str | None,
+                 git_host: str | None = None) -> None:
         if not sha or not token:
             raise ClusterError("a copy needs the commit and a clone token")
         self.sha, self.message, self.author, self._token = sha, message or "", author, token
+        self.git_host = None
+        if git_host:  # an app of the primary's GitLab
+            from mas.gitlab import GitLabError, clean_url
+            try:
+                self.git_host = clean_url(git_host)
+            except GitLabError as exc:
+                raise ClusterError(str(exc)) from None
+
+    def clone_url(self, repo: str) -> str:
+        return f"{self.git_host}/{repo}.git" if self.git_host else f"https://github.com/{repo}.git"
+
+    def auth_env(self, token: str) -> dict[str, str]:
+        from mas.github import git_auth_env
+        from mas.gitlab import auth_env
+        return auth_env(self.git_host, token) if self.git_host else git_auth_env(token)
 
     def installation_for(self, repo: str) -> int:
         return 0
