@@ -41,11 +41,15 @@ function Banner({ a, f, tall = false }: { a: App; f: FoldersApi; tall?: boolean 
   const h = hue(a.id);
   if (!style.banner) {
     return (
-      <div className="flex items-center gap-3 px-5 pt-5">
-        <Monogram name={a.id} />
-        <span className="min-w-0 flex-1 truncate text-sm text-zinc-500">{a.domain ?? t("no domain yet")}</span>
-        {last && <ReleaseBadge status={last.status} />}
-        <MoveMenu f={f} kind="app" id={a.id} className="opacity-0 transition group-hover:opacity-100 [&>button]:bg-zinc-200 [&>button]:text-zinc-700 dark:[&>button]:bg-white/10 dark:[&>button]:text-zinc-200" />
+      <div className="px-5 pt-5">
+        <div className="flex items-center gap-3">
+          <Monogram name={a.id} />
+          <span className="flex-1" />
+          {last && <ReleaseBadge status={last.status} />}
+          <MoveMenu f={f} kind="app" id={a.id} className="opacity-0 transition group-hover:opacity-100 [&>button]:bg-zinc-200 [&>button]:text-zinc-700 dark:[&>button]:bg-white/10 dark:[&>button]:text-zinc-200" />
+        </div>
+        {/* its own line: next to the status the address had no room left */}
+        <div className="mt-2 truncate text-sm text-zinc-500" title={a.domain ?? undefined}>{a.domain ?? t("no domain yet")}</div>
       </div>
     );
   }

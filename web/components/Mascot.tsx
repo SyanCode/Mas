@@ -83,6 +83,13 @@ export function Mascot() {
     window.addEventListener("resize", size);
     return () => window.removeEventListener("resize", size);
   }, []);
+  // the page keeps a free strip on the side the robot is docked to: it never covers a card or a button
+  useEffect(() => {
+    const root = document.documentElement;
+    if (ready && !place.hidden) root.dataset.mascot = place.side;
+    else delete root.dataset.mascot;
+    return () => { delete root.dataset.mascot; };
+  }, [ready, place.side, place.hidden]);
   const save = useCallback((p: Place) => { setPlace(p); try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* private mode */ } }, []);
 
   // what the robot does: the task going on (it may wait for a click), and the question asked here, which may run

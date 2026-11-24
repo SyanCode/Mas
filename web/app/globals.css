@@ -649,3 +649,9 @@ table {
 @media (prefers-reduced-motion: reduce) {
   .mascot *, .mascot-dock:hover .mascot-arm { animation: none !important; }
 }
+
+/* the strip kept free for the docked robot (components/Mascot.tsx) */
+@media (min-width: 768px) {
+  html[data-mascot="right"] main { padding-right: 6rem; }
+  html[data-mascot="left"] main { padding-left: 6rem; }
+}
