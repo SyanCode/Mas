@@ -1,5 +1,6 @@
 "use client";
 
+import { AiText } from "@/components/AiText";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, Check, CircleSlash, Hammer, Play, ShieldCheck, Square, Wrench, X } from "lucide-react";
 import { Badge, Button, Card, ErrorText, Input, Label, Select, Spinner, Textarea } from "@/components/ui";
@@ -76,13 +77,13 @@ const TONE = { running: "sky", waiting: "amber", done: "emerald", failed: "red",
 function Step({ s }: { s: RobotStep }) {
   const t = useT();
   const base = "animate-fade-up flex gap-2.5 text-sm";
-  if (s.kind === "say") return <li className={base}><Bot className="mt-0.5 size-4 shrink-0 text-indigo-400" /><p className="min-w-0 whitespace-pre-wrap break-words">{s.text}</p></li>;
+  if (s.kind === "say") return <li className={base}><Bot className="mt-0.5 size-4 shrink-0 text-indigo-400" /><AiText>{s.text}</AiText></li>;
   if (s.kind === "tool") return <li className={`${base} text-zinc-500`}><Wrench className="mt-0.5 size-4 shrink-0" /><span className="mono min-w-0 break-words text-xs">{s.text}</span></li>;
   if (s.kind === "result") return <li className={`${base} pl-6 text-xs text-zinc-500`}><span className="mono min-w-0 break-words">{s.text}</span></li>;
   if (s.kind === "ask") return <li className={`${base} text-amber-600 dark:text-amber-300`}><ShieldCheck className="mt-0.5 size-4 shrink-0" /><span className="min-w-0 break-words">{s.text}</span></li>;
   if (s.kind === "approved") return <li className={`${base} text-emerald-600 dark:text-emerald-400`}><Check className="mt-0.5 size-4 shrink-0" />{t("Approved")}</li>;
   if (s.kind === "denied") return <li className={`${base} text-rose-500`}><CircleSlash className="mt-0.5 size-4 shrink-0" />{t("Refused")}</li>;
-  return <li className={`${base} border-t border-zinc-200/80 pt-3 font-medium dark:border-white/[0.06]`}><Hammer className="mt-0.5 size-4 shrink-0" /><p className="min-w-0 whitespace-pre-wrap break-words">{s.text}</p></li>;
+  return <li className={`${base} border-t border-zinc-200/80 pt-3 font-medium dark:border-white/[0.06]`}><Hammer className="mt-0.5 size-4 shrink-0" /><AiText className="font-normal">{s.text}</AiText></li>;
 }
 
 /** The robot: a goal in a few words, then Claude (or another model) works on the site, deploys and reports, live. */

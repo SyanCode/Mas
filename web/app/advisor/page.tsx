@@ -1,5 +1,6 @@
 "use client";
 
+import { AiText } from "@/components/AiText";
 import { useCallback, useEffect, useState } from "react";
 import { Bot, Check, Lightbulb, Sparkles, UserRoundCog, X } from "lucide-react";
 import { AiAccountsList } from "@/components/AiAccounts";
@@ -155,7 +156,7 @@ function Proposals({ state, setState, onRobot }: { state: AdvisorState; setState
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{s.detail}</p>
               {s.status === "working" && <p className="mt-2 flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-300"><Spinner />{t("The robot is working on it…")}</p>}
               {s.status === "failed" && <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{t("The robot could not do it: it needs you.")}</p>}
-              {s.result && s.status !== "working" && <p className="mt-2 whitespace-pre-line rounded-lg bg-zinc-900/[0.04] px-3 py-2 text-xs text-zinc-600 dark:bg-white/[0.05] dark:text-zinc-400">{s.result}</p>}
+              {s.result && s.status !== "working" && <AiText className="mt-2 rounded-lg bg-zinc-900/[0.04] px-3 py-2 text-xs text-zinc-600 dark:bg-white/[0.05] dark:text-zinc-400">{s.result}</AiText>}
               <div className="mt-3 flex flex-wrap gap-2">
                 {s.status === "new" || s.status === "failed" ? (
                   <>

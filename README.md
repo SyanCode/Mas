@@ -212,6 +212,8 @@ no AI: `/mcp` is only a protocol in front of the API.
 - **Monthly token budget** (Robot page): the tokens of the month for every AI use (robot, advisor, questions), and an
   optional cap. When it is spent nothing more is sent: the robot and the autopilot stop until next month (cache reads
   count for a tenth, as they are billed). Only an administrator signed in changes it, never an API token.
+- **Formatted answers**: the robot's reports, the mascot's answers and the advisor's results show the Markdown
+  Claude writes (headings, bold, lists, code, tables, links); raw HTML is shown as text and only web links are kept.
 - **Auto-prompting** (on by default, the box under *Start*): before a task starts, Claude reads the request with
   the list of your sites and the skills. When an answer only you can give would change the result (which site, the
   scope, facts it cannot know), it asks one to three short questions with suggested answers (or type your own), then

@@ -59,7 +59,9 @@ class Claude:
                         "questions": [{"question": "Which site should be deployed?", "options": ["site", "every site"]}]})
             blocks = [{"type": "text", "text": json.dumps(refined)}]
         elif "This is a QUESTION" in text:
-            blocks = [{"type": "text", "text": "Everything is running: 1 site, no problem found.\nRESULT: done"}]
+            blocks = [{"type": "text", "text": "Everything is running: 1 site, no problem found.\n\n"
+                                               "- **nginx**: valid\n- `mas.service` running\n\n"
+                                               "<img src=x onerror=alert(1)> [docs](javascript:alert(1))\nRESULT: done"}]
         elif len(body["messages"]) == 1:
             blocks = [{"type": "tool_use", "id": "t1", "name": "deploy_app", "input": {"app_id": "site"}}]
         else:
@@ -126,6 +128,10 @@ def test_ask_a_question_read_only(live):
     dialog.get_by_text("Is everything running on my server?").wait_for()
     dialog.get_by_text("Everything is running: 1 site, no problem found.").wait_for(timeout=15000)
     assert "RESULT:" not in dialog.inner_text()
+    # Claude's Markdown is rendered (bold, list, code), never raw HTML or a javascript: link
+    dialog.locator("li strong", has_text="nginx").wait_for()
+    assert dialog.locator("code", has_text="mas.service").count() == 1
+    assert dialog.locator("img").count() == 0 and dialog.locator("a", has_text="docs").count() == 0
     if os.environ.get("MAS_SCREENSHOTS"):  # a picture for the README / a review
         page.wait_for_timeout(400)
         page.screenshot(path=os.path.join(os.environ["MAS_SCREENSHOTS"], "mascot-panel.png"))

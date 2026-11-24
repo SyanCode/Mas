@@ -1,5 +1,6 @@
 "use client";
 
+import { AiText } from "@/components/AiText";
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { ArrowLeftRight, Check, Minus, Send, Square, Wand2, X } from "lucide-react";
@@ -267,12 +268,14 @@ export function Mascot() {
               <>
                 <p className="ml-8 whitespace-pre-wrap rounded-xl rounded-tr-sm bg-indigo-500 px-3 py-2 text-white">{run.goal}</p>
                 {steps.map((s, i) => (
-                  <p key={i} className={`text-xs ${s.kind === "say" ? "whitespace-pre-wrap text-zinc-600 dark:text-zinc-300" : "font-mono text-zinc-500"}`}>{s.kind === "say" ? s.text : `› ${s.text}`}</p>
+                  s.kind === "say"
+                    ? <AiText key={i} className="text-xs text-zinc-600 dark:text-zinc-300">{s.text}</AiText>
+                    : <p key={i} className="font-mono text-xs text-zinc-500">{`› ${s.text}`}</p>
                 ))}
                 {run.status === "waiting" && run.pending && <Approval run={run} busy={!!busy} onDecide={(approve) => act("decision", { approve })} />}
                 {run.status === "running" && <p className="flex items-center gap-2 text-xs text-zinc-500"><Spinner />{t("Claude is working…")}</p>}
                 {!live && answerOf(run) && (
-                  <p className={`whitespace-pre-wrap rounded-xl rounded-tl-sm px-3 py-2 ${run.status === "failed" ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-zinc-100 dark:bg-white/[0.06]"}`}>{answerOf(run)}</p>
+                  <AiText className={`rounded-xl rounded-tl-sm px-3 py-2 ${run.status === "failed" ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-zinc-100 dark:bg-white/[0.06]"}`}>{answerOf(run)}</AiText>
                 )}
                 <div className="flex items-center justify-between gap-2 text-xs">
                   {live
