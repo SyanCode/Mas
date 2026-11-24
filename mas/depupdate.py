@@ -52,6 +52,15 @@ NPM_FLAGS = ["--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund
 Runner = Callable[[list[str], str], tuple[int, str]]  # (argv, workdir) -> (exit code, output)
 
 
+def on_gitlab(app: dict) -> bool:
+    return (app.get("source") or "github") == "gitlab"
+
+
+def linked(app: dict) -> bool:
+    """Deployed from a repository Mas can commit to: GitHub (its App installation) or GitLab."""
+    return bool(app.get("repo")) and bool(app.get("installation_id") or on_gitlab(app))
+
+
 class UpdateError(Exception):
     pass
 
@@ -129,6 +138,12 @@ def default_runner(tool_path: str) -> Runner:
 
 
 class DepUpdater:
+    def client(self, app: dict):
+        """The code host of the app: the GitHub App, or the connected GitLab (its merge requests stand for pull requests)."""
+        if on_gitlab(app):
+            return getattr(self.deployer, "gitlab", lambda: None)()
+        return self.github()
+
     def __init__(self, db: Database, host: Host, config: Config, github: Callable, deployer, audit: DepAudit,
                  notifier=None, runner: Runner | None = None) -> None:
         self.db, self.host, self.config, self.github = db, host, config, github
@@ -216,11 +231,12 @@ class DepUpdater:
         rec = self.state(app["id"])
         if rec.get("state") in ("deploying",):
             raise UpdateError("the previous update is still being deployed")
-        if not app.get("repo") or not app.get("installation_id"):
+        if not linked(app):
             raise UpdateError("this app is not linked to a GitHub repository")
-        gh = self.github()
+        gh = self.client(app)
         if gh is None:
-            raise UpdateError("GitHub is not connected (Settings → GitHub)")
+            raise UpdateError("GitLab is not connected (Settings → GitLab)" if on_gitlab(app)
+                              else "GitHub is not connected (Settings → GitHub)")
         found = self.audit.latest(app["id"]) or {}
         blocked = {k: float(v) for k, v in (rec.get("blocked") or {}).items()}
         todo, manual = plan(found.get("findings") or [], blocked, now)
@@ -351,7 +367,7 @@ class DepUpdater:
         """A pull request merged or closed lets the next audit decide again (merged: its release fixes it)."""
         if now - _ts(rec.get("checked_pr_at")) < 3600:
             return
-        gh = self.github()
+        gh = self.client(app)
         if gh is None:
             return
         try:
@@ -369,7 +385,7 @@ class DepUpdater:
             blocked[target_key(t)] = now
         rec = {**rec, "blocked": blocked, "release_id": release["id"], "finished_at": _now_iso(now)}
         why = (release.get("error") or "the deployment failed")[:300]
-        gh = self.github()
+        gh = self.client(app)
         try:
             if gh is None:
                 raise UpdateError("GitHub is not connected")
@@ -401,12 +417,14 @@ class DepUpdater:
             self.watch(now)
         except Exception:  # noqa: BLE001
             log.exception("watching the dependency upgrades failed")
-        if self.mode() == "off" or not self.audit.settings()["enabled"] or self.github() is None:
+        if self.mode() == "off" or not self.audit.settings()["enabled"]:
             return []
         for app in self.audit.apps():
             res = self.audit.latest(app["id"])
             rec = self.state(app["id"])
-            if not res or not res.get("findings") or not app.get("installation_id") or rec.get("state") in ("deploying", "pr"):
+            if not res or not res.get("findings") or not linked(app) or rec.get("state") in ("deploying", "pr"):
+                continue
+            if self.client(app) is None:
                 continue
             if rec.get("audit_at") == res.get("at"):
                 continue  # this result was already handled

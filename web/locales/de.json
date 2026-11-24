@@ -2254,5 +2254,21 @@
   "GitLab": "GitLab",
   "Your own GitLab: repositories, merge requests, CI. Mas deploys its projects, previews each merge request and can mirror your GitHub repositories into it. Needs about 3 GB of memory.": "Ihr eigenes GitLab: Repositories, Merge Requests, CI. Mas stellt seine Projekte bereit, erstellt für jeden Merge Request eine Vorschau und kann Ihre GitHub-Repositories dorthin spiegeln. Braucht etwa 3 GB Speicher.",
   "Git over SSH": "Git über SSH",
-  "Connect Mas to this GitLab": "Mas mit diesem GitLab verbinden"
+  "Connect Mas to this GitLab": "Mas mit diesem GitLab verbinden",
+  "Back up the GitLab of this server every night": "Das GitLab dieses Servers jede Nacht sichern",
+  "gitlab-backup (repositories, database, uploads) with gitlab-secrets.json and gitlab.rb, between 3 and 5 a.m.; the 3 latest are kept and sent to the remote storage of Mas's backups when it is set up. GitLab keeps running.": "gitlab-backup (Repositories, Datenbank, Uploads) mit gitlab-secrets.json und gitlab.rb, zwischen 3 und 5 Uhr; die 3 letzten werden behalten und an den externen Speicher der Mas-Sicherungen gesendet, falls eingerichtet. GitLab läuft weiter.",
+  "{n} backup(s), latest {name}": "{n} Sicherung(en), neueste {name}",
+  "Deploy from GitLab instead": "Stattdessen aus GitLab bereitstellen",
+  "Deploy this app from GitLab?": "Diese App aus GitLab bereitstellen?",
+  "Mas copies the repository to GitLab one last time, checks that GitLab has the commit that is live, then follows GitLab: its pushes deploy, its merge requests get previews. Nothing is rebuilt and the site stays up. The previews of GitHub pull requests are removed; the GitHub repository is not touched.": "Mas kopiert das Repository ein letztes Mal nach GitLab, prüft, dass GitLab den live laufenden Commit hat, und folgt dann GitLab: Pushes werden bereitgestellt, Merge Requests bekommen Vorschauen. Nichts wird neu gebaut, die Website bleibt online. Die Vorschauen von GitHub-Pull-Requests werden entfernt; das GitHub-Repository bleibt unverändert.",
+  "Move to GitLab": "Zu GitLab wechseln",
+  "GitLab Runner": "GitLab Runner",
+  "Runs the CI pipelines of your GitLab on this server, each job in its own Docker container. Registered by itself on the GitLab connected to Mas.": "Führt die CI-Pipelines Ihres GitLab auf diesem Server aus, jeden Job in einem eigenen Docker-Container. Registriert sich selbst beim mit Mas verbundenen GitLab.",
+  "Jobs at the same time": "Gleichzeitige Jobs",
+  "Each job is a container: more jobs, more memory and CPU": "Jeder Job ist ein Container: mehr Jobs, mehr Speicher und CPU",
+  "Default image of the jobs": "Standard-Image der Jobs",
+  "Used when .gitlab-ci.yml does not name one, for example node:22": "Wird verwendet, wenn .gitlab-ci.yml keines nennt, zum Beispiel node:22",
+  "Runner token (glrt-…, optional)": "Runner-Token (glrt-…, optional)",
+  "Only when Mas's GitLab token is not an administrator's": "Nur wenn das GitLab-Token von Mas keinem Administrator gehört",
+  "Register on GitLab": "Bei GitLab registrieren"
 }

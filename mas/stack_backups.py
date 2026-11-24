@@ -37,6 +37,7 @@ class StackBackups:
         self.root = Path(self.db.path).parent / "backups" / "stacks"
         self._locks: dict[str, threading.Lock] = {}
         self.jobs: dict[str, dict] = {}  # app id -> running or last operation
+        self.offsite = None  # mas.offsite.Offsite: the nightly backups are also sent to the remote storage
 
     def dir(self, app_id: str) -> Path:
         return self.root / app_id
@@ -169,8 +170,11 @@ class StackBackups:
                 continue
             self.db.set_setting(key, str(now.timestamp()))  # once a night, even if it fails
             try:
-                done.append(self.backup(app["id"]))
+                name = self.backup(app["id"])
+                done.append(name)
                 self.db.audit("mas", "stack-backup", True, service_id=app["id"], detail="nightly")
+                if self.offsite is not None:  # never raises: the local backup is what counts
+                    self.offsite.upload(self.dir(app["id"]) / name)
             except (BackupError, StackError) as exc:
                 log.warning("nightly backup of %s failed: %s", app["id"], exc)
                 self.db.audit("mas", "stack-backup", False, service_id=app["id"], detail=str(exc)[:300])

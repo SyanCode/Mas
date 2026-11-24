@@ -408,6 +408,57 @@ def _gitlab_connect(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> s
     return f"Mas is connected to https://{ctx.domain}: its projects can be deployed and mirrored (Settings → GitLab)."
 
 
+RUNNER_TOKEN_RE = re.compile(r"^glrt-[A-Za-z0-9_-]{10,200}$")
+IMAGE_RE = re.compile(r"^[a-z0-9][a-z0-9._/:@-]{0,199}$")
+
+
+def _gitlab_runner(ctx: Ctx) -> dict:
+    """GitLab Runner with the Docker executor: each CI job runs in a throw-away container of the host's Docker."""
+    return {"services": {"runner": _service(
+        "gitlab/gitlab-runner:latest", ctx, volumes=[f"{ctx.data}/config:/etc/gitlab-runner",
+                                                     "/var/run/docker.sock:/var/run/docker.sock"])}}
+
+
+def _runner_register(mgr: "StackManager", app: dict, ctx: Ctx, values: dict) -> str:
+    """Register the runner on the GitLab connected to Mas (or with a glrt- token pasted from GitLab), then set how many
+    jobs run at once."""
+    from mas import gitlab as gitlab_mod
+    from mas.envcrypt import load_fernet
+    cfg = gitlab_mod.load(mgr.db, load_fernet(mgr.host, mgr.config.secret_key_path))
+    if cfg is None:
+        raise StackError("connect a GitLab first (Settings → GitLab)")
+    token = str(values.get("token") or "").strip()
+    if token and not RUNNER_TOKEN_RE.fullmatch(token):
+        raise StackError("a runner token starts with glrt- (GitLab → Admin → CI/CD → Runners → New instance runner)")
+    if not token:
+        try:
+            token = gitlab_mod.GitLab(cfg["url"], cfg["token"]).create_runner(f"mas {app['id']}")
+        except gitlab_mod.GitLabError as exc:
+            raise StackError(f"GitLab refused to create the runner ({exc}): Mas's token is not an administrator's. "
+                             "Create an instance runner in GitLab and paste its glrt- token here") from None
+    image = ctx.options.get("image") or "alpine:latest"
+    if not IMAGE_RE.fullmatch(image):
+        raise StackError("default image: a Docker image name such as node:22 or alpine:latest")
+    mgr.exec(app, "runner", ["gitlab-runner", "register", "--non-interactive", "--url", cfg["url"], "--token", token,
+                             "--executor", "docker", "--docker-image", image, "--description", f"mas {app['id']}"])
+    path = f"{ctx.files}/config/config.toml"
+    text = mgr.host.read_text(path) or ""
+    jobs = max(1, min(int(ctx.options.get("concurrent") or 1), 8))
+    text = re.sub(r"(?m)^concurrent\s*=\s*\d+", f"concurrent = {jobs}", text) if "concurrent" in text else f"concurrent = {jobs}\n" + text
+    mgr.host.write_text(path, text)
+    mgr.db.audit("stacks", "gitlab-runner", True, service_id=app["id"], detail=cfg["url"])
+    return f"The runner is registered on {cfg['url']} and runs {jobs} job(s) at a time."
+
+
+def _runner_after(mgr: "StackManager", app: dict, ctx: Ctx, rlog: ReleaseLog) -> None:
+    if "[[runners]]" in (mgr.host.read_text(f"{ctx.files}/config/config.toml") or ""):
+        return  # registered already
+    try:
+        rlog.line(_runner_register(mgr, app, ctx, {}))
+    except StackError as exc:  # no admin token: the person registers it with the action
+        rlog.line(f"not registered yet: {exc}")
+
+
 def _web_info(rows: Callable[[Ctx], list[dict]] | None = None):
     def info(ctx: Ctx, host: Host, ip: str | None) -> dict:
         return {"rows": [{"label": "Address", "value": f"https://{ctx.domain}", "link": True},
@@ -542,6 +593,18 @@ TEMPLATES: dict[str, Template] = {t.id: t for t in (
                                        {"label": "Git over SSH", "value": f"ssh://git@{c.domain}:{c.ports.get('ssh', 22)}",
                                         "copy": True}]),
              actions={"connect": {"label": "Connect Mas to this GitLab", "run": _gitlab_connect, "fields": []}}),
+    Template("gitlab-runner", "GitLab Runner", "other",
+             "Runs the CI pipelines of your GitLab on this server, each job in its own Docker container. Registered by "
+             "itself on the GitLab connected to Mas.",
+             _gitlab_runner, image="gitlab/gitlab-runner", ram=lambda o: 128 + 512 * int(o.get("concurrent") or 1),
+             fields=[{"key": "concurrent", "label": "Jobs at the same time", "type": "number", "default": 1, "min": 1,
+                      "max": 8, "help": "Each job is a container: more jobs, more memory and CPU"},
+                     {"key": "image", "label": "Default image of the jobs", "type": "text", "default": "alpine:latest",
+                      "max": 200, "help": "Used when .gitlab-ci.yml does not name one, for example node:22"}],
+             after=_runner_after,
+             actions={"register": {"label": "Register on GitLab", "run": _runner_register,
+                                   "fields": [{"key": "token", "label": "Runner token (glrt-…, optional)", "type": "text",
+                                               "max": 250, "help": "Only when Mas's GitLab token is not an administrator's"}]}}),
     Template("custom", "Any Docker image", "other",
              "Run an image from Docker Hub or another registry: its web port served on a domain and/or ports "
              "published as they are.",

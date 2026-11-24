@@ -285,6 +285,10 @@ def create_app(
                 await asyncio.to_thread(app.state.previews.sweep)
             except Exception:
                 log.exception("preview sweep failed")
+            try:  # the GitLab package of this server, every night when asked
+                await asyncio.to_thread(app.state.gitlab_backup.tick)
+            except Exception:
+                log.exception("GitLab backup failed")
             try:  # GitLab copies of GitHub repositories, every half hour (and after each push)
                 await asyncio.to_thread(app.state.mirror.tick)
             except Exception:
@@ -1211,14 +1215,17 @@ def create_app(
     # GitLab: a second code host (deploys, merge request previews) and the mirror of GitHub repositories into it
     gitlab_ref: list = [lambda: None]
     mirror = gitlab_mod.Mirror(host, db, Path(db.path).parent, github_client, lambda: gitlab_ref[0]())
+    gitlab_backup = gitlab_mod.OmnibusBackup(host, db, Path(db.path).parent, offsite)
     gitlab_ref[0] = api_gitlab.register(app, host=host, config=config, db=db, current_session=current_session,
                                         require_password=require_password, deployer=deployer, scanner=scanner,
-                                        cluster=cluster, mirror=mirror)
+                                        cluster=cluster, mirror=mirror, backup=gitlab_backup)
+    app.state.gitlab_backup = gitlab_backup
     deployer.gitlab = robot.gitlab = gitlab_ref[0]
     app.state.mirror = mirror
     app.state.resources = resources
     app.state.stacks = stacks
     app.state.stack_backups = stack_backups
+    stack_backups.offsite = offsite  # services (a GitLab of the catalog too) leave the server every night
     api_cms.register(app, db=db, any_session=any_session, current_session=current_session, manager=cms,
                      stats=site_stats, geo=geo, compliance=compliance, notifier=notifier, uptime=uptime,
                      rules=site_rules, seo_fetch=seo_fetch)

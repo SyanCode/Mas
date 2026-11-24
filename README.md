@@ -658,6 +658,19 @@ connects it, nothing to copy.
   GitLab project (created private if missing) after each push and every half hour: GitLab CI and reviews work on it,
   and the code also lives outside GitHub.
 
+- **Move an app to GitLab**: on a mirrored app, *Deploy from GitLab instead* copies the repository one last time,
+  checks that GitLab has the commit that is live and makes the app follow GitLab (webhook added). Nothing is rebuilt
+  and the site stays up; the previews of GitHub pull requests are removed, the GitHub repository is not touched.
+- **CI on this server**: **GitLab Runner** in the catalog runs the pipelines, each job in its own Docker container
+  (1 to 8 at a time, a default image). It registers itself on the connected GitLab when Mas's token is an
+  administrator's; otherwise paste a `glrt-` token in its *Register on GitLab* action.
+- **Backups**: a GitLab of the catalog is backed up every night with the other services; a GitLab installed with
+  the package can be backed up every night too (*Back up the GitLab of this server every night*: `gitlab-backup`
+  with `gitlab-secrets.json` and `gitlab.rb`, GitLab keeps running, the 3 latest kept). Both, and every nightly
+  service backup, are sent to the remote storage of Mas's backups when it is set up, in 64 MB parts (S3 multipart)
+  so their size does not matter.
+- **Vulnerable dependencies** of apps deployed from GitLab are upgraded like GitHub ones (commit or merge request).
+
 ### Redeploy all
 
 **Apps → Redeploy all** queues a deployment of the latest commit of every app from GitHub; they run
@@ -991,6 +1004,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **GitLab Runner, backups and moving apps**: a runner from the catalog registered by itself, nightly GitLab backups (catalog or package) sent off the server in parts, vulnerable dependencies of GitLab apps upgraded, and an app moved from GitHub to GitLab without a rebuild.
 - [x] **GitLab CMS and deploy statuses**: the CMS edits sites deployed from GitLab; each release reports *Mas deploy* (live address or the error) on its commit, in GitLab merge requests and GitHub checks.
 - [x] **GitLab**: a GitLab of the server or the cluster found by itself, or one created from the catalog and connected in one click; apps deployed from GitLab (push webhook, robot, cluster copies), merge request previews, and GitHub repositories mirrored into GitLab.
 - [x] **Auto-prompting and container advice**: a vague request gets questions and becomes a precise goal before the robot starts; limits far too wide and heavy containers without a limit get advice, applied by the economy mode once you agree (`--shrink`); ClamAV in a mail server is pointed at.

@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { GitBranch, RefreshCw } from "lucide-react";
-import { Badge, Button, Card, CopyCode, ErrorText, Input, Label, Notice, Spinner } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, CopyCode, ErrorText, Input, Label, Notice, Spinner } from "@/components/ui";
 import { api, ApiError, timeAgo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -12,6 +12,7 @@ interface Status {
   connected: boolean; url: string | null; webhook_url: string; error: string | null;
   user: { username: string; name: string; version: string | null } | null;
   detected: { local: Found[]; cluster: Found[] };
+  backup?: { enabled: boolean; archives: { name: string; size: number }[]; running?: boolean; error?: string | null; result?: string | null };
 }
 interface MirrorState { project: string; at: number | null; error: string | null }
 
@@ -83,6 +84,24 @@ export function GitLabCard() {
           </div>
         )}
 
+        {status?.backup && (
+          <div className="space-y-2 rounded-lg border border-zinc-200/70 p-3 dark:border-white/[0.06]">
+            <label className="flex items-start gap-2">
+              <input type="checkbox" className="mt-1" checked={status.backup.enabled}
+                onChange={(e) => api("/gitlab/backup", { method: "PUT", body: { enabled: e.target.checked } }).then(load).catch((err: ApiError) => setError(err.detail))} />
+              <span><span className="font-medium">{t("Back up the GitLab of this server every night")}</span>
+                <span className="block text-xs text-zinc-500">{t("gitlab-backup (repositories, database, uploads) with gitlab-secrets.json and gitlab.rb, between 3 and 5 a.m.; the 3 latest are kept and sent to the remote storage of Mas's backups when it is set up. GitLab keeps running.")}</span></span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+              <Button disabled={!!status.backup.running} onClick={() => api("/gitlab/backup/run", { method: "POST" }).then(load).catch((err: ApiError) => setError(err.detail))}>
+                {status.backup.running ? <Spinner /> : null}{status.backup.running ? t("Backing up…") : t("Back up now")}
+              </Button>
+              {status.backup.archives.length > 0 && <span>{t("{n} backup(s), latest {name}", { n: status.backup.archives.length, name: status.backup.archives[0].name })}</span>}
+            </div>
+            {status.backup.error && <ErrorText>{status.backup.error}</ErrorText>}
+          </div>
+        )}
+
         {status && !status.connected && (
           <>
             {found.length === 0 && (
@@ -112,6 +131,7 @@ export function MirrorCard({ appId, repo }: { appId: string; repo: string }) {
   const [project, setProject] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [moving, setMoving] = useState(false);
   const load = () => api<{ mirror: MirrorState | null; gitlab: string | null }>(`/apps/${encodeURIComponent(appId)}/mirror`).then(setState).catch(() => setState(null));
   useEffect(() => { load(); setProject(`mirrors/${repo.split("/").pop() ?? appId}`); }, [appId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!state || !state.gitlab) return null;
@@ -125,6 +145,13 @@ export function MirrorCard({ appId, repo }: { appId: string; repo: string }) {
     setBusy(true); setError("");
     try { await api(`/apps/${encodeURIComponent(appId)}/mirror/sync`, { method: "POST" }); await load(); }
     catch (err) { setError((err as ApiError).detail); } finally { setBusy(false); }
+  }
+  async function move() {
+    setMoving(false); setBusy(true); setError("");
+    try {
+      await api(`/apps/${encodeURIComponent(appId)}/move-to-gitlab`, { method: "POST", body: { project: state?.mirror?.project ?? project.trim() } });
+      window.location.reload();
+    } catch (err) { setError((err as ApiError).detail); setBusy(false); }
   }
   const m = state.mirror;
   return (
@@ -140,6 +167,7 @@ export function MirrorCard({ appId, repo }: { appId: string; repo: string }) {
             <div className="flex gap-2">
               <Button disabled={busy} onClick={sync}>{busy ? <Spinner /> : <RefreshCw className="size-3.5" />}{t("Sync now")}</Button>
               <Button variant="ghost" disabled={busy} onClick={() => save(null)}>{t("Stop mirroring")}</Button>
+              <Button variant="ghost" disabled={busy} onClick={() => setMoving(true)}>{t("Deploy from GitLab instead")}</Button>
             </div>
           </>
         ) : (
@@ -149,6 +177,9 @@ export function MirrorCard({ appId, repo }: { appId: string; repo: string }) {
           </form>
         )}
       </div>
+      <ConfirmDialog open={moving} title={t("Deploy this app from GitLab?")}
+        message={t("Mas copies the repository to GitLab one last time, checks that GitLab has the commit that is live, then follows GitLab: its pushes deploy, its merge requests get previews. Nothing is rebuilt and the site stays up. The previews of GitHub pull requests are removed; the GitHub repository is not touched.")}
+        confirmLabel={t("Move to GitLab")} onConfirm={move} onCancel={() => setMoving(false)} />
     </Card>
   );
 }

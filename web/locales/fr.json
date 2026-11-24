@@ -2258,5 +2258,21 @@
   "GitLab": "GitLab",
   "Your own GitLab: repositories, merge requests, CI. Mas deploys its projects, previews each merge request and can mirror your GitHub repositories into it. Needs about 3 GB of memory.": "Votre propre GitLab : dépôts, merge requests, CI. Mas déploie ses projets, crée une préversion de chaque merge request et peut y copier vos dépôts GitHub. Demande environ 3 Go de mémoire.",
   "Git over SSH": "Git en SSH",
-  "Connect Mas to this GitLab": "Connecter Mas à ce GitLab"
+  "Connect Mas to this GitLab": "Connecter Mas à ce GitLab",
+  "Back up the GitLab of this server every night": "Sauvegarder le GitLab de ce serveur chaque nuit",
+  "gitlab-backup (repositories, database, uploads) with gitlab-secrets.json and gitlab.rb, between 3 and 5 a.m.; the 3 latest are kept and sent to the remote storage of Mas's backups when it is set up. GitLab keeps running.": "gitlab-backup (dépôts, base de données, fichiers envoyés) avec gitlab-secrets.json et gitlab.rb, entre 3 et 5 h ; les 3 dernières sont gardées et envoyées vers le stockage distant des sauvegardes de Mas s'il est configuré. GitLab continue de tourner.",
+  "{n} backup(s), latest {name}": "{n} sauvegarde(s), dernière {name}",
+  "Deploy from GitLab instead": "Déployer depuis GitLab à la place",
+  "Deploy this app from GitLab?": "Déployer cette app depuis GitLab ?",
+  "Mas copies the repository to GitLab one last time, checks that GitLab has the commit that is live, then follows GitLab: its pushes deploy, its merge requests get previews. Nothing is rebuilt and the site stays up. The previews of GitHub pull requests are removed; the GitHub repository is not touched.": "Mas copie une dernière fois le dépôt vers GitLab, vérifie que GitLab a le commit en ligne, puis suit GitLab : ses pushs déploient, ses merge requests ont des préversions. Rien n'est reconstruit et le site reste en ligne. Les préversions des pull requests GitHub sont supprimées ; le dépôt GitHub n'est pas modifié.",
+  "Move to GitLab": "Passer à GitLab",
+  "GitLab Runner": "GitLab Runner",
+  "Runs the CI pipelines of your GitLab on this server, each job in its own Docker container. Registered by itself on the GitLab connected to Mas.": "Exécute les pipelines CI de votre GitLab sur ce serveur, chaque job dans son propre conteneur Docker. S'enregistre tout seul sur le GitLab connecté à Mas.",
+  "Jobs at the same time": "Jobs en même temps",
+  "Each job is a container: more jobs, more memory and CPU": "Chaque job est un conteneur : plus de jobs, plus de mémoire et de CPU",
+  "Default image of the jobs": "Image par défaut des jobs",
+  "Used when .gitlab-ci.yml does not name one, for example node:22": "Utilisée quand .gitlab-ci.yml n'en indique pas, par exemple node:22",
+  "Runner token (glrt-…, optional)": "Jeton du runner (glrt-…, facultatif)",
+  "Only when Mas's GitLab token is not an administrator's": "Seulement si le jeton GitLab de Mas n'est pas celui d'un administrateur",
+  "Register on GitLab": "Enregistrer sur GitLab"
 }

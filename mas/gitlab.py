@@ -269,6 +269,12 @@ class GitLab:
         levels = [(perms.get(k) or {}).get("access_level") or 0 for k in ("project_access", "group_access")]
         return max(levels) >= 30
 
+    def create_runner(self, description: str) -> str:
+        """A new instance runner (needs an administrator's token): its glrt- authentication token."""
+        r = self._req("POST", "/user/runners", {"runner_type": "instance_type", "description": description[:200],
+                                                 "run_untagged": True})
+        return r["token"]
+
     def whoami(self) -> dict:
         user = self._req("GET", "/user")
         version = self._req("GET", "/version", ok404=True) or {}
@@ -410,6 +416,77 @@ def detect(host: Host, services: list | None = None) -> list[dict]:
                     d["url"] = f"https://{svc.domains[0]}"
                     d["service_id"] = svc.id
     return found
+
+
+# -- nightly backup of a GitLab installed with the package on this server ---------------------------------------
+
+
+BACKUP_SETTING, BACKUP_AT = "gitlab:omnibus_backup", "gitlab:omnibus_backup_at"
+BACKUP_NIGHT = range(3, 5)
+BACKUP_KEEP = 3
+
+
+class OmnibusBackup:
+    """``gitlab-backup create`` (repositories, database, uploads; GitLab keeps running), then one archive of it with
+    ``gitlab-secrets.json`` and ``gitlab.rb`` (without them a backup cannot be restored) in Mas's backups, the 3
+    latest kept, and sent to the remote storage of Mas's backups when it is set up. A GitLab of the catalog is a
+    service of Mas and is backed up with the services instead."""
+
+    def __init__(self, host: Host, db, data_dir: str | Path, offsite=None) -> None:
+        self.host, self.db, self.dir, self.offsite = host, db, Path(data_dir) / "backups" / "gitlab", offsite
+
+    def available(self) -> bool:
+        return self.host.exists("/opt/gitlab/embedded")
+
+    def enabled(self) -> bool:
+        return self.db.get_setting(BACKUP_SETTING) == "1"
+
+    def set_enabled(self, on: bool) -> bool:
+        self.db.set_setting(BACKUP_SETTING, "1" if on else None)
+        return on
+
+    def list(self) -> list[dict]:
+        return [{"name": p.name, "size": p.stat().st_size} for p in sorted(self.dir.glob("gitlab-*.tar"), reverse=True)] \
+            if self.dir.is_dir() else []
+
+    def run(self, now: float | None = None) -> Path:
+        if not self.available():
+            raise GitLabError("no GitLab package on this server")
+        res = self.host.run(["gitlab-backup", "create", "STRATEGY=copy", "SKIP=artifacts,registry", "CRON=1"], timeout=6 * 3600)
+        if res is None or not res.ok:
+            raise GitLabError("gitlab-backup failed: " + ((res.stderr or res.stdout)[-300:] if res else "not found"))
+        made = sorted(f for f in self.host.listdir("/var/opt/gitlab/backups") if f.endswith("_gitlab_backup.tar"))
+        if not made:
+            raise GitLabError("gitlab-backup wrote no archive in /var/opt/gitlab/backups")
+        self.dir.mkdir(parents=True, exist_ok=True)
+        target = self.dir / time.strftime("gitlab-%Y%m%d-%H%M%S.tar", time.localtime(now or time.time()))
+        members = [f"var/opt/gitlab/backups/{made[-1]}"] + [p for p in ("etc/gitlab/gitlab-secrets.json", "etc/gitlab/gitlab.rb")
+                                                           if self.host.exists("/" + p)]
+        res = self.host.run(["tar", "cf", str(target), "-C", str(self.host.real("/")), *members], timeout=6 * 3600)
+        if res is None or not res.ok or not target.is_file():
+            target.unlink(missing_ok=True)
+            raise GitLabError("could not write the archive: " + ((res.stderr or "")[-300:] if res else "tar not found"))
+        target.chmod(0o600)  # it holds the secrets of the GitLab
+        for old in sorted(self.dir.glob("gitlab-*.tar"), reverse=True)[BACKUP_KEEP:]:
+            old.unlink(missing_ok=True)
+        if self.offsite is not None:
+            self.offsite.upload(target)
+        return target
+
+    def tick(self, now: float | None = None) -> Path | None:
+        now = now or time.time()
+        if not self.enabled() or time.localtime(now).tm_hour not in BACKUP_NIGHT or not self.available():
+            return None
+        if now - float(self.db.get_setting(BACKUP_AT) or 0) < 20 * 3600:
+            return None
+        self.db.set_setting(BACKUP_AT, str(now))  # once a night, even if it fails
+        try:
+            path = self.run(now)
+        except GitLabError as exc:
+            self.db.audit("mas", "gitlab-backup", False, detail=str(exc)[:300])
+            return None
+        self.db.audit("mas", "gitlab-backup", True, detail=path.name)
+        return path
 
 
 # -- mirror: the GitHub repository of an app, kept on the GitLab ---------------------------------------------

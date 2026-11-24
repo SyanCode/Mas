@@ -83,3 +83,9 @@ token (constant-time compare) and refuses a replayed delivery. Merge requests fr
 The copies of a GitLab app on other servers of the cluster receive this token for their clone, as copies of a GitHub
 app receive a clone token: a cluster server is trusted like this one. Prefer a token limited to the projects Mas
 deploys (a group access token) over a personal one.
+
+The **GitLab Runner** of the catalog gets the Docker socket of the server: it starts each CI job in a container of
+its own, which means the pipelines of the projects it serves can start containers on this server. Register it only
+on a GitLab whose projects you trust (your own), keep job containers unprivileged (the default), and use a separate
+server for untrusted code. The nightly archive of a GitLab installed with the package holds `gitlab-secrets.json`: it
+is written readable by root only and sent only to the remote storage you configured for Mas's backups.

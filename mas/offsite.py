@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -22,7 +23,8 @@ from mas.notify import Notifier
 log = logging.getLogger(__name__)
 
 SETTING = "selfbackup:remote"
-MAX_UPLOAD = 256 * 1024 * 1024
+MAX_UPLOAD = 256 * 1024 * 1024  # sent in one request up to here
+PART = 64 * 1024 * 1024  # above it: an S3 multipart upload, one part of this size in memory at a time
 REGION_RE = __import__("re").compile(r"^[a-z0-9-]{2,30}$")
 BUCKET_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 
@@ -100,29 +102,76 @@ class Offsite:
 
     # -- sending ---------------------------------------------------------------------------------------------
 
-    def put(self, name: str, data: bytes, cfg: dict | None = None, now: datetime | None = None) -> str:
-        cfg = cfg or self.settings(reveal=True)
-        if not (cfg["endpoint"] and cfg["bucket"] and cfg["access_key"] and cfg.get("secret_key")):
-            raise OffsiteError("the remote storage is not set up")
-        if len(data) > MAX_UPLOAD:
-            raise OffsiteError("the archive is too large to send")
+    def _send(self, method: str, url: str, data: bytes, cfg: dict, now: datetime | None = None) -> tuple[dict, bytes]:
+        """One signed request: (response headers, body)."""
         now = now or datetime.now(timezone.utc)
-        key = f"{cfg['prefix']}{name}"
-        url = f"{cfg['endpoint']}/{cfg['bucket']}/{quote(key, safe='/~')}"
         payload = hashlib.sha256(data).hexdigest()
         headers = {"host": urlsplit(url).netloc, "x-amz-content-sha256": payload, "x-amz-date": now.strftime("%Y%m%dT%H%M%SZ")}
-        auth = sign_v4("PUT", url, headers, payload, cfg["access_key"], cfg["secret_key"], cfg["region"], now)
-        req = urllib.request.Request(url, data=data, method="PUT", headers={
+        auth = sign_v4(method, url, headers, payload, cfg["access_key"], cfg["secret_key"], cfg["region"], now)
+        req = urllib.request.Request(url, data=data, method=method, headers={
             "x-amz-content-sha256": payload, "x-amz-date": headers["x-amz-date"], "Authorization": auth,
             "Content-Type": "application/octet-stream", "User-Agent": "mas"})
         try:
             with self.opener(req, timeout=300) as resp:  # noqa: S310 - https only, set by an administrator
                 if resp.status >= 300:
                     raise OffsiteError(f"the storage answered {resp.status}")
+                return dict(getattr(resp, "headers", None) or {}), resp.read() if hasattr(resp, "read") else b""
         except urllib.error.HTTPError as exc:
             raise OffsiteError(f"the storage answered {exc.code}") from None
         except OSError as exc:
             raise OffsiteError(f"cannot reach the storage: {exc}") from None
+
+    def _ready(self, cfg: dict | None) -> dict:
+        cfg = cfg or self.settings(reveal=True)
+        if not (cfg["endpoint"] and cfg["bucket"] and cfg["access_key"] and cfg.get("secret_key")):
+            raise OffsiteError("the remote storage is not set up")
+        return cfg
+
+    def _url(self, cfg: dict, key: str, query: str = "") -> str:
+        return f"{cfg['endpoint']}/{cfg['bucket']}/{quote(key, safe='/~')}" + (f"?{query}" if query else "")
+
+    def put(self, name: str, data: bytes, cfg: dict | None = None, now: datetime | None = None) -> str:
+        cfg = self._ready(cfg)
+        if len(data) > MAX_UPLOAD:
+            raise OffsiteError("the archive is too large to send")
+        key = f"{cfg['prefix']}{name}"
+        self._send("PUT", self._url(cfg, key), data, cfg, now)
+        return key
+
+    def put_file(self, path: Path, name: str | None = None, cfg: dict | None = None) -> str:
+        """Send a file of any size: in one request when small, else as an S3 multipart upload (64 MB parts, read one
+        at a time); a failed multipart upload is aborted so the storage keeps no orphan parts."""
+        cfg = self._ready(cfg)
+        name = name or path.name
+        size = path.stat().st_size
+        if size <= MAX_UPLOAD:
+            return self.put(name, path.read_bytes(), cfg)
+        key = f"{cfg['prefix']}{name}"
+        _, body = self._send("POST", self._url(cfg, key, "uploads="), b"", cfg)
+        upload = re.search(rb"<UploadId>([^<]+)</UploadId>", body or b"")
+        if not upload:
+            raise OffsiteError("the storage did not start the upload")
+        upload_id = upload.group(1).decode()
+        etags = []
+        try:
+            with path.open("rb") as fh:
+                number = 0
+                while chunk := fh.read(PART):
+                    number += 1
+                    headers, _ = self._send("PUT", self._url(cfg, key, f"partNumber={number}&uploadId={quote(upload_id, safe='')}"), chunk, cfg)
+                    etag = next((v for k, v in headers.items() if k.lower() == "etag"), "")
+                    if not etag:
+                        raise OffsiteError("the storage did not acknowledge a part")
+                    etags.append((number, etag))
+            done = "".join(f"<Part><PartNumber>{n}</PartNumber><ETag>{e}</ETag></Part>" for n, e in etags)
+            self._send("POST", self._url(cfg, key, f"uploadId={quote(upload_id, safe='')}"),
+                       f"<CompleteMultipartUpload>{done}</CompleteMultipartUpload>".encode(), cfg)
+        except (OffsiteError, OSError):
+            try:
+                self._send("DELETE", self._url(cfg, key, f"uploadId={quote(upload_id, safe='')}"), b"", cfg)
+            except OffsiteError:
+                pass
+            raise
         return key
 
     def upload(self, archive: Path) -> str | None:
@@ -131,7 +180,7 @@ class Offsite:
         if not cfg["enabled"]:
             return None
         try:
-            key = self.put(archive.name, archive.read_bytes(), cfg)
+            key = self.put_file(archive, archive.name, cfg)
         except (OffsiteError, EnvError, OSError) as exc:
             self.db.audit("offsite", "mas-backup-offsite", False, detail=f"{archive.name}: {exc}"[:300])
             log.warning("offsite copy of %s failed: %s", archive.name, exc)

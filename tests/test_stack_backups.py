@@ -120,3 +120,17 @@ def test_backups_from_the_dashboard(env):
     assert client.post("/api/apps/mc/stack/backups/nope/restore", headers=h).status_code == 400
     assert client.get("/api/apps/web/stack/backups").status_code == 404
     assert any(e["action"] == "stack-restore" and e["ok"] for e in db.history(None, 20))
+
+
+def test_nightly_backups_leave_the_server(env):
+    client, host, db, backups, calls, state, h = env
+    sent = []
+
+    class Off:
+        def upload(self, path):
+            sent.append(path)
+    assert client.app.state.stack_backups.offsite is not None  # Mas wires its remote storage in
+    backups.offsite = Off()
+    db.update_app("mc", current_release=db.create_release("mc", "create", "admin"))
+    done = backups.auto_backup(datetime(2026, 11, 24, 3, 30))
+    assert len(done) == 1 and [p.name for p in sent] == done and sent[0].is_file()

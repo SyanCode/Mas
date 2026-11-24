@@ -15,7 +15,7 @@ from mas.api import create_app
 from mas.config import Config
 from mas.db import Database
 from mas.depaudit import OSV, DepAudit
-from mas.depupdate import DepUpdater, bump_requirements, plan
+from mas.depupdate import DepUpdater, UpdateError, bump_requirements, plan
 from mas.host import FixtureHost
 
 from test_depaudit import LOCK, FakeOSV
@@ -235,3 +235,17 @@ def test_api_settings_and_update(tmp_path):
     db.create_app("site", name="site", repo="me/site", branch="main", type="nextjs", mode="managed")
     r = client.post("/api/dependencies/update?app_id=site", headers=h)
     assert r.status_code == 409 and "GitHub" in r.json()["detail"]
+
+
+def test_an_app_deployed_from_gitlab_is_upgraded_through_gitlab(tmp_path):
+    db, up, gh, calls, deployer = setup(tmp_path)
+    db.update_app("site", source="gitlab", installation_id=None, repo="me/web/site")
+    up.github = lambda: None  # no GitHub App at all: the GitLab of the app does the work
+    deployer.gitlab = lambda: None
+    with pytest.raises(UpdateError, match="GitLab is not connected"):
+        up.update(db.get_app("site"))
+    assert up.tick() == []  # nothing to talk to: skipped, no error
+    deployer.gitlab = lambda: gh
+    up.configure("pr")
+    rec = up.update(db.get_app("site"))
+    assert rec["state"] == "pr" and gh.pulls[0]["base"] == "main"  # a merge request on GitLab

@@ -81,3 +81,53 @@ def test_upload_is_off_by_default_and_a_failure_never_raises(tmp_path):
     assert any(e["action"] == "mas-backup-offsite" and not e["ok"] for e in db.history(None, 20))
     with pytest.raises(OffsiteError):
         offsite.test()
+
+
+def test_a_large_archive_goes_in_parts_and_a_failure_aborts_it(tmp_path, monkeypatch):
+    from mas import offsite as offsite_mod
+    client, db, sent, h = setup(tmp_path)
+    client.put("/api/self-backup/remote", headers=h, json=BODY)
+    monkeypatch.setattr(offsite_mod, "MAX_UPLOAD", 10)
+    monkeypatch.setattr(offsite_mod, "PART", 8)
+    calls, fail = [], {"part": None}
+
+    class Resp:
+        status = 200
+
+        def __init__(self, body=b"", headers=None):
+            self.body, self.headers = body, headers or {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self.body
+
+    def opener(req, timeout=0):
+        calls.append((req.get_method(), req.full_url.split("?", 1)[-1] if "?" in req.full_url else "", req.data))
+        query = req.full_url.split("?", 1)[-1]
+        if query == "uploads=":
+            return Resp(b"<InitiateMultipartUploadResult><UploadId>up-1</UploadId></InitiateMultipartUploadResult>")
+        if query.startswith("partNumber="):
+            number = int(query.split("&")[0].split("=")[1])
+            if number == fail["part"]:
+                raise OSError("connection reset")
+            return Resp(headers={"ETag": f'"e{number}"'})
+        return Resp()
+    off = client.app.state.offsite
+    off.opener = opener
+    archive = tmp_path / "gitlab-20261124-030000.tar"
+    archive.write_bytes(b"0123456789abcdefghij")  # 20 bytes: three parts of 8, 8, 4
+    assert off.upload(archive) == "mas/gitlab-20261124-030000.tar"
+    parts = [c for c in calls if c[1].startswith("partNumber=")]
+    assert [p[2] for p in parts] == [b"01234567", b"89abcdef", b"ghij"]
+    complete = calls[-1]
+    assert complete[0] == "POST" and complete[1] == "uploadId=up-1"
+    assert b"<PartNumber>3</PartNumber><ETag>\"e3\"</ETag>" in complete[2]
+    calls.clear()
+    fail["part"] = 2
+    assert off.upload(archive) is None  # never raises: the local backup is what counts
+    assert calls[-1][0] == "DELETE" and calls[-1][1] == "uploadId=up-1"  # no orphan parts left on the storage

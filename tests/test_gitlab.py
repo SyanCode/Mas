@@ -326,3 +326,132 @@ def test_each_release_reports_its_status_on_the_commit(env, api, monkeypatch):  
     hook(target, {"sha": "c" * 40, "status": "live", "trigger": "rollback"}, True)  # a rollback says nothing
     assert statuses == [("acme/shop", "a" * 40, "Mas deploy", "success", "Live at https://shop.example.com"),
                         ("acme/shop", "b" * 40, "Mas deploy", "failure", "Deployment failed: npm run build exited with 1")]
+
+
+def test_the_runner_of_the_catalog_registers_itself(tmp_path, monkeypatch):
+    from mas.envcrypt import load_fernet
+    from mas.stacks import TEMPLATES, Ctx, StackError
+
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    config = Config(secret_key_path="/etc/mas/secret.key")
+
+    class Mgr:
+        def __init__(self):
+            self.host, self.db, self.config, self.ran = host, db, config, []
+
+        def exec(self, app, service, args, retries=1):
+            self.ran.append((service, args))
+            host.write_text("/stacks/r/data/config/config.toml", "concurrent = 1\ncheck_interval = 0\n\n[[runners]]\n  name = \"mas r\"\n")
+            return ""
+    mgr, t = Mgr(), TEMPLATES["gitlab-runner"]
+    ctx = Ctx("r", {"concurrent": 3, "image": "node:22"}, {}, "/real/r/data", "/stacks/r/data", None, {}, None)
+    service = t.compose(ctx)["services"]["runner"]
+    assert "/var/run/docker.sock:/var/run/docker.sock" in service["volumes"] and "ports" not in service
+    with pytest.raises(StackError, match="connect a GitLab"):
+        t.actions["register"]["run"](mgr, {"id": "r"}, ctx, {})
+    gitlab.save(db, load_fernet(host, config.secret_key_path), "https://gitlab.example.com", TOKEN)
+    monkeypatch.setattr(gitlab.GitLab, "create_runner", lambda self, d: "glrt-" + "z" * 20)
+    out = t.actions["register"]["run"](mgr, {"id": "r"}, ctx, {})
+    assert "3 job(s)" in out
+    service_, args = mgr.ran[-1]
+    assert args[:3] == ["gitlab-runner", "register", "--non-interactive"] and "glrt-" + "z" * 20 in args
+    assert args[args.index("--url") + 1] == "https://gitlab.example.com" and args[args.index("--docker-image") + 1] == "node:22"
+    assert host.read_text("/stacks/r/data/config/config.toml").startswith("concurrent = 3\n")
+    # registered: the hook after a redeploy leaves it alone; a pasted token must be a runner token
+    class Log:
+        lines = []
+
+        def line(self, text):
+            self.lines.append(text)
+    t.after(mgr, {"id": "r"}, ctx, Log())
+    assert len(mgr.ran) == 1
+    with pytest.raises(StackError, match="glrt-"):
+        t.actions["register"]["run"](mgr, {"id": "r"}, ctx, {"token": "glpat-nope"})
+    def refuse(self, d):
+        raise gitlab.GitLabError("GitLab API POST /user/runners: HTTP 403 Forbidden")
+    monkeypatch.setattr(gitlab.GitLab, "create_runner", refuse)
+    with pytest.raises(StackError, match="not an administrator"):
+        t.actions["register"]["run"](mgr, {"id": "r"}, ctx, {})
+
+
+def test_a_gitlab_package_is_backed_up_every_night_with_its_secrets(tmp_path):
+    import time as _t
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    sent = []
+
+    class Off:
+        def upload(self, path):
+            sent.append(path.name)
+    b = gitlab.OmnibusBackup(host, db, tmp_path, Off())
+    assert not b.available() and b.tick() is None
+    with pytest.raises(gitlab.GitLabError):
+        b.run()
+    host.makedirs("/opt/gitlab/embedded")
+    host.write_text("/etc/gitlab/gitlab-secrets.json", "{}")
+    host.write_text("/etc/gitlab/gitlab.rb", "external_url 'https://git.example.com'")
+
+    def made(argv, *a, **k):
+        host.write_text("/var/opt/gitlab/backups/1732410000_2026_11_24_17.5.1_gitlab_backup.tar", "tar")
+    host._commands = {"gitlab-backup create STRATEGY=copy SKIP=artifacts,registry CRON=1": {"output": "done"},
+                      "tar cf *": {"output": ""}, **host._commands}
+    made(None)
+    real_run = host.run
+
+    def run(argv, timeout=None):
+        out = real_run(argv, timeout)
+        if argv[:2] == ["tar", "cf"]:
+            Path(argv[2]).write_bytes(b"archive")
+        return out
+    host.run = run
+    night = _t.mktime((2026, 11, 24, 3, 30, 0, 0, 0, -1))
+    assert b.tick(night) is None  # off until asked
+    b.set_enabled(True)
+    path = b.tick(night)
+    assert path is not None and path.name == "gitlab-20261124-033000.tar" and sent == [path.name]
+    tar = next(a for a in host.executed if a[:2] == ["tar", "cf"])
+    assert oct(path.stat().st_mode & 0o777) == "0o600"  # it holds the GitLab's secrets
+    assert "var/opt/gitlab/backups/1732410000_2026_11_24_17.5.1_gitlab_backup.tar" in tar
+    assert "etc/gitlab/gitlab-secrets.json" in tar and "etc/gitlab/gitlab.rb" in tar  # restorable
+    assert b.tick(night + 600) is None  # once a night
+    assert b.tick(_t.mktime((2026, 11, 24, 14, 0, 0, 0, 0, -1)) + 86400) is None  # only at night
+
+
+def test_move_an_app_from_github_to_gitlab_without_a_rebuild(api, monkeypatch):
+    client, csrf, db, app = api
+    connect(client, csrf, monkeypatch)
+    db.create_app("site", name="site", repo="acme/site", branch="main", installation_id=7, type="static", mode="managed",
+                  domain="site.example.com")
+    rid = db.create_release("site", "push", "github", "a" * 40, status="live")
+    db.update_app("site", current_release=rid)
+    monkeypatch.setattr(gitlab.GitLab, "ensure_project", lambda self, path, d="": {"full_name": path, "created": True})
+    hooks = []
+    monkeypatch.setattr(gitlab.GitLab, "ensure_hook", lambda self, repo, url, key: hooks.append(repo) or True)
+    heads = {"main": "b" * 40}
+    monkeypatch.setattr(gitlab.GitLab, "head", lambda self, inst, repo, branch: heads[branch])
+
+    class GH:
+        def token(self, inst):
+            return "ghs_x"
+
+        def installation_for(self, repo):
+            return 7
+    app.state.mirror.github = lambda: GH()
+    app.state.host._commands = {**app.state.host._commands, "*": {"returncode": 0}}
+    enqueued = []
+    app.state.deployer.enqueue = lambda *a, **k: enqueued.append(a) or 1
+    assert client.post("/api/apps/site/move-to-gitlab", headers=csrf, json={}).status_code == 400  # which project?
+    # GitLab does not have the live commit: nothing moves
+    r = client.post("/api/apps/site/move-to-gitlab", headers=csrf, json={"project": "acme/site"})
+    assert r.status_code == 409 and "is live" in r.json()["detail"]
+    assert db.get_app("site")["source"] is None
+    heads["main"] = "a" * 40
+    r = client.post("/api/apps/site/move-to-gitlab", headers=csrf, json={"project": "acme/site"})
+    assert r.status_code == 200, r.text
+    moved = db.get_app("site")
+    assert moved["source"] == "gitlab" and moved["repo"] == "acme/site" and moved["installation_id"] is None
+    assert hooks == ["acme/site"] and enqueued == []  # same commit live: no rebuild, no downtime
+    assert app.state.mirror.get("site") is None
+    assert client.post("/api/apps/site/move-to-gitlab", headers=csrf, json={"project": "acme/site"}).status_code == 409
+    assert any(h["action"] == "app-move-gitlab" for h in db.history(limit=10))

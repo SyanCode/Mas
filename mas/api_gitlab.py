@@ -26,12 +26,17 @@ class ConnectBody(BaseModel):
     password: str = Field(default="", max_length=200)
 
 
+class BackupBody(BaseModel):
+    enabled: bool
+
+
 class MirrorBody(BaseModel):
     project: str | None = Field(default=None, max_length=300)  # group/name on the GitLab; empty: stop mirroring
 
 
 def register(app: FastAPI, *, host: Host, config: Config, db: Database, current_session: Callable,
-             require_password: Callable, deployer, scanner, cluster, mirror: gl_mod.Mirror) -> Callable:
+             require_password: Callable, deployer, scanner, cluster, mirror: gl_mod.Mirror,
+             backup: gl_mod.OmnibusBackup | None = None) -> Callable:
     """Returns the ``gitlab()`` factory (None while no GitLab is connected)."""
     cache: dict = {}
     seen: dict[str, float] = {}
@@ -96,7 +101,41 @@ def register(app: FastAPI, *, host: Host, config: Config, db: Database, current_
             except gl_mod.GitLabError as exc:
                 out["error"] = str(exc)
         out["detected"] = await asyncio.to_thread(detected)
+        if backup is not None and backup.available():
+            out["backup"] = {"enabled": backup.enabled(), "archives": backup.list(), **jobs.get("backup", {})}
         return out
+
+    jobs: dict[str, dict] = {}
+
+    @app.put("/api/gitlab/backup")
+    def set_backup(body: BackupBody, s=Depends(current_session)) -> dict:
+        if backup is None or not backup.available():
+            raise HTTPException(404, "no GitLab package on this server")
+        backup.set_enabled(body.enabled)
+        db.audit(s.username, "gitlab-backup-set", True, detail="on" if body.enabled else "off")
+        return {"enabled": body.enabled}
+
+    @app.post("/api/gitlab/backup/run")
+    def run_backup(s=Depends(current_session)) -> dict:
+        if backup is None or not backup.available():
+            raise HTTPException(404, "no GitLab package on this server")
+        if jobs.get("backup", {}).get("running"):
+            raise HTTPException(409, "a backup of the GitLab is already running")
+        job = {"running": True, "error": None, "result": None}
+        jobs["backup"] = job
+
+        def work() -> None:
+            try:
+                job["result"] = backup.run().name
+                db.audit(s.username, "gitlab-backup", True, detail=job["result"])
+            except gl_mod.GitLabError as exc:
+                job["error"] = str(exc)
+                db.audit(s.username, "gitlab-backup", False, detail=str(exc)[:300])
+            finally:
+                job["running"] = False
+        import threading
+        threading.Thread(target=work, daemon=True, name="mas-gitlab-backup").start()
+        return job
 
     @app.put("/api/gitlab")
     async def connect(body: ConnectBody, s=Depends(current_session)) -> dict:
@@ -206,6 +245,41 @@ def register(app: FastAPI, *, host: Host, config: Config, db: Database, current_
         if state:
             asyncio.get_running_loop().run_in_executor(None, mirror.sync, db.get_app(app_id))
         return {"mirror": state}
+
+    @app.post("/api/apps/{app_id}/move-to-gitlab")
+    async def move_to_gitlab(app_id: str, body: MirrorBody, request: Request, s=Depends(current_session)) -> dict:
+        """Deploy an app from GitLab instead of GitHub, without a rebuild nor a second of downtime: the repository is
+        copied (every branch and tag), Mas checks that GitLab has the very commit that is live, then the app follows
+        GitLab (webhook added). The previews of GitHub pull requests are removed; the GitHub repository is not touched."""
+        target = find(app_id)
+        if (target.get("source") or "github") == "gitlab":
+            raise HTTPException(409, "this app is already deployed from GitLab")
+        if target["mode"] != "managed" or target.get("environment") == "preview":
+            raise HTTPException(409, "only an app Mas builds from GitHub can move")
+        client = require()
+        project = (body.project or (mirror.get(app_id) or {}).get("project") or "").strip()
+        if not project:
+            raise HTTPException(400, "give the GitLab project (group/name)")
+        try:
+            if (mirror.get(app_id) or {}).get("project") != project:
+                await asyncio.to_thread(mirror.configure, target, project)
+            if not await asyncio.to_thread(mirror.sync, target):
+                raise gl_mod.GitLabError((mirror.get(app_id) or {}).get("error") or "the copy to GitLab failed")
+            project = mirror.get(app_id)["project"]
+            gitlab_head = await asyncio.to_thread(client.head, None, project, target["branch"])
+        except gl_mod.GitLabError as exc:
+            raise HTTPException(400, str(exc)) from None
+        live = db.get_release(target["current_release"]) if target.get("current_release") else None
+        if live and live.get("sha") and live["sha"] != gitlab_head:
+            raise HTTPException(409, f"GitLab's {target['branch']} is at {gitlab_head[:7]} but {live['sha'][:7]} is live: "
+                                     "push or deploy first, then move again")
+        removed = await asyncio.to_thread(request.app.state.previews.remove_all, app_id)
+        db.update_app(app_id, source="gitlab", repo=project, installation_id=None)
+        mirror.configure(db.get_app(app_id), None)
+        hook = await asyncio.to_thread(ensure_hook, project, base(request))
+        db.audit(s.username, "app-move-gitlab", True, service_id=app_id,
+                 detail=f"{target['repo']} → {client.url}/{project} at {gitlab_head[:7]}")
+        return {"moved": True, "repo": project, "sha": gitlab_head, "webhook": hook, "previews_removed": removed}
 
     @app.post("/api/apps/{app_id}/mirror/sync")
     async def sync_mirror(app_id: str, _=Depends(current_session)) -> dict:
