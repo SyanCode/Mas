@@ -148,7 +148,7 @@ $ sudo mas backup create [-o DIR] [--keep 7]  # database, secret key, config, Gi
 $ sudo mas backup list
 $ sudo mas backup restore <file>  # current files kept as *.before-restore, then restart mas
 
-$ sudo mas economy on|off        # economy mode: memory limits and sleep of quiet apps, applied by themselves
+$ sudo mas economy on|off [--shrink]  # economy mode: memory limits and sleep of quiet apps, applied by themselves
 $ mas skills                    # the robot's skills (SEO checklist, not vibecoded, design, copy…)
 $ mas skills show seo-checklist
 $ mas skills export ~/my-site   # as Claude Code skills: ~/my-site/.claude/skills/*/SKILL.md
@@ -212,6 +212,12 @@ no AI: `/mcp` is only a protocol in front of the API.
 - **Monthly token budget** (Robot page): the tokens of the month for every AI use (robot, advisor, questions), and an
   optional cap. When it is spent nothing more is sent: the robot and the autopilot stop until next month (cache reads
   count for a tenth, as they are billed). Only an administrator signed in changes it, never an API token.
+- **Auto-prompting** (on by default, the box under *Start*): before a task starts, Claude reads the request with
+  the list of your sites and the skills. When an answer only you can give would change the result (which site, the
+  scope, facts it cannot know), it asks one to three short questions with suggested answers (or type your own), then
+  writes a precise goal: the site, what to do, the skills to load, the audits before and after, what must not change
+  and when it is done. You can edit it, start it, or start your request as typed. Questions to the mascot and the
+  presets start directly.
 - **Skills.** The robot does not only change things, it knows how to do them well. Its prompt lists written skills
   (`mas skills`): the **22-point SEO checklist**, **not vibecoded** (the design, copy and code signs of a generated site
   and what to do instead), design craft, copywriting, accessibility, performance (Core Web Vitals), code quality and a
@@ -682,7 +688,12 @@ Each Node.js, Next.js or Python app has a **Resources** card (also editable from
 - **Economy mode** (top of the Resources page, or `mas economy on`): every two hours Mas applies the safe advice by
   itself. An app without a memory limit gets one (twice what it uses), an app close to its limit gets more, and an app
   that had no visit at three looks in a row (about six hours) sleeps after 30 quiet minutes and wakes up at the next
-  visit. A value set by a person is never lowered or removed; every change is in the history.
+  visit. A value set by a person is never lowered or removed; every change is in the history. With your agreement
+  (the box under it, or `mas economy on --shrink`) it also lowers a limit far above what an app uses (four times its
+  peak or more, to twice its peak) and caps a Docker container of the server that uses more than 512 MB without a
+  limit (`docker update`, at once, no restart).
+- **Containers** of the server get advice too: a heavy one without a memory limit (one click caps it), and ClamAV
+  inside a mail server, about a gigabyte on its own (`ENABLE_CLAMAV=0` when the mails need no virus scan).
 - **Next.js `output: "standalone"`** is started by itself: after the build Mas copies `.next/static` and `public/`
   next to the standalone server and runs `node .next/standalone/server.js` instead of `next start` (about half the
   memory, no full `node_modules` loaded).
@@ -954,6 +965,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **Auto-prompting and container advice**: a vague request gets questions and becomes a precise goal before the robot starts; limits far too wide and heavy containers without a limit get advice, applied by the economy mode once you agree (`--shrink`); ClamAV in a mail server is pointed at.
 - [x] **Lighter Mas and apps**: economy mode (`mas economy on`), Next.js standalone builds started by themselves, the MCP library loaded on demand (about 20 MB and half the start time saved), freed memory returned to the system, no journal line per request, no polling from background tabs; a question to the mascot runs beside a task (read-only), tested in a real browser.
 - [x] **Robot mascot and token budget**: a robot docked on the side of the screen (drag, other side, hide) shows the robot's state and answers questions read-only or takes a task; a monthly token cap stops every AI use when it is spent, with the month's tokens by source on the Robot page.
 - [x] **Robot skills**: the robot loads written know-how when a goal needs it (22-point SEO checklist, not vibecoded, design craft, copywriting, accessibility, performance, code quality, launch checklist); the SEO audit now checks structured data, breadcrumbs, heading order, broken links, orphan pages, thin and JavaScript-only pages, clean URLs, image sizes and blocking scripts and reports the 22 points; `polish_report` finds the signs of a generated, unfinished project; presets *Not vibecoded* and *Ready to launch*; the skills also go to Claude Code (`mas skills export`, MCP `get_skill`, the robot's `install_skills`).

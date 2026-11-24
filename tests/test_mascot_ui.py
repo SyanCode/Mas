@@ -49,7 +49,16 @@ class Claude:
         time.sleep(self.delay)
         first = body["messages"][0]["content"]
         text = first if isinstance(first, str) else first[0]["text"]
-        if "This is a QUESTION" in text:
+        system = " ".join(b["text"] for b in body["system"])
+        if "You prepare work for the robot" in system:  # auto-prompting: one question, then the goal
+            asked = json.loads(text)
+            refined = ({"ready": True, "questions": [], "why": "Clear now.",
+                        "goal": f"Deploy the site {asked['answers'][0]['answer']} and check it answers."}
+                       if asked["answers"] else
+                       {"ready": False, "goal": "Deploy a site.", "why": "",
+                        "questions": [{"question": "Which site should be deployed?", "options": ["site", "every site"]}]})
+            blocks = [{"type": "text", "text": json.dumps(refined)}]
+        elif "This is a QUESTION" in text:
             blocks = [{"type": "text", "text": "Everything is running: 1 site, no problem found.\nRESULT: done"}]
         elif len(body["messages"]) == 1:
             blocks = [{"type": "tool_use", "id": "t1", "name": "deploy_app", "input": {"app_id": "site"}}]
@@ -161,7 +170,19 @@ def test_a_task_waits_for_a_click_and_a_question_runs_beside_it(live):
         dialog.get_by_role("button", name="New question").click()
     page.get_by_placeholder("Ask the robot…").fill("Deploy the client site now please")
     dialog.get_by_role("button", name="Do it").click()
+    # auto-prompting: Claude asks which site, then shows the goal it wrote, which can be edited
+    dialog.get_by_text("Which site should be deployed?").wait_for(timeout=15000)
+    dialog.get_by_role("button", name="site", exact=True).click()
+    if os.environ.get("MAS_SCREENSHOTS"):
+        page.screenshot(path=os.path.join(os.environ["MAS_SCREENSHOTS"], "mascot-coach.png"))
+    dialog.get_by_role("button", name="Continue").click()
+    goal = dialog.get_by_label("Goal for the robot")
+    goal.wait_for(timeout=15000)
+    assert goal.input_value() == "Deploy the site site and check it answers."
+    goal.fill("Deploy the site site and check it answers. Do not touch anything else.")
+    dialog.get_by_role("button", name="Start with this goal").click()
     dialog.get_by_text("The robot asks your permission").wait_for(timeout=15000)
+    assert db.list_robot_runs(1)[0]["goal"] == "Deploy the site site and check it answers. Do not touch anything else."
     # the panel closed, the robot calls for attention
     page.get_by_role("button", name="Close", exact=True).click()
     page.get_by_text("I need your go-ahead").wait_for(timeout=15000)

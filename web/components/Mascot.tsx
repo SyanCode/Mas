@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import Link from "next/link";
 import { ArrowLeftRight, Check, Minus, Send, Square, Wand2, X } from "lucide-react";
 import { MascotBot, type Mood } from "@/components/MascotBot";
+import { PromptCoach } from "@/components/PromptCoach";
 import { Button, Spinner } from "@/components/ui";
 import { api, ApiError, type App, type RobotRun, type RobotStep } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
@@ -65,6 +66,8 @@ export function Mascot() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [bubble, setBubble] = useState("");
+  const [refineOn, setRefineOn] = useState<boolean | null>(null);  // auto-prompting before a task
+  const [coach, setCoach] = useState<string | null>(null);
   const press = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const shown = useRef<number | null>(null);
   const lastStatus = useRef<string>("");
@@ -133,6 +136,7 @@ export function Mascot() {
   useEffect(() => {
     if (!open) return;
     if (sites === null) api<App[]>("/apps").then((a) => setSites(a.filter((x) => x.repo))).catch(() => setSites([]));
+    if (refineOn === null) api<{ refine?: boolean }>("/robot").then((r) => setRefineOn(r.refine !== false)).catch(() => setRefineOn(false));
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
@@ -244,7 +248,11 @@ export function Mascot() {
 
           <div ref={log} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3 text-sm">
             {waiting?.pending && <Approval run={waiting} busy={!!busy} withGoal onDecide={(approve) => act("decision", { approve }, waiting.id)} />}
-            {!run && (
+            {coach !== null && (
+              <PromptCoach compact request={coach} appId={appId} onCancel={() => setCoach(null)}
+                onStart={(g) => { setCoach(null); start(g, false); }} />
+            )}
+            {coach === null && !run && (
               <>
                 <p className="rounded-xl rounded-tl-sm bg-zinc-100 px-3 py-2 dark:bg-white/[0.06]">{t("Hi! Ask me anything about your server and your sites: I look and answer without changing anything. Or give me something to do.")}</p>
                 <div className="flex flex-wrap gap-1.5">
@@ -255,7 +263,7 @@ export function Mascot() {
                 </div>
               </>
             )}
-            {run && (
+            {coach === null && run && (
               <>
                 <p className="ml-8 whitespace-pre-wrap rounded-xl rounded-tr-sm bg-indigo-500 px-3 py-2 text-white">{run.goal}</p>
                 {steps.map((s, i) => (
@@ -288,7 +296,7 @@ export function Mascot() {
                 <option value="">{t("Any site")}</option>
                 {(sites ?? []).map((a) => <option key={a.id} value={a.id}>{a.domain || a.name}</option>)}
               </select>
-              <button type="button" disabled={!!busy || taskBusy || mineLive || text.trim().length < 5} onClick={() => start(text, false)} title={t("Let the robot change things (with your settings: it asks first, or acts alone)")}
+              <button type="button" disabled={!!busy || taskBusy || mineLive || text.trim().length < 5} onClick={() => (refineOn ? setCoach(text.trim()) : start(text, false))} title={t("Let the robot change things (with your settings: it asks first, or acts alone)")}
                 className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-900/[0.05] disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-white/[0.07]">
                 {busy === "do" ? <Spinner /> : <Wand2 className="size-3.5" />}{t("Do it")}
               </button>

@@ -40,6 +40,8 @@ ASLEEP = "asleep:"          # setting asleep:<app id> = "1" while the app sleeps
 AUTO = "resources_auto"     # "1": economy mode, the advice is applied by itself (see Resources.auto_tune)
 AUTO_EVERY = 2 * 3600       # seconds between two looks of the economy mode
 AUTO_QUIET_LOOKS = 3        # an app goes to sleep after this many looks in a row without traffic (about 6 hours)
+SHRINK = "resources_auto_shrink"  # "1": the economy mode may also lower limits far too wide and cap heavy containers
+OVERSIZED = 4               # a limit this many times what the app uses (at its peak) is far too wide
 
 
 class ResourceError(Exception):
@@ -75,6 +77,7 @@ class Resources:
         self.last_change: dict[str, float] = {}    # app id → time of the last scale / sleep / wake
         self.quiet_since: dict[str, float] = {}    # app id → since when fewer instances would do
         self.cpu: dict[str, tuple[float, int]] = {}  # unit → (time, CPUUsageNSec) at the previous tick
+        self.containers = None  # () → advice of the containers (set by the API from mas.usage)
 
     def _log(self, app_id: str) -> ReleaseLog:
         return ReleaseLog(Path(self.db.path).parent / "logs" / "resources" / f"{app_id}.log")
@@ -87,9 +90,14 @@ class Resources:
     def auto_enabled(self) -> bool:
         return self.db.get_setting(AUTO) == "1"
 
-    def set_auto(self, on: bool) -> bool:
+    def set_auto(self, on: bool, shrink: bool | None = None) -> bool:
         self.db.set_setting(AUTO, "1" if on else None)
+        if shrink is not None:
+            self.db.set_setting(SHRINK, "1" if shrink else None)
         return on
+
+    def shrink_enabled(self) -> bool:
+        return self.db.get_setting(SHRINK) == "1"
 
     def auto_tune(self, now: float | None = None, apply=None) -> list[str]:
         """Economy mode: every two hours, the apps get what the advice says, without anyone clicking.
@@ -117,6 +125,9 @@ class Resources:
             elif "memory-high" in advice:
                 res["memory_mb"] = min(MAX_MEMORY_MB, advice["memory-high"]["set"]["memory_mb"])
                 changes.append(f"memory limit raised to {res['memory_mb']} MB")
+            elif "memory-oversized" in advice and self.shrink_enabled():  # agreed to: twice the peak stays
+                res["memory_mb"] = advice["memory-oversized"]["set"]["memory_mb"]
+                changes.append(f"memory limit lowered to {res['memory_mb']} MB (peak {advice['memory-oversized']['params']['peak']} MB)")
             key = f"{AUTO}_quiet:{app['id']}"
             quiet = int(self.db.get_setting(key) or 0) + 1 if "sleep" in advice else 0
             self.db.set_setting(key, str(quiet) if quiet else None)
@@ -134,7 +145,25 @@ class Resources:
             except DeployError as exc:
                 self.db.audit("resources", "resources-auto", False, service_id=app["id"], detail=str(exc)[:300])
             done.append(f"{app['id']}: " + "; ".join(changes))
+        if self.shrink_enabled() and self.containers is not None:
+            for c in self.containers():
+                mb = (c.get("set") or {}).get("container_memory_mb")
+                if c["id"] != "container-limit" or not mb:
+                    continue
+                name = c["params"]["name"]
+                ok = self.limit_container(name, mb)
+                self.db.audit("resources", "resources-auto", ok, detail=f"container {name}: memory limit {mb} MB")
+                if ok:
+                    done.append(f"container {name}: memory limit {mb} MB")
         return done
+
+    def limit_container(self, name: str, mb: int) -> bool:
+        """A memory limit on a running container, at once and without a restart (docker update). It stays across
+        restarts of the container, not when it is recreated (docker compose up): put it in its compose file too."""
+        if not MIN_MEMORY_MB <= int(mb) <= MAX_MEMORY_MB:
+            raise ResourceError(f"memory: between {MIN_MEMORY_MB} and {MAX_MEMORY_MB} MB")
+        res = self.host.run(["docker", "update", "--memory", f"{int(mb)}m", "--memory-swap", f"{int(mb)}m", name], timeout=60)
+        return res is not None and res.ok
 
     # -- every minute --------------------------------------------------------------
 
@@ -269,6 +298,16 @@ class Resources:
                 found = True
         return round(total / 1048576, 1) if found else None
 
+    def peak_mb(self, app: dict) -> float | None:
+        """The most memory one instance used since it started (systemd 256+), MB."""
+        peak = None
+        for unit, _ in app_instances(app):
+            res = self.host.run(["systemctl", "show", unit, "-pMemoryPeak", "--value"])
+            text = res.stdout.strip() if res is not None and res.ok else ""
+            if text.isdigit() and int(text) < 2**63:
+                peak = max(peak or 0, int(text))
+        return round(peak / 1048576, 1) if peak else None
+
     def advice(self, app: dict, now: float | None = None) -> list[dict]:
         """What would make the app lighter or steadier, from what it uses now: {id, level, params, set}
         (``set``: the resources the dashboard applies in one click; the texts are in the dashboard)."""
@@ -291,6 +330,12 @@ class Resources:
             elif per > limit * 0.9:
                 out.append({"id": "memory-high", "level": "warning", "params": {"used": per, "limit": limit},
                             "set": {"memory_mb": int(limit * 1.5)}})
+            elif limit >= 1024:
+                peak = max(per, self.peak_mb(app) or 0)
+                if limit >= peak * OVERSIZED:  # a limit that protects nothing: the app could take it all
+                    mb = max(256, int(math.ceil(peak * 2 / 64)) * 64)
+                    out.append({"id": "memory-oversized", "level": "info", "params": {"used": per, "peak": round(peak),
+                                "limit": limit, "mb": mb}, "set": {"memory_mb": mb}})
         if not res.get("sleep_after_min") and app.get("domain") and rpm < 1 and now - self.started > 900:
             out.append({"id": "sleep", "level": "info", "params": {"rpm": rpm, "min": 30},
                         "set": {"sleep_after_min": 30}})

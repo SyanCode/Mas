@@ -1283,19 +1283,23 @@ def self_update_cmd(
 def economy(
     ctx: typer.Context,
     state: Annotated[Optional[str], typer.Argument(help="on or off (nothing: show it).")] = None,
+    shrink: Annotated[Optional[bool], typer.Option("--shrink/--no-shrink", help="Also lower limits far too wide and cap heavy containers.")] = None,
 ) -> None:
     """Economy mode: memory limits and sleep of quiet apps applied by themselves (Resources page)."""
-    from mas.resources import AUTO
+    from mas.resources import AUTO, SHRINK
     env: Env = ctx.obj
+    if shrink is not None:
+        env.db.set_setting(SHRINK, "1" if shrink else None)
     if state is None:
         on = env.db.get_setting(AUTO) == "1"
-        console.print(f"economy mode: [bold]{'on' if on else 'off'}[/]")
+        console.print(f"economy mode: [bold]{'on' if on else 'off'}[/], lowering too-wide limits and capping "
+                      f"containers: [bold]{'on' if env.db.get_setting(SHRINK) == '1' else 'off'}[/]")
         return
     if state not in ("on", "off"):
         fail("on or off")
     env.db.set_setting(AUTO, "1" if state == "on" else None)
     env.db.set_setting(AUTO + "_at", None)
-    env.db.audit(actor(), "resources-auto", True, detail=state)
+    env.db.audit(actor(), "resources-auto", True, detail=state + ("" if shrink is None else f", shrink {'on' if shrink else 'off'}"))
     console.print(f"[green]✓[/] economy mode {state}" + (" (first look within a minute)" if state == "on" else ""))
 
 

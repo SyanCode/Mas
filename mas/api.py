@@ -428,6 +428,7 @@ def create_app(
     robot = robot_mod.Robot(db, pool, github_client, lambda token: masclient.MasClient(app, token, None))
     autopilot = Autopilot(db, robot, pool)
     usage = Usage(host, config, db, scanner, resources)
+    resources.containers = usage.heavy_containers
     maintenance = Maintenance(host, config, db, deployer)
     site_rules = SiteRules(db, host, maintenance, cms)
     updater = Updater(host, config, db, update_fetch or github_fetch)
@@ -1177,7 +1178,8 @@ def create_app(
     api_stacks.register(app, db=db, current_session=current_session, manager=stacks, backups=stack_backups)
     api_cluster.register(app, db=db, current_session=current_session, cluster=cluster, deployer=deployer)
     app.state.cluster = cluster
-    api_resources.register(app, db=db, current_session=current_session, deployer=deployer, resources=resources)
+    api_resources.register(app, db=db, current_session=current_session, deployer=deployer, resources=resources,
+                           containers=lambda: list(usage._containers().values()))
     api_advisor.register(app, db=db, current_session=current_session, advisor=advisor, pool=pool, robot=robot,
                          require_password=require_password, claude_login=claude_login, autopilot=autopilot)
     api_maintenance.register(app, db=db, current_session=current_session, maintenance=maintenance, client_ip=client_ip)

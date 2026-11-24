@@ -68,3 +68,40 @@ def test_everything_grouped_and_sorted(tmp_path, monkeypatch):
     u._last["mariadb.service"] = (u._last["mariadb.service"][0] - 1.0, 5000)
     second = {r["key"]: r for r in u.overview()["rows"]}
     assert 40 <= second["unit:mariadb.service"]["cpu_percent"] <= 51
+
+
+def test_heavy_containers_get_a_limit_and_clamav_is_pointed_at(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_mod, "FIRST_SAMPLE", 0)
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    config = Config()
+    deployer = Deployer(host, config, db, lambda: None)
+    host.write_text("/proc/meminfo", "MemTotal: 4096000 kB\nMemAvailable: 2048000 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n")
+    group(host, f"docker-{'e' * 64}.scope", 1650, 0)
+    group(host, f"docker-{'f' * 64}.scope", 800, 0)
+    group(host, f"docker-{'c' * 64}.scope", 100, 0)
+    running = [{"Id": "e" * 64, "Names": ["/sxnmail"], "Image": "mailserver/docker-mailserver"},
+               {"Id": "f" * 64, "Names": ["/capped"], "Image": "redis"},
+               {"Id": "c" * 64, "Names": ["/small"], "Image": "redis"}]
+    inspect = {"e": {"Config": {"Env": ["ENABLE_CLAMAV=1"]}, "HostConfig": {"Memory": 0}},
+               "f": {"Config": {"Env": []}, "HostConfig": {"Memory": 1024 * 1048576}}}
+    calls = []
+    host.docker_get = lambda path: running if path.startswith("/containers/json") else calls.append(path) or inspect[path.split("/")[2][0]]
+    resources = Resources(host, config, db, deployer, Cluster(host, config, db, deployer))
+    u = Usage(host, config, db, Scanner(host, config, db), resources)
+    rows = {r["key"]: r for r in u.overview()["rows"]}
+    advice = {a["id"]: a for a in rows["container:sxnmail"]["advice"]}
+    assert advice["container-limit"]["set"] == {"container_memory_mb": 2496, "container": "sxnmail"}
+    assert "container-clamav" in advice
+    assert rows["container:capped"]["advice"] == [] and rows["container:small"]["advice"] == []
+    u.overview()
+    assert len(calls) == 2  # inspected once, then from the cache
+    # the economy mode caps it only once the person agreed to it
+    host._commands = {"docker update --memory 2496m --memory-swap 2496m sxnmail": {"output": "sxnmail"}, **host._commands}
+    resources.containers = u.heavy_containers
+    resources.set_auto(True)
+    resources.auto_tune(10_000, lambda app_id: None)
+    assert ["docker", "update", "--memory", "2496m", "--memory-swap", "2496m", "sxnmail"] not in host.executed
+    resources.set_auto(True, shrink=True)
+    assert resources.auto_tune(10_000 + 7200, lambda app_id: None) == ["container sxnmail: memory limit 2496 MB"]
+    assert ["docker", "update", "--memory", "2496m", "--memory-swap", "2496m", "sxnmail"] in host.executed

@@ -5,6 +5,7 @@ import { Bot, Check, CircleSlash, Hammer, Play, ShieldCheck, Square, Wrench, X }
 import { Badge, Button, Card, ErrorText, Input, Label, Select, Spinner, Textarea } from "@/components/ui";
 import { api, ApiError, timeAgo, type App, type RobotRun, type RobotState, type RobotStep, type RobotUsage } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
+import { PromptCoach } from "@/components/PromptCoach";
 
 const PRESET_LABEL: Record<string, string> = {
   polish: msg("Not vibecoded"), launch: msg("Ready to launch"),
@@ -89,6 +90,7 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
   const t = useT();
   const [state, setState] = useState<RobotState | null>(null);
   const [text, setText] = useState("");
+  const [coach, setCoach] = useState<string | null>(null);  // a request being turned into a precise goal
   const [appId, setAppId] = useState("");
   const [autonomy, setAutonomy] = useState<"ask" | "auto">("ask");
   const [run, setRun] = useState<RobotRun | null>(null);
@@ -125,7 +127,7 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
     setBusy(path); setError("");
     try { await api(`/robot/runs/${run!.id}/${path}`, { method: "POST", body }); setRun(await api<RobotRun>(`/robot/runs/${run!.id}`)); } catch (e) { setError((e as ApiError).detail); } finally { setBusy(""); }
   }
-  async function save(body: { schedule?: string; autonomy?: string; monthly_cap?: number }) {
+  async function save(body: { schedule?: string; autonomy?: string; monthly_cap?: number; refine?: boolean }) {
     try { await api("/robot", { method: "PUT", body }); load(); } catch (e) { setError((e as ApiError).detail); }
   }
 
@@ -153,7 +155,13 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
         </Card>
       )}
 
-      {!live && (
+      {!live && coach !== null && (
+        <Card title={t("Preparing the goal")}>
+          <PromptCoach request={coach} appId={appId} onCancel={() => setCoach(null)} onStart={(g) => { setCoach(null); start(g); }} />
+        </Card>
+      )}
+
+      {!live && coach === null && (
         <Card title={t("What should the robot do?")}>
           <div className="space-y-4 text-sm">
             <div className="stagger grid gap-2 sm:grid-cols-2">
@@ -188,9 +196,17 @@ export function RobotPanel({ apps, goal, onGoalUsed }: { apps: App[]; goal?: { t
                 </Select>
               </Label>
             </div>
-            <Button variant="glow" disabled={!!busy || text.trim().length < 5 || !state} onClick={() => start(text)}>
-              {busy === "start" ? <Spinner /> : <Play className="size-3.5" />}{t("Start")}
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="glow" disabled={!!busy || text.trim().length < 5 || !state} onClick={() => (state?.refine ? setCoach(text.trim()) : start(text))}>
+                {busy === "start" ? <Spinner /> : <Play className="size-3.5" />}{t("Start")}
+              </Button>
+              {state && (
+                <label className="flex items-center gap-2 text-xs text-zinc-500">
+                  <input type="checkbox" checked={state.refine !== false} onChange={(e) => save({ refine: e.target.checked })} />
+                  {t("Improve my request first: Claude asks for missing details and writes a precise goal")}
+                </label>
+              )}
+            </div>
             <p className="text-xs text-zinc-500">{autonomy === "auto" ? t("In automatic mode the robot commits and deploys alone. Mas still checks nginx, health-checks the new release and rolls back by itself; every commit is in your repository history.") : t("The robot reads and audits freely, but every commit, deployment and fix waits for your click.")}</p>
           </div>
         </Card>

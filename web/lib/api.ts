@@ -760,6 +760,7 @@ export interface RobotUsage {
 export interface RobotState {
   schedule: "off" | "daily" | "weekly";
   autonomy: "ask" | "auto";
+  refine?: boolean;
   presets: string[];
   skills?: { name: string; description: string }[];
   usage_30d?: RobotUsage;

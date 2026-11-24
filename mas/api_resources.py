@@ -23,6 +23,11 @@ class AutoscaleBody(BaseModel):
 
 class AutoBody(BaseModel):
     enabled: bool
+    shrink: bool | None = None  # also lower limits far too wide and cap heavy containers
+
+
+class ContainerMemoryBody(BaseModel):
+    memory_mb: int = Field(ge=64, le=65536)
 
 
 class ResourcesBody(BaseModel):
@@ -32,7 +37,8 @@ class ResourcesBody(BaseModel):
 
 
 def register(app: FastAPI, *, db: Database, current_session: Callable, deployer: Deployer,
-             resources: Resources) -> None:
+             resources: Resources, containers: Callable[[], list[dict]] = lambda: []) -> None:
+    usage_containers = containers
 
     def find(app_id: str) -> dict:
         target = db.get_app(app_id)
@@ -42,15 +48,32 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, deployer:
 
     @app.get("/api/resources/auto")
     def get_auto(_=Depends(current_session)) -> dict:
-        return {"enabled": resources.auto_enabled()}
+        return {"enabled": resources.auto_enabled(), "shrink": resources.shrink_enabled()}
 
     @app.put("/api/resources/auto")
     def put_auto(body: AutoBody, s=Depends(current_session)) -> dict:
-        """Economy mode: the safe advice (memory limits, sleep of quiet apps) applied by itself every two hours."""
-        resources.set_auto(body.enabled)
+        """Economy mode: the safe advice (memory limits, sleep of quiet apps) applied by itself every two hours;
+        with ``shrink``, also the limits far too wide lowered and the heavy containers capped."""
+        resources.set_auto(body.enabled, body.shrink)
         db.set_setting("resources_auto_at", None)  # the first look happens at the next minute
-        db.audit(s.username, "resources-auto", True, detail="on" if body.enabled else "off")
-        return {"enabled": body.enabled}
+        detail = ("on" if body.enabled else "off") + ("" if body.shrink is None else f", shrink {'on' if body.shrink else 'off'}")
+        db.audit(s.username, "resources-auto", True, detail=detail)
+        return {"enabled": body.enabled, "shrink": resources.shrink_enabled()}
+
+    @app.put("/api/containers/{name}/memory")
+    def container_memory(name: str, body: ContainerMemoryBody, s=Depends(current_session)) -> dict:
+        """A memory limit on a running Docker container (docker update: at once, no restart)."""
+        known = {c["name"] for c in usage_containers()}
+        if name not in known:
+            raise HTTPException(404, "no running container with that name")
+        try:
+            ok = resources.limit_container(name, body.memory_mb)
+        except ResourceError as exc:
+            raise HTTPException(400, str(exc)) from None
+        db.audit(s.username, "container-memory", ok, service_id=f"docker-{name}", detail=f"{body.memory_mb} MB")
+        if not ok:
+            raise HTTPException(502, "docker update failed (see the journal of Mas)")
+        return {"ok": True, "name": name, "memory_mb": body.memory_mb}
 
     @app.get("/api/apps/{app_id}/resources")
     async def get_resources(app_id: str, _=Depends(current_session)) -> dict:

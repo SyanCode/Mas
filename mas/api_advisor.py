@@ -13,6 +13,7 @@ from mas.advisor import STATUSES, Advisor, AdvisorError
 from mas.ai import PROVIDERS, AiError, AiPool
 from mas.claudelogin import ClaudeLogin, LoginError
 from mas.db import Database
+from mas import refine as refine_mod
 from mas import skills as skills_mod
 from mas.robot import PRESETS, Robot
 
@@ -70,10 +71,23 @@ class DecisionBody(BaseModel):
     approve: bool
 
 
+class RefineAnswer(BaseModel):
+    question: str = Field(default="", max_length=300)
+    answer: str = Field(default="", max_length=500)
+
+
+class RefineBody(BaseModel):
+    goal: str = Field(max_length=4000)
+    app_id: str = Field(default="", max_length=100)
+    answers: list[RefineAnswer] = Field(default_factory=list, max_length=9)
+    rounds: int = Field(default=0, ge=0, le=5)
+
+
 class RobotSettings(BaseModel):
     schedule: str | None = Field(default=None, max_length=10)
     autonomy: str | None = Field(default=None, max_length=5)
     monthly_cap: int | None = Field(default=None, ge=0, le=10_000_000_000)  # tokens a month for every AI use, 0: none
+    refine: bool | None = None  # auto-prompting: improve a request (and ask for details) before the robot starts
 
 
 def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: Advisor, pool: AiPool, robot: Robot,
@@ -228,7 +242,7 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
 
     @app.get("/api/robot")
     def robot_overview(_=Depends(current_session)) -> dict:
-        return {**robot.settings(), "presets": list(PRESETS), "skills": skills_mod.catalog(), "active": robot.active(),
+        return {**robot.settings(), "refine": refine_mod.enabled(db), "presets": list(PRESETS), "skills": skills_mod.catalog(), "active": robot.active(),
                 "runs": db.list_robot_runs(15), "usage_30d": db.robot_usage(time.time() - 30 * 86400),
                 "budget": pool.month_usage()}
 
@@ -250,11 +264,25 @@ def register(app: FastAPI, *, db: Database, current_session: Callable, advisor: 
             out = robot.configure(body.schedule, body.autonomy)
             if body.monthly_cap is not None:
                 out["budget"] = pool.set_cap(body.monthly_cap)
+            if body.refine is not None:
+                refine_mod.set_enabled(db, body.refine)
+            out["refine"] = refine_mod.enabled(db)
         except AiError as exc:
             raise bad(exc) from None
         cap = f", cap {body.monthly_cap}" if body.monthly_cap is not None else ""
         db.audit(s.username, "robot-settings", True, detail=f"{out['schedule']}, {out['autonomy']}{cap}")
         return out
+
+    @app.post("/api/robot/refine")
+    async def robot_refine(body: RefineBody, _=Depends(current_session)) -> dict:
+        """Auto-prompting: is the request precise enough? Questions if not, and the goal rewritten for the robot."""
+        if body.app_id and not db.get_app(body.app_id):
+            raise HTTPException(404, "unknown site")
+        try:
+            return await asyncio.to_thread(refine_mod.refine, pool, db, PRESETS.get(body.goal, body.goal), body.app_id,
+                                           [a.model_dump() for a in body.answers], body.rounds)
+        except AiError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     @app.post("/api/robot/runs")
     async def robot_start(body: RunBody, s=Depends(current_session)) -> dict:

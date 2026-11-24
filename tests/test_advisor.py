@@ -222,8 +222,34 @@ def test_monthly_token_cap_counts_every_ai_use_and_stops_it(env):
 
 def test_economy_mode_route(env):
     client, csrf, db = env
-    assert client.get("/api/resources/auto").json() == {"enabled": False}
+    assert client.get("/api/resources/auto").json() == {"enabled": False, "shrink": False}
     assert client.put("/api/resources/auto", json={"enabled": True}).status_code == 403  # no CSRF token
-    assert client.put("/api/resources/auto", headers=csrf, json={"enabled": True}).json() == {"enabled": True}
+    assert client.put("/api/resources/auto", headers=csrf, json={"enabled": True}).json() == {"enabled": True, "shrink": False}
     assert db.get_setting("resources_auto") == "1" and client.app.state.resources.auto_enabled()
     assert "resources-auto" in [h["action"] for h in db.history(limit=5)]
+
+
+def test_economy_shrink_and_container_limit_routes(env):
+    client, csrf, db = env
+    r = client.put("/api/resources/auto", headers=csrf, json={"enabled": True, "shrink": True}).json()
+    assert r == {"enabled": True, "shrink": True} and db.get_setting("resources_auto_shrink") == "1"
+    assert client.put("/api/resources/auto", headers=csrf, json={"enabled": True}).json()["shrink"] is True  # kept
+    assert client.put("/api/containers/nope/memory", headers=csrf, json={"memory_mb": 512}).status_code == 404
+    assert client.put("/api/containers/nope/memory", headers=csrf, json={"memory_mb": 10}).status_code == 422
+
+
+def test_refine_route(env):
+    client, csrf, db = env
+    client.post("/api/ai/accounts", headers=csrf, json={"provider": "anthropic", "secret": API, "name": "Pro", "password": PASSWORD})
+    goal = {"ready": False, "goal": "SEO of the site.", "why": "which page?",
+            "questions": [{"question": "Which pages?", "options": ["Home", "All"]}]}
+    client.app.state.pool.opener = lambda req, timeout: answer(json.dumps(goal))
+    r = client.post("/api/robot/refine", headers=csrf, json={"goal": "seo please"})
+    assert r.status_code == 200 and r.json()["questions"][0]["options"] == ["Home", "All"]
+    assert client.post("/api/robot/refine", headers=csrf, json={"goal": "seo please", "app_id": "nope"}).status_code == 404
+    client.app.state.pool.opener = lambda req, timeout: answer("no json here")
+    assert client.post("/api/robot/refine", headers=csrf, json={"goal": "seo please"}).status_code == 409
+    assert client.get("/api/robot").json()["refine"] is True
+    assert client.put("/api/robot", headers=csrf, json={"refine": False}).json()["refine"] is False
+    assert client.get("/api/robot").json()["refine"] is False
+    assert not auth.api_token_allowed("/api/robot/refine")

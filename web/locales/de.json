@@ -2209,5 +2209,21 @@
   "When it is spent, the robot, the autopilot, the advisor and the questions stop until next month. Cache reads count for a tenth. Empty: no cap.": "Ist es erreicht, stoppen Roboter, Autopilot, Berater und Fragen bis zum nächsten Monat. Cache-Lesezugriffe zählen ein Zehntel. Leer: kein Limit.",
   "no cap": "kein Limit",
   "Economy mode": "Sparmodus",
-  "Every two hours, apps without a memory limit get one (twice what they use), apps close to their limit get more, and apps without a visit for about six hours sleep after 30 quiet minutes. A value you set is never lowered.": "Alle zwei Stunden erhalten Apps ohne Speicherlimit eines (das Doppelte ihres Verbrauchs), Apps nahe an ihrem Limit mehr, und Apps ohne Besuch seit etwa sechs Stunden schlafen nach 30 ruhigen Minuten ein. Ein von Ihnen gesetzter Wert wird nie gesenkt."
+  "Every two hours, apps without a memory limit get one (twice what they use), apps close to their limit get more, and apps without a visit for about six hours sleep after 30 quiet minutes. A value you set is never lowered.": "Alle zwei Stunden erhalten Apps ohne Speicherlimit eines (das Doppelte ihres Verbrauchs), Apps nahe an ihrem Limit mehr, und Apps ohne Besuch seit etwa sechs Stunden schlafen nach 30 ruhigen Minuten ein. Ein von Ihnen gesetzter Wert wird nie gesenkt.",
+  "Also lower the limits far above what an app uses (to twice its peak) and cap the heavy Docker containers that have no limit": "Auch Limits weit über dem Verbrauch einer App senken (auf das Doppelte ihres Spitzenwerts) und speicherhungrige Docker-Container ohne Limit begrenzen",
+  "Its limit ({limit} MB) is far above what it uses ({used} MB now, {peak} MB at most): {mb} MB still leaves twice its peak and keeps it from taking the memory of the other apps.": "Ihr Limit ({limit} MB) liegt weit über dem Verbrauch ({used} MB jetzt, höchstens {peak} MB): {mb} MB lassen noch das Doppelte des Spitzenwerts und hindern sie daran, den anderen Apps den Speicher zu nehmen.",
+  "{name} uses {used} MB with no memory limit: cap it at {mb} MB (applied at once, no restart; put it in its compose file too so it stays when the container is recreated).": "{name} verwendet {used} MB ohne Speicherlimit: begrenzen Sie es auf {mb} MB (sofort, ohne Neustart; tragen Sie es auch in die Compose-Datei ein, damit es beim Neuerstellen bleibt).",
+  "{name} runs the ClamAV antivirus, about 1 GB of memory on its own: set ENABLE_CLAMAV=0 if the mails do not need a virus scan (spam filtering keeps working).": "{name} betreibt den Virenscanner ClamAV, allein etwa 1 GB Speicher: setzen Sie ENABLE_CLAMAV=0, wenn die Mails keinen Virenscan brauchen (der Spamfilter läuft weiter).",
+  "Claude is reading your request…": "Claude liest Ihre Anfrage…",
+  "A few details make the result much better:": "Ein paar Angaben machen das Ergebnis viel besser:",
+  "Here is your request, written for the robot. Edit it if you like, then start.": "Hier ist Ihre Anfrage, für den Roboter formuliert. Passen Sie sie bei Bedarf an und starten Sie.",
+  "Preparing the goal…": "Ziel wird vorbereitet…",
+  "Start as typed": "So starten",
+  "Or your own answer…": "Oder Ihre eigene Antwort…",
+  "Skip the questions": "Fragen überspringen",
+  "Goal for the robot": "Ziel für den Roboter",
+  "Start with this goal": "Mit diesem Ziel starten",
+  "Use my request as typed": "Meine Anfrage unverändert verwenden",
+  "Preparing the goal": "Ziel vorbereiten",
+  "Improve my request first: Claude asks for missing details and writes a precise goal": "Meine Anfrage zuerst verbessern: Claude fragt nach fehlenden Details und schreibt ein genaues Ziel"
 }

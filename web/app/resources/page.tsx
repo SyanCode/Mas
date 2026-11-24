@@ -8,7 +8,7 @@ import { api, ApiError } from "@/lib/api";
 import { msg, useT } from "@/lib/i18n";
 import { ADVICE } from "@/lib/advice";
 
-interface Settings { memory_mb?: number; sleep_after_min?: number; autoscale?: { min: number; max: number } }
+interface Settings { memory_mb?: number; sleep_after_min?: number; autoscale?: { min: number; max: number }; container_memory_mb?: number; container?: string }
 interface Advice { id: string; level: "info" | "warning"; params: Record<string, string | number>; set: Settings | null }
 interface Row {
   key: string; kind: string; name: string; memory_mb: number; cpu_percent: number | null; parts: string[];
@@ -46,10 +46,10 @@ function Resources() {
   const [busy, setBusy] = useState("");
   const [done, setDone] = useState("");
   const [confirmAll, setConfirmAll] = useState(false);
-  const [economy, setEconomy] = useState<boolean | null>(null);
-  useEffect(() => { api<{ enabled: boolean }>("/resources/auto").then((r) => setEconomy(r.enabled)).catch(() => setEconomy(null)); }, []);
-  const toggleEconomy = async () => {
-    try { setEconomy((await api<{ enabled: boolean }>("/resources/auto", { method: "PUT", body: { enabled: !economy } })).enabled); }
+  const [economy, setEconomy] = useState<{ enabled: boolean; shrink: boolean } | null>(null);
+  useEffect(() => { api<{ enabled: boolean; shrink: boolean }>("/resources/auto").then(setEconomy).catch(() => setEconomy(null)); }, []);
+  const saveEconomy = async (body: { enabled: boolean; shrink?: boolean }) => {
+    try { setEconomy(await api<{ enabled: boolean; shrink: boolean }>("/resources/auto", { method: "PUT", body })); }
     catch (e) { setError((e as ApiError).detail); }
   };
   const load = useCallback(() => {
@@ -62,7 +62,13 @@ function Resources() {
   }, [load]);
 
   async function apply(row: Row, set: Settings) {
-    await api(`/apps/${encodeURIComponent(row.app_id!)}/resources`, { method: "PUT", body: { ...row.resources, ...set } });
+    const { container_memory_mb: memory, container, ...app } = set;
+    if (memory && container) {  // a Docker container of the server: docker update, at once
+      await api(`/containers/${encodeURIComponent(container)}/memory`, { method: "PUT", body: { memory_mb: memory } });
+    }
+    if (Object.keys(app).length && row.app_id) {
+      await api(`/apps/${encodeURIComponent(row.app_id)}/resources`, { method: "PUT", body: { ...row.resources, ...app } });
+    }
   }
   async function applyOne(row: Row, a: Advice) {
     setBusy(`${row.key}:${a.id}`);
@@ -84,7 +90,9 @@ function Resources() {
     let n = 0;
     try {
       for (const row of data?.rows ?? []) {
-        const merged = (row.advice ?? []).filter((a) => a.set).reduce<Settings>((acc, a) => ({ ...acc, ...a.set }), {});
+        const sets = (row.advice ?? []).filter((a) => a.set).map((a) => a.set!);
+        for (const c of sets.filter((x) => x.container)) await apply(row, c);  // one container at a time
+        const merged = sets.filter((x) => !x.container).reduce<Settings>((acc, x) => ({ ...acc, ...x }), {});
         if (Object.keys(merged).length) {
           await apply(row, merged);
           n++;
@@ -118,10 +126,14 @@ function Resources() {
         <Card className="mb-6">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <div className="min-w-0 flex-1">
-              <div className="font-medium">{t("Economy mode")} <Badge tone={economy ? "emerald" : "zinc"}>{economy ? t("on") : t("off")}</Badge></div>
+              <div className="font-medium">{t("Economy mode")} <Badge tone={economy.enabled ? "emerald" : "zinc"}>{economy.enabled ? t("on") : t("off")}</Badge></div>
               <p className="mt-0.5 text-xs text-zinc-500">{t("Every two hours, apps without a memory limit get one (twice what they use), apps close to their limit get more, and apps without a visit for about six hours sleep after 30 quiet minutes. A value you set is never lowered.")}</p>
+              <label className="mt-2 flex items-start gap-2 text-xs">
+                <input type="checkbox" className="mt-0.5" checked={economy.shrink} onChange={(e) => saveEconomy({ enabled: economy.enabled, shrink: e.target.checked })} />
+                <span>{t("Also lower the limits far above what an app uses (to twice its peak) and cap the heavy Docker containers that have no limit")}</span>
+              </label>
             </div>
-            <Button variant={economy ? "secondary" : "primary"} onClick={toggleEconomy}>{economy ? t("Turn off") : t("Turn on")}</Button>
+            <Button variant={economy.enabled ? "secondary" : "primary"} onClick={() => saveEconomy({ enabled: !economy.enabled })}>{economy.enabled ? t("Turn off") : t("Turn on")}</Button>
           </div>
         </Card>
       )}

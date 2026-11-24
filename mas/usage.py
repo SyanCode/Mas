@@ -10,6 +10,7 @@ per compose project (a service of the catalog, Supabase…), one per other servi
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import time
@@ -23,6 +24,7 @@ from mas.resources import Resources
 SLICE = "/sys/fs/cgroup/system.slice"
 USER_SLICE = "/sys/fs/cgroup/user.slice"
 FIRST_SAMPLE = 0.5
+HEAVY_CONTAINER_MB = 512  # a container using more than this without a memory limit gets advice
 
 
 def _meminfo(host: Host) -> dict[str, int]:
@@ -49,6 +51,9 @@ class Usage:
         self.host, self.config, self.db, self.scanner, self.resources = host, config, db, scanner, resources
         self._last: dict[str, tuple[float, int]] = {}  # cgroup → (time, usage_usec) at the previous reading
         self._last_machine: tuple[float, int, int] | None = None
+        self._inspect: dict[str, tuple[float, dict]] = {}  # container id → (time, docker inspect), kept 5 minutes
+        self._heavy: list[dict] = []  # the container advice of the last overview (for the economy mode)
+        self._heavy_at = -1e9
 
     # -- cgroups ----------------------------------------------------------------------------
 
@@ -145,19 +150,46 @@ class Usage:
                                              "image": c.get("Image") or ""}
                 for c in running}
 
-    def _container_advice(self, info: dict) -> list[dict]:
-        """A Minecraft server (itzg image) started with MEMORY only reserves all of it, even empty."""
-        if not info["image"].startswith(("itzg/minecraft-server", "docker.io/itzg/minecraft-server")):
-            return []
+    def _inspect_of(self, cid: str) -> dict:
+        now = time.monotonic()
+        hit = self._inspect.get(cid)
+        if hit and now - hit[0] < 300:
+            return hit[1]
         try:
-            env = dict(e.partition("=")[::2] for e in (self.host.docker_get(f"/containers/{info['id']}/json")
-                                                       .get("Config") or {}).get("Env") or [])
+            data = self.host.docker_get(f"/containers/{cid}/json")
         except (OSError, ValueError):
-            return []
-        if env.get("MEMORY") and not env.get("INIT_MEMORY"):
-            return [{"id": "minecraft-heap", "level": "info", "params": {"name": info["name"], "memory": env["MEMORY"]},
-                     "set": None}]
-        return []
+            data = {}
+        if len(self._inspect) > 200:
+            self._inspect.clear()
+        self._inspect[cid] = (now, data)
+        return data
+
+    def _container_advice(self, info: dict, memory_mb: float | None = None) -> list[dict]:
+        """A Minecraft server (itzg image) started with MEMORY only reserves all of it, even empty; a heavy container
+        without a memory limit can take the memory of everything else; ClamAV alone keeps about a gigabyte."""
+        out: list[dict] = []
+        heavy = memory_mb is not None and memory_mb >= HEAVY_CONTAINER_MB
+        minecraft = info["image"].startswith(("itzg/minecraft-server", "docker.io/itzg/minecraft-server"))
+        if not (heavy or minecraft):
+            return out
+        data = self._inspect_of(info["id"])
+        env = dict(e.partition("=")[::2] for e in (data.get("Config") or {}).get("Env") or [])
+        if minecraft and env.get("MEMORY") and not env.get("INIT_MEMORY"):
+            out.append({"id": "minecraft-heap", "level": "info", "params": {"name": info["name"], "memory": env["MEMORY"]},
+                        "set": None})
+        if heavy and not (data.get("HostConfig") or {}).get("Memory") and data:
+            mb = int(math.ceil(memory_mb * 1.5 / 64)) * 64
+            out.append({"id": "container-limit", "level": "info", "params": {"name": info["name"], "used": round(memory_mb), "mb": mb},
+                        "set": {"container_memory_mb": mb, "container": info["name"]}})
+        if heavy and env.get("ENABLE_CLAMAV", "").lower() in ("1", "true", "yes"):
+            out.append({"id": "container-clamav", "level": "info", "params": {"name": info["name"]}, "set": None})
+        return out
+
+    def heavy_containers(self) -> list[dict]:
+        """The container advice of a recent reading (the economy mode applies the limits when it is allowed to)."""
+        if time.monotonic() - self._heavy_at > 600:
+            self.overview()
+        return list(self._heavy)
 
     def overview(self) -> dict:
         first = self._last_machine is None
@@ -167,6 +199,7 @@ class Usage:
         if first:  # the half second the cgroups were sampled over gives the CPU of the machine too
             server["cpu_percent"] = self.server()["cpu_percent"]
         containers = self._containers()
+        heavy: list[dict] = []
         apps = self.db.list_apps()
         services = self.scanner.result().services
         by_unit = {s.unit: s for s in services if s.unit}
@@ -204,7 +237,9 @@ class Usage:
                     target = row(f"container:{info['name']}", kind="containers", name=info["name"],
                                  service_id=svc.id if svc else None)
                 add(target, info["name"], reading)
-                target.setdefault("advice", []).extend(self._container_advice(info))
+                found = self._container_advice(info, reading["memory_mb"])
+                heavy.extend(a for a in found if a["id"] == "container-limit")
+                target.setdefault("advice", []).extend(found)
             elif name == "mas.service":
                 add(row("mas", kind="mas", name="Mas"), name, reading)
             elif name == "user.slice":
@@ -231,5 +266,6 @@ class Usage:
         listed.sort(key=lambda r: -(r["memory_mb"] or 0))
         counted = sum(r["memory_mb"] for r in listed)
         used = server["memory"]["used_mb"]
+        self._heavy, self._heavy_at = heavy, time.monotonic()
         return {"server": server, "rows": listed, "cgroups": bool(groups),
                 "kernel_and_cache_mb": round(max(0, used - counted), 1) if used is not None else None}

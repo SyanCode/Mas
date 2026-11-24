@@ -62,3 +62,13 @@ Economy mode (`/api/resources/auto`, `mas economy`) changes the memory limits an
 administrator signed in can turn it on or off: API tokens are refused. It only adds a limit to an app without one,
 raises a limit an app is close to, or adds sleep to an app without visits; it never lowers or removes a value a
 person set.
+
+Capping a container (`PUT /api/containers/<name>/memory`, or the economy mode with `--shrink`) only runs
+`docker update --memory` on a running container Mas lists, with a value between 64 MB and 64 GB; it is in the history.
+Lowering a limit set by a person, or capping containers, happens only after an administrator ticked the agreement box.
+
+## Auto-prompting
+
+Improving a request sends the request, the answers to its questions and the list of the sites (id, domain, type,
+repository name) to the AI account: no file, log, variable or secret. Its answer is read as JSON, cut to size, and only
+shown: nothing starts until the administrator clicks. `/api/robot/refine` refuses API tokens.

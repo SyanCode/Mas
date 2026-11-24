@@ -138,3 +138,22 @@ def test_economy_mode_applies_the_safe_advice_by_itself(res):
     assert json.loads(db.get_app("web")["resources"]) == {"memory_mb": 4096}
     assert db.get_setting("resources_auto_quiet:web") is None
     assert any(h["action"] == "resources-auto" for h in db.history(limit=10))
+
+
+def test_a_limit_far_too_wide_is_lowered_only_with_consent(res):
+    r, db, host, _ = res
+    r.started = 0
+    host._commands = {"systemctl show mas-app-web.service -pMemoryCurrent --value": {"output": str(454 * 1048576)},
+                      "systemctl show mas-app-web.service -pMemoryPeak --value": {"output": str(700 * 1048576)},
+                      **host._commands}
+    db.update_app("web", resources=json.dumps({"memory_mb": 5056}))
+    ids = {a["id"]: a for a in r.advice(db.get_app("web"))}
+    assert ids["memory-oversized"]["set"] == {"memory_mb": 1408} and ids["memory-oversized"]["params"]["peak"] == 700
+    r.set_auto(True)
+    r.auto_tune(10_000, lambda app_id: None)
+    assert json.loads(db.get_app("web")["resources"])["memory_mb"] == 5056  # a person's value, no consent yet
+    r.set_auto(True, shrink=True)
+    r.auto_tune(10_000 + 7200, lambda app_id: None)
+    assert json.loads(db.get_app("web")["resources"])["memory_mb"] == 1408
+    db.update_app("web", resources=json.dumps({"memory_mb": 2048}))  # under four times the peak: left alone
+    assert "memory-oversized" not in {a["id"] for a in r.advice(db.get_app("web"))}
