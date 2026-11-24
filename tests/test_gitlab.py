@@ -90,6 +90,9 @@ def test_the_client_answers_like_the_github_one():
     assert gl.ensure_hook("acme/web", "https://mas.example.com/api/gitlab/webhook", "s3cret") is True
     hook = api.seen[-1][3]
     assert hook["token"] == "s3cret" and hook["merge_requests_events"] and hook["enable_ssl_verification"]
+    api.routes[("POST", "/projects/acme%2Fweb/statuses/" + "d" * 40)] = {}
+    gl.create_check_run(None, "acme/web", "d" * 40, "Mas deploy", "failure", "Deployment failed", "x")
+    assert api.seen[-1][3] == {"state": "failed", "name": "Mas deploy", "description": "Deployment failed"}
     repos = gl.repos()
     assert repos[0]["full_name"] == "acme/web" and repos[0]["source"] == "gitlab" and repos[0]["owner_type"] == "Organization"
     assert all(h["PRIVATE-TOKEN"] == TOKEN for _, _, h, _ in api.seen)
@@ -260,3 +263,66 @@ def test_mirror_a_github_repository_into_gitlab(api, monkeypatch):
     assert push[1]["GIT_CONFIG_KEY_0"].startswith("http.https://gitlab.example.com")
     assert out["mirror"]["error"] is None and out["mirror"]["at"]
     assert client.put("/api/apps/site/mirror", headers=csrf, json={"project": None}).json() == {"mirror": None}
+
+
+def test_the_cms_edits_a_site_deployed_from_gitlab(tmp_path):
+    from test_cms import SCHEMA, FakeGitHub, login
+
+    host = FixtureHost(server.build(tmp_path / "srv"))
+    db = Database(tmp_path / "mas.db")
+    db.create_user("admin", auth.hash_password(PASSWORD))
+    db.create_app("site", name="Client site", repo="acme/front/site", branch="main", installation_id=None, type="static",
+                  domain="client.example.com", auto_deploy=0, source="gitlab")
+    app = create_app(host, Config(cookie_secure=False), db, background=False)
+    repo = FakeGitHub({"mas.cms.json": json.dumps(SCHEMA).encode(), "content/home.json": b'{"title": "Hello"}\n'})
+    repo.source = "gitlab"
+    repo.can_write = lambda name: name == "acme/front/site"
+    app.state.cms.github = lambda: None  # no GitHub App on this server at all
+    app.state.deployer.gitlab = lambda: repo
+    app.state.cms.deployer.enqueue = lambda app_id, trigger, actor, sha=None: 42
+    client = TestClient(app)
+    csrf = {"x-csrf-token": login(client)}
+    assert [s["id"] for s in client.get("/api/cms/sites").json()] == ["site"]
+    assert client.get("/api/apps/site/cms").json()["can_write"] is True
+    page = client.get("/api/cms/sites/site").json()["pages"][0]
+    assert page["values"]["title"] == "Hello"
+    r = client.put("/api/cms/sites/site/pages/home", json={"values": {**page["values"], "title": "Bonjour"}, "sha": page["sha"]},
+                   headers=csrf)
+    assert r.status_code == 200, r.text
+    assert json.loads(repo.files["content/home.json"])["title"] == "Bonjour"
+    # the GitLab answers become the CMS's own messages
+    from mas.cms import CmsConflict, CmsManager
+    assert isinstance(CmsManager._github_error(gitlab.GitLabError("main moved since it was read: read it again")), CmsConflict)
+    assert "Developer role" in str(CmsManager._github_error(gitlab.GitLabError("GitLab API POST /x: HTTP 403 Forbidden")))
+    app.state.deployer.gitlab = lambda: None
+    assert "GitLab is not connected" in client.get("/api/cms/sites/site").json()["detail"]
+
+
+def test_each_release_reports_its_status_on_the_commit(env, api, monkeypatch):  # noqa: F811
+    # the deployer calls its hooks once a release is over, live or failed
+    deployer, db = env["deployer"], env["db"]
+    seen = []
+    deployer.after_release.append(lambda app, release, live: seen.append((app["id"], release["status"], live)))
+    rid, ok = deploy_once(env, SHA1)
+    import time as _t
+    for _ in range(50):
+        if seen:
+            break
+        _t.sleep(0.02)
+    assert ok and seen == [("web", "live", True)]
+
+    # the hook of Mas posts it on the commit: a GitLab commit status for a GitLab app
+    client, csrf, adb, app = api
+    statuses = []
+    monkeypatch.setattr(gitlab.GitLab, "create_check_run",
+                        lambda self, inst, repo, sha, name, conclusion, title, summary: statuses.append((repo, sha, name, conclusion, title)))
+    connect(client, csrf, monkeypatch)
+    adb.create_app("shop", name="shop", repo="acme/shop", branch="main", type="static", mode="managed",
+                   domain="shop.example.com", source="gitlab")
+    hook = app.state.deployer.after_release[-1]
+    target = adb.get_app("shop")
+    hook(target, {"sha": "a" * 40, "status": "live", "trigger": "push"}, True)
+    hook(target, {"sha": "b" * 40, "status": "failed", "trigger": "push", "error": "npm run build exited with 1"}, False)
+    hook(target, {"sha": "c" * 40, "status": "live", "trigger": "rollback"}, True)  # a rollback says nothing
+    assert statuses == [("acme/shop", "a" * 40, "Mas deploy", "success", "Live at https://shop.example.com"),
+                        ("acme/shop", "b" * 40, "Mas deploy", "failure", "Deployment failed: npm run build exited with 1")]

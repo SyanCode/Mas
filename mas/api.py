@@ -374,9 +374,10 @@ def create_app(
 
     def post_check(target: dict, release_id: int, result: dict) -> None:
         """The audit as a check on the commit that was published (shown on GitHub next to the build)."""
-        gh = github_client()
+        gh = deployer.client_for(target)  # GitHub: a check run; GitLab: a commit status
         release = db.get_release(release_id)
-        if gh is None or not release or not release.get("sha") or not target.get("repo") or not target.get("installation_id"):
+        if (gh is None or not release or not release.get("sha") or not target.get("repo")
+                or not (target.get("installation_id") or target.get("source") == "gitlab")):
             return
         from mas.compliance import check_markdown
         previous = None
@@ -386,6 +387,25 @@ def create_app(
         conclusion, title, summary = check_markdown(result, previous)
         gh.create_check_run(target["installation_id"], target["repo"], release["sha"], "Mas compliance", conclusion, title, summary)
     compliance.checks = post_check
+
+    def post_deploy_status(target: dict, release: dict, live: bool) -> None:
+        """The deployment as a check (GitHub) or a commit status (GitLab, shown in the merge request): live at
+        which address, or why it failed. Needs Checks: write on the GitHub App; skipped silently without it."""
+        if target.get("mode") != "managed" or target.get("replica_of") or not release.get("sha") or release.get("trigger") == "rollback":
+            return
+        if not target.get("repo") or not (target.get("installation_id") or target.get("source") == "gitlab"):
+            return
+        gh = deployer.client_for(target)
+        if gh is None:
+            return
+        where = f"https://{target['domain']}" if target.get("domain") else target["id"]
+        if live:
+            title, conclusion = f"Live at {where}", "success"
+        else:
+            title, conclusion = f"Deployment failed: {(release.get('error') or 'see the log in Mas')[:200]}", "failure"
+        gh.create_check_run(target.get("installation_id"), target["repo"], release["sha"], "Mas deploy", conclusion,
+                            title, title)
+    deployer.after_release.append(post_deploy_status)
     uptime = Uptime(db, notifier=notifier)
     cms.notifier = notifier
     cluster = Cluster(host, config, db, deployer, opener=cluster_opener) if cluster_opener else \

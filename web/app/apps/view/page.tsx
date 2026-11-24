@@ -1083,7 +1083,7 @@ function AppView() {
           )}
           {app.mode === "managed" && BALANCED_TYPES.has(app.type) && app.port && <ResourcesCard app={app} />}
           {app.mode === "managed" && <DatabaseCard app={app} onLinked={(rid) => { setSelected(rid); load(); }} />}
-          {app.installation_id && <CmsCard appId={app.id} />}
+          {(app.installation_id || app.source === "gitlab") && <CmsCard appId={app.id} />}
           {app.mode === "managed" && app.domain && (app.installation_id || app.source === "gitlab") && app.environment !== "preview" && <PreviewsCard app={app} />}
           {app.mode === "managed" && app.source !== "gitlab" && app.installation_id && app.environment !== "preview" && <MirrorCard appId={app.id} repo={app.repo} />}
           {app.mode === "managed" && <EnvCard appId={app.id} onSaved={load} />}

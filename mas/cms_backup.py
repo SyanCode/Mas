@@ -192,7 +192,7 @@ def tick(db: Database, manager: CmsManager) -> list[str]:
     """Once a day, a backup of every site that asked for it (the 14 latest are kept)."""
     done = []
     for a in db.list_apps():
-        if db.get_setting(f"backup_auto:{a['id']}") != "1" or not a["repo"] or not a["installation_id"]:
+        if db.get_setting(f"backup_auto:{a['id']}") != "1" or not a["repo"] or not (a["installation_id"] or a.get("source") == "gitlab"):
             continue
         last = max((i.get("created_at") or "" for i in listing(data_dir_of(manager), a["id"]) if i["auto"]), default="")
         if last and (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < 23 * 3600:

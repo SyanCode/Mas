@@ -427,7 +427,7 @@ function PeopleCard() {
   const viewers = users.filter((u) => u.role === "viewer");
   const admins = users.filter((u) => u.role === "admin");
   const appName = (id: string) => apps.find((a) => a.id === id)?.name ?? id;
-  const linked = apps.filter((a) => a.installation_id);
+  const linked = apps.filter((a) => a.installation_id || a.source === "gitlab");
 
   return (
     <Card title={t("People")} actions={<Badge tone="violet">{t("{n} editor(s)", { n: editors.length })}</Badge>}>

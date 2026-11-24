@@ -352,7 +352,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
     @app.get("/api/cms/sites")
     def sites(s=Depends(any_session)) -> list[dict]:
         apps = db.list_apps() if s.role == "admin" else [a for a in (db.get_app(i) for i in db.user_apps(s.user_id)) if a]
-        return [site_payload(a, s) for a in apps if a["repo"] and a["installation_id"]]
+        return [site_payload(a, s) for a in apps if a["repo"] and (a["installation_id"] or a.get("source") == "gitlab")]
 
     @app.get("/api/cms/sites/{app_id}")
     async def load(app_id: str, s=Depends(any_session)) -> dict:
@@ -471,7 +471,7 @@ def register(app: FastAPI, *, db: Database, any_session: Callable, current_sessi
 
     def visible_apps(s) -> list[dict]:
         apps = db.list_apps() if s.role == "admin" else [a for a in (db.get_app(i) for i in db.user_apps(s.user_id)) if a]
-        return [a for a in apps if a["repo"] and a["installation_id"]]
+        return [a for a in apps if a["repo"] and (a["installation_id"] or a.get("source") == "gitlab")]
 
     @app.get("/api/cms/dashboard")
     async def dashboard(s=Depends(any_session)) -> dict:

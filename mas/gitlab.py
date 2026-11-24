@@ -262,6 +262,13 @@ class GitLab:
 
     # -- GitLab only ---------------------------------------------------------------------------------------
 
+    def can_write(self, repo: str) -> bool:
+        """Developer (30) or more on the project, directly or through its group: the CMS may commit."""
+        p = self._req("GET", self._p(repo), ok404=True) or {}
+        perms = p.get("permissions") or {}
+        levels = [(perms.get(k) or {}).get("access_level") or 0 for k in ("project_access", "group_access")]
+        return max(levels) >= 30
+
     def whoami(self) -> dict:
         user = self._req("GET", "/user")
         version = self._req("GET", "/version", ok404=True) or {}

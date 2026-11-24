@@ -382,6 +382,8 @@ class Deployer:
         # Other kinds of apps (mas.stacks): deploy(app, release, log) and remove(app, purge) -> notes.
         self.mode_handlers: dict[str, Callable[[dict, dict, "ReleaseLog"], None]] = {}
         self.remove_handlers: dict[str, Callable[[dict, bool], list[str]]] = {}
+        # Called once a release is over, in a thread of its own (app, release, live?): commit statuses…
+        self.after_release: list[Callable[[dict, dict, bool], None]] = []
         self.github = github
         self.gitlab: Callable[[], Any] = lambda: None  # mas.gitlab.GitLab once one is connected
         self.find_service = find_service
@@ -471,6 +473,18 @@ class Deployer:
                 rlog.close()
                 if self.on_change:
                     self.on_change()
+                if self.after_release:
+                    done = self.db.get_release(release_id)
+                    live = (done or {}).get("status") != "failed"
+                    threading.Thread(target=self._after, args=(app, done or release, live), daemon=True,
+                                     name=f"mas-after-{release_id}").start()
+
+    def _after(self, app: dict, release: dict, live: bool) -> None:
+        for hook in self.after_release:
+            try:
+                hook(app, release, live)
+            except Exception as exc:  # noqa: BLE001 - a status that cannot be posted never fails a deploy
+                log.info("after-release hook of %s: %s", app["id"], exc)
 
     # -- helpers -------------------------------------------------------------
 

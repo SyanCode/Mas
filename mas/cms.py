@@ -709,16 +709,25 @@ class CmsManager:
         app = self.db.get_app(app_id)
         if app is None:
             raise CmsError(f"unknown app {app_id}")
-        gh = self.github()
+        on_gitlab = (app.get("source") or "github") == "gitlab"
+        client_for = getattr(self.deployer, "client_for", None)
+        gh = client_for(app) if on_gitlab and client_for else self.github()
         if gh is None:
-            raise CmsError("GitHub is not connected (Settings → GitHub)")
-        if not app["installation_id"] or not app["repo"]:
+            raise CmsError("GitLab is not connected (Settings → GitLab)" if on_gitlab
+                           else "GitHub is not connected (Settings → GitHub)")
+        if not app["repo"] or not (app["installation_id"] or on_gitlab):
             raise CmsError("this app is not linked to a GitHub repository")
         return gh, app
 
     @staticmethod
     def _github_error(exc: GitHubError) -> CmsError:
         text = str(exc)
+        on_gitlab = type(exc).__name__ == "GitLabError"
+        if on_gitlab and ("moved since" in text or "HTTP 400" in text or "HTTP 409" in text):
+            return CmsConflict("the site changed on GitLab meanwhile: reload and try again")
+        if on_gitlab and ("HTTP 403" in text or "HTTP 404" in text):
+            return CmsError("the GitLab token cannot write to this project: it needs the api scope and the "
+                            "Developer role (or more) on the project")
         if "HTTP 403" in text or "HTTP 404" in text:
             return CmsError("the GitHub App cannot write to this repository: give it Contents: Read and write "
                             "(GitHub → Settings → Developer settings → GitHub Apps → Permissions) and accept "
@@ -759,7 +768,8 @@ class CmsManager:
                      "can_write": None}
         try:
             gh, app = self._target(app_id)
-            out["can_write"] = gh.permissions(app["installation_id"]).get("contents") == "write"
+            out["can_write"] = (gh.can_write(app["repo"]) if getattr(gh, "source", "github") == "gitlab"
+                                else gh.permissions(app["installation_id"]).get("contents") == "write")
             schema, _ = self.schema(app_id)
             out["pages"] = [{"id": p["id"], "label": p["label"], "file": p["file"], "fields": len(p["fields"])}
                             for p in schema["pages"]]

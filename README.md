@@ -649,6 +649,11 @@ connects it, nothing to copy.
 - **Merge request previews**: with previews on, each merge request gets its own copy at `pr<N>.<domain>`, updated at
   each push, commented on the merge request and removed when it is merged or closed. Merge requests from a fork are
   ignored: their code never runs here.
+- **CMS**: the content of a site deployed from GitLab is edited in the CMS like a GitHub one (pages, articles,
+  media, history, backups); the token needs the Developer role on the project.
+- **Deploy status on the commit**: every release posts *Mas deploy* on its commit, a commit status on GitLab (shown
+  in the merge request next to the pipelines) or a check on GitHub (with *Checks: write*): live at which address, or
+  why it failed.
 - **Mirror**: on an app deployed from GitHub, **GitLab mirror** copies every branch and tag of its repository into a
   GitLab project (created private if missing) after each push and every half hour: GitLab CI and reviews work on it,
   and the code also lives outside GitHub.
@@ -986,6 +991,7 @@ $ mas --fixture /tmp/mas-demo --db /tmp/mas-demo.db serve --insecure-cookie
 - [x] **Read-only accounts**: `mas user create --role viewer` or Settings → People; the whole dashboard to look at, no change, no secret.
 
 - [x] **File hosting** (Files page): upload a big file, get a link `https://<mas domain>/d/<id>` anyone can open without an account, with an optional password (argon2, rate limited; `curl -u :PASSWORD` works), an expiry date and a download limit; the file is streamed to disk (any size, up to the free space minus 1 GB), served only as a download with resume, and deleted when the link ends. Administrators only, never through an API token. Files are not part of `mas backup`.
+- [x] **GitLab CMS and deploy statuses**: the CMS edits sites deployed from GitLab; each release reports *Mas deploy* (live address or the error) on its commit, in GitLab merge requests and GitHub checks.
 - [x] **GitLab**: a GitLab of the server or the cluster found by itself, or one created from the catalog and connected in one click; apps deployed from GitLab (push webhook, robot, cluster copies), merge request previews, and GitHub repositories mirrored into GitLab.
 - [x] **Auto-prompting and container advice**: a vague request gets questions and becomes a precise goal before the robot starts; limits far too wide and heavy containers without a limit get advice, applied by the economy mode once you agree (`--shrink`); ClamAV in a mail server is pointed at.
 - [x] **Lighter Mas and apps**: economy mode (`mas economy on`), Next.js standalone builds started by themselves, the MCP library loaded on demand (about 20 MB and half the start time saved), freed memory returned to the system, no journal line per request, no polling from background tabs; a question to the mascot runs beside a task (read-only), tested in a real browser.
