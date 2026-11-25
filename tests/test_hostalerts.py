@@ -83,3 +83,23 @@ def test_a_service_that_was_running_and_stops(tmp_path):
     client.put("/api/host-alerts", headers=h, json={"enabled": True, "emails": ["me@example.com"], "services": False})
     svcs[0] = svcs[0].model_copy(update={"status": Status.RUNNING})
     assert alerts.tick(now=6000, force=True) == ["service:api"]  # the earlier alert still resolves
+
+
+def test_the_site_of_a_sleeping_app_is_not_down(tmp_path):
+    """An app asleep on purpose: its nginx site (no unit, backend port closed) is stopped too, and says nothing."""
+    from types import SimpleNamespace
+
+    from mas.models import Service, Status
+    client, db, alerts, state, hooks, h = setup(tmp_path)
+    db.create_app("clippy", name="clippy", repo="o/clippy", branch="main", type="python",
+                  domain="clippy.example.com", port=7106, mode="managed")
+    site = Service(id="clippy.example.com", name="clippy.example.com", status=Status.RUNNING, port=7106,
+                   domains=["clippy.example.com"], nginx_files=["/etc/nginx/sites-enabled/mas-app-clippy.conf"])
+    svcs = [site]
+    alerts.scanner = SimpleNamespace(result=lambda: SimpleNamespace(services=svcs))
+    assert alerts.tick(now=1000, force=True) == []
+    db.set_setting("asleep:clippy", "1")
+    svcs[0] = site.model_copy(update={"status": Status.STOPPED})
+    assert alerts.tick(now=2000, force=True) == []  # asleep: no mail
+    db.set_setting("asleep:clippy", None)
+    assert alerts.tick(now=3000, force=True) == ["service:clippy.example.com"]  # stopped while awake: a real problem

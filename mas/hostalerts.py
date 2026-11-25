@@ -127,11 +127,21 @@ class HostAlerts:
         tracked = set(json.loads(self.db.get_setting(RUNNING) or "[]"))
         tracked |= {s.id for s in services if s.status == Status.RUNNING}
         found: dict[str, tuple[str, str]] = {}
+        apps = None
         for svc in services:
             if svc.status not in (Status.STOPPED, Status.ERRORED):
                 continue
+            # An app asleep on purpose shows up stopped twice: its unit, and its nginx site (no backend on
+            # its port). Both belong to the app, so neither is a problem.
             m = APP_UNIT.match(svc.unit or "")
-            if m and self.db.get_setting(f"asleep:{m.group(1)}") == "1":
+            app_id = m.group(1) if m else None
+            if app_id is None:
+                from mas.runtime import app_for
+                if apps is None:
+                    apps = self.db.list_apps()
+                app = app_for(svc, apps, self.config.apps_dir)
+                app_id = app["id"] if app else None
+            if app_id and self.db.get_setting(f"asleep:{app_id}") == "1":
                 continue
             if svc.status == Status.ERRORED or svc.id in tracked:
                 where = ", ".join(svc.domains[:2]) or svc.manager.value
